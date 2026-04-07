@@ -590,17 +590,8 @@ def parse_cli(argv: list[str]) -> tuple[int, bool]:
     if mode is not None:
         return mode, backfill_mcap
 
-    print("请选择输出模式:")
-    print("  1. 全部等级")
-    print("  2. 仅看 S/A 级")
-    print("  3. 仅看 S 级")
-    print("  4. 仅看汇总统计")
-
-    while True:
-        choice = input("请输入 1-4: ").strip()
-        if choice in {"1", "2", "3", "4"}:
-            return int(choice), backfill_mcap
-        print("无效输入，请输入 1-4。")
+    # 默认采用静默模式 4 (汇总统计)，对齐 V5 体验
+    return 4, backfill_mcap
 
 def filter_results(results: list[dict], mode: int) -> list[dict]:
     if mode == 1:
