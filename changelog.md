@@ -4,7 +4,32 @@
 
 ---
 
+## [v5.1] — 2026-04-07
+
+### 只读访问 + 目录清理 + GitHub 初始化
+
+**数据库只读访问（不复制副本）**：
+- `ai_sum_v5/db_loader.py`: `ATTACH` 后立即 `PRAGMA src_db.query_only = ON`，对原始 `select.db` 完全只读
+- `ai_sum_v5/config.py`: 支持从 `.env` 文件读取 `SRC_DB_PATH` / `SUM_DB_PATH`，无需改代码即可调整路径
+- 删除 `select_db_analysis_copy.db`（87MB 副本），改为直接只读访问原始库
+
+**报告数据库路径外置**：
+- 新建 `.env` 文件，`SUM_DB_PATH` 默认 `E:\AI-SUM\data\select-sum.db`
+- `config.py` 无 python-dotenv 依赖，内置原生 `.env` 解析
+
+**目录清理**（与 V5 无关文件）：
+- 删除 `nofx/`（仅含空 .git）
+- 删除 `nofx-src/`（完全无关的 Go 项目）
+- 删除 `leak-check-analysis/`（另一个独立 Python 项目）
+
+**GitHub 初始化**：
+- 新建仓库 `cfanlik/AI-SUM`，初始提交 18 个核心文件
+- `.gitignore` 忽略 `.env`、`data/`、`exports/`、`report/`、`__pycache__/`
+
+---
+
 ## [v5.0] — 2026-04-03
+
 
 ### 全新 V5 多快照时序分析引擎（ai_sum_v5/）
 
