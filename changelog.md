@@ -4,6 +4,13 @@
 
 ---
 
+## [v5.1.2] — 2026-04-07
+
+### Bugfix: 原 v4 兼容脚本适配 `.env` 配置
+
+- **硬编码路径移除**：将 `accumulation_scan_v3.py` 中写死的 `select.db` 绝对路径（`C:\Users\...`）替换为动态读取项目根目录 `.env` 文件获取 `SRC_DB_PATH`。这解决了 Linux / 远端 VPS 运行 `accumulation_scan_v3.py` 时由于路径不兼容导致在本地新建空库并报 `no such table: bubblemap_holders` 的报错。
+- **环境隔离一致性**：向 V5 的配置标准拉齐，所有包含数据库路径的参数均经由环境变量和 `.env` 统一接管。
+
 ## [v5.1.1] — 2026-04-07
 
 ### Bugfix: 分析库初始化报错修复与依赖纯净声明

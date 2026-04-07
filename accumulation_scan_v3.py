@@ -37,7 +37,19 @@ from pathlib import Path
 # ====================================================================
 # 配置
 # ====================================================================
-DB_PATH = r'C:\Users\Administrator\.gemini\antigravity\playground\select-coin\data\select.db'
+# 从本地 .env 读取 SRC_DB_PATH
+_ENV_FILE = Path(__file__).parent / ".env"
+if _ENV_FILE.exists():
+    for _line in _ENV_FILE.read_text(encoding="utf-8").splitlines():
+        _line = _line.strip()
+        if not _line or _line.startswith("#") or "=" not in _line:
+            continue
+        _k, _v = _line.split("=", 1)
+        if _k.strip() and _v.strip() and _k.strip() not in os.environ:
+            os.environ[_k.strip()] = _v.strip()
+
+_SRC_DB_DEFAULT = r'C:\Users\Administrator\.gemini\antigravity\playground\select-coin\data\select.db'
+DB_PATH = os.environ.get("SRC_DB_PATH", _SRC_DB_DEFAULT)
 
 # 评分权重 v4.0 (8 维, 可调参)
 W_ACC_PCT    = 0.20   # d1 吸筹占比 (基于真实用户)
@@ -84,7 +96,7 @@ EXPORT_DIR = Path(__file__).resolve().parent / "exports"
 REPORT_DIR = Path(__file__).resolve().parent / "report"
 
 # select-coin 项目 .env 路径 (读取 CMC_API_KEY)
-SELECT_COIN_ENV = Path(r'C:\Users\Administrator\.gemini\antigravity\playground\select-coin\.env')
+SELECT_COIN_ENV = Path(DB_PATH).parent.parent / '.env'
 
 # CMC API 配置
 CMC_BASE = "https://pro-api.coinmarketcap.com"
