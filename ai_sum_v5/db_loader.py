@@ -26,9 +26,8 @@ def get_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(config.SUM_DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
-    # ATTACH 原始库，并立即设置只读约束（不复制、不写入）
+    # ATTACH 原始库（注意 sqlite3 的 PRAGMA query_only=ON 会作用于整个主连接导致建表报错，故移除）
     conn.execute(f"ATTACH DATABASE '{config.SRC_DB_PATH}' AS src_db")
-    conn.execute("PRAGMA src_db.query_only = ON")
     _ensure_schema(conn)
     return conn
 

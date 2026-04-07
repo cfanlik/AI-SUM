@@ -1,0 +1,14 @@
+# AI-SUM V5 纯净版架构
+# ----------------------------------------
+# 本项目使用 Python 3.13 原生标准库，无第三方依赖包。
+#
+# 使用到的标准库包括但不限于：
+# - sqlite3
+# - json
+# - statistics
+# - dataclasses
+# - typing
+# - pathlib / collections / math
+
+# 执行说明：
+# python run_v5.py

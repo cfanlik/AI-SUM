@@ -4,6 +4,15 @@
 
 ---
 
+## [v5.1.1] — 2026-04-07
+
+### Bugfix: 分析库初始化报错修复与依赖纯净声明
+
+- **分析库创建失败修复**：移除了 `ai_sum_v5/db_loader.py` 中的 `PRAGMA src_db.query_only = ON`。因 SQLite 机制该选项会导致主库 (`select-sum.db`) 同步变为只读，引发初始化表结构报错。现主库已保持正常写入。
+- **纯净版依赖声明**：根目录生成 `requirements.txt`，明文标注 AI-SUM 基于 Python 3.13 纯标准库开发，无需借助 `python-dotenv` 等第三方库。
+
+---
+
 ## [v5.1] — 2026-04-07
 
 ### 只读访问 + 目录清理 + GitHub 初始化
