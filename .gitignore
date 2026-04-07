@@ -1,0 +1,42 @@
+# =============================================
+# AI-SUM — Git 忽略规则
+# =============================================
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyc
+*.pyd
+.Python
+
+# 环境变量（含密钥路径信息）
+.env
+
+# 数据库文件（分析库由 .env 配置）
+data/select-sum.db
+data/*.db-shm
+data/*.db-wal
+*.db
+*.db-shm
+*.db-wal
+
+# 导出文件（扫描结果，本地存储即可）
+exports/
+
+# 报告输出（含原始扫描结果）
+report/
+
+# 无关子项目（已废弃，待手动删除）
+nofx-src/
+nofx/
+leak-check-analysis/
+
+# IDE / 工具
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 日志
+*.log
