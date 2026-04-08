@@ -201,8 +201,6 @@ def compute_snapshot_diff(
     # hold_percentage 在 bubblemap_holders 中为 100 进制 (2.5 = 2.5%)
     inst_hold = 0.0
     hidden_whales = 0
-    # DEX 真金率：吸筹地址中 dex_ratio>=0.5 或 gmgn_verified>=1 的数量占比
-    dex_verified_count = 0
     for h in holders_new:
         hp = h.get('hold_percentage') or 0.0
         is_cex = h.get('is_cex')
@@ -215,12 +213,38 @@ def compute_snapshot_diff(
             # 隐庄：不是基础设施但持仓>=2%
             if not is_infra and hp >= 2.0:
                 hidden_whales += 1
-        # DEX真金率：仅统计吸筹地址
-        if h.get('is_accumulating') == 1:
-            dex_ratio = h.get('dex_ratio') or 0.0
-            gmgn_v = h.get('gmgn_verified') or 0
-            if dex_ratio >= 0.5 or gmgn_v >= 1:
-                dex_verified_count += 1
+
+    # ── V8.3 DEX 真金率（hop2 + entity 聚簇穿透）──
+    # Step 1: 收集每个 entity_id 组的最高 dex 信号
+    entity_dex_max = {}  # entity_id -> max(dex_ratio, dex_ratio_hop2)
+    for h in holders_new:
+        eid = h.get('entity_id') or ''
+        if not eid:
+            continue
+        dr = h.get('dex_ratio') or 0.0
+        dr2 = h.get('dex_ratio_hop2') or 0.0
+        gv = h.get('gmgn_verified') or 0
+        best = max(dr, dr2)
+        if gv >= 1:
+            best = max(best, 1.0)  # gmgn 验证视为满分
+        entity_dex_max[eid] = max(entity_dex_max.get(eid, 0.0), best)
+
+    # Step 2: 对吸筹地址判定 DEX 验证
+    dex_verified_count = 0
+    for h in holders_new:
+        if h.get('is_accumulating') != 1:
+            continue
+        dr = h.get('dex_ratio') or 0.0
+        dr2 = h.get('dex_ratio_hop2') or 0.0
+        gv = h.get('gmgn_verified') or 0
+        # 直接判定
+        if dr >= 0.5 or dr2 >= 0.5 or gv >= 1:
+            dex_verified_count += 1
+            continue
+        # entity 聚簇穿透：组内有通过的则共享
+        eid = h.get('entity_id') or ''
+        if eid and entity_dex_max.get(eid, 0.0) >= 0.5:
+            dex_verified_count += 1
 
     dex_pct = (dex_verified_count / max(acc_count_new, 1)) * 100.0
 

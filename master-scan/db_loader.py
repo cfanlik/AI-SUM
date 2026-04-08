@@ -167,7 +167,9 @@ def load_snapshot_detail(
             is_contract,
             is_supernode,
             dex_ratio,
-            gmgn_verified
+            gmgn_verified,
+            dex_ratio_hop2,
+            entity_id
         FROM src_db.bubblemap_holders
         WHERE chain = ? AND token_address = ? AND snapshot_time = ?
         ORDER BY rank ASC
