@@ -207,11 +207,11 @@ def compute_snapshot_diff(
         is_contract = h.get('is_contract')
         is_supernode = h.get('is_supernode')
         is_infra = is_cex or is_contract or is_supernode
-        # 机构控盘：基础设施地址 + 持仓>=2% 的大户
-        if is_infra or hp >= 2.0:
+        # 机构控盘：基础设施地址 + 持仓>=配置阈值 的大户
+        if is_infra or hp >= config.HIDDEN_WHALE_HOLD_THRESHOLD:
             inst_hold += hp
-            # 隐庄：不是基础设施但持仓>=2%
-            if not is_infra and hp >= 2.0:
+            # 隐庄：不是基础设施但持仓>=配置阈值
+            if not is_infra and hp >= config.HIDDEN_WHALE_HOLD_THRESHOLD:
                 hidden_whales += 1
 
     # ── V8.3 DEX 真金率（hop2 + entity 聚簇穿透）──
