@@ -47,8 +47,8 @@ MAX_HOURS_GAP: float     = 30.0  # 超过此间隔标注"数据间隔过大"
 # ============================================================
 # 模式 A — 地址聚合（Aggregation Pattern）
 # ============================================================
-PATTERN_A_ROSTER_YELLOW: float = 0.25   # 换手率黄色阈值（12h 内 Top300 换手 >25%）
-PATTERN_A_ROSTER_RED:    float = 0.40   # 换手率红色阈值
+PATTERN_A_ROSTER_YELLOW: float = 0.03   # 换手率黄色阈值（10h 内 Top300 换手 >3%）
+PATTERN_A_ROSTER_RED:    float = 0.08   # 换手率红色阈值（>8%）
 PATTERN_A_NEW_ACC_RATIO: float = 0.30   # 新acc地址 / 旧acc地址 > 30% 触发辅助条件
 PATTERN_A_NEW_ACC_MIN_CNT: int = 5      # 新acc地址最少绝对数量（防止小数点噪声）
 
@@ -64,10 +64,10 @@ PATTERN_B_HOLD_PCT_RED:    float = 2.0   # 新鲸持仓合计红色阈值 (%)
 # 模式 C — 爆发前静默（Pre-Pump Silence）
 # ============================================================
 PATTERN_C_HOLD_RATIO_VS_MEDIAN: float = 1.20  # 最新acc持仓 >= 历史中位数 * 1.20
-PATTERN_C_TURNOVER_MAX:         float = 0.05  # 换手率极低门槛 < 5%
+PATTERN_C_TURNOVER_MAX:         float = 0.02  # 换手率极低门槛 < 2%（V8.4 收紧）
 PATTERN_C_ONLY_BUY_MIN:         float = 0.70  # 只买不卖比例 >= 70%
 PATTERN_C_YELLOW_CONDITIONS:    int   = 3     # 满足 3/4 条件 → 黄色
-PATTERN_C_RED_CONDITIONS:       int   = 4     # 满足 4/4 条件 → 红色
+PATTERN_C_RED_CONDITIONS:       int   = 3     # V8.4: 满足 3/4 + cond_4必须 → 红色
 
 # ============================================================
 # Watchlist 生命周期
@@ -94,4 +94,9 @@ MIN_ACC_HOLDERS: int = 3   # 至少 3 个吸筹地址才纳入分析
 # 大户及隐庄判定阈值
 # ============================================================
 HIDDEN_WHALE_HOLD_THRESHOLD: float = float(os.environ.get("HIDDEN_WHALE_HOLD_THRESHOLD", "2.0"))
+
+# ============================================================
+# V8.4 全局信号质量门（DEX 底线）
+# ============================================================
+MIN_SIGNAL_DEX_PCT: float = float(os.environ.get("MIN_SIGNAL_DEX_PCT", "10.0"))
 

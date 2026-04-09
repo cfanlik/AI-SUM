@@ -35,6 +35,7 @@ SUM_DB_PATH=/opt/AI-SUM/select-sum.db
 DIAMOND_INST_THRESHOLD=85.0
 DIAMOND_DEX_THRESHOLD=85.0
 HIDDEN_WHALE_HOLD_THRESHOLD=2.0
+MIN_SIGNAL_DEX_PCT=10.0
 """
 with sftp.open("/opt/AI-SUM/.env", "w") as f:
     f.write(env)

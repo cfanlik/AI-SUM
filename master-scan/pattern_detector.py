@@ -1,10 +1,11 @@
 """
-AI-SUM V8.2 — 行为模式识别引擎
+AI-SUM V8.4 — 行为模式识别引擎
 四大核心模式：
   A — 地址聚合（Aggregation Pattern）
   B — 新鲸下场（Fresh Whale Pattern）
   C — 爆发前静默（Pre-Pump Silence）
-  E — 钻石绞杀区（Diamond Squeeze）— V8.2 新增
+  E — 钻石绞杀区（Diamond Squeeze）
+全局信号质量门：DEX 底线过滤（防空投/伪信号）
 """
 from __future__ import annotations
 
@@ -176,7 +177,8 @@ def detect_pattern_c(diff: SnapshotDiff) -> tuple[Optional[str], dict, int]:
         "only_buy_pct": round(only_buy * 100, 1),
     }
 
-    if met >= config.PATTERN_C_RED_CONDITIONS:
+    # V8.4: RED 需满足 3/4 且 cond_4（only_buy）必须通过
+    if met >= config.PATTERN_C_RED_CONDITIONS and cond_4:
         return LEVEL_RED, detail, met
     elif met >= config.PATTERN_C_YELLOW_CONDITIONS:
         return LEVEL_YELLOW, detail, met
@@ -251,6 +253,12 @@ def detect(ts: TokenTimeSeries) -> Optional[PatternResult]:
     b_level, b_detail               = detect_pattern_b(diff)
     c_level, c_detail, c_conditions = detect_pattern_c(diff)
     e_level, e_detail               = detect_pattern_e(diff)
+
+    # V8.4: 全局 DEX 信号质量门 —— E(DIAMOND) 豁免
+    if e_level != LEVEL_DIAMOND and diff.dex_verified_pct < config.MIN_SIGNAL_DEX_PCT:
+        a_level = LEVEL_NONE
+        b_level = LEVEL_NONE
+        c_level = LEVEL_NONE
 
     comp_level, triggered = _composite_level(a_level, b_level, c_level, e_level)
 
