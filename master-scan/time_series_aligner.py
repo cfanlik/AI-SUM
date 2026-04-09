@@ -306,7 +306,7 @@ def build_time_series(
         return None
 
     recent = snap_times[-config.DEFAULT_SNAP_WINDOW:]
-    hist = db_loader.load_acc_hold_history(conn, chain, addr)
+    hist = db_loader.load_acc_hold_history(conn, chain, addr)[-20:]  # 近20快照滑动窗口
 
     ts = TokenTimeSeries(
         chain=chain,

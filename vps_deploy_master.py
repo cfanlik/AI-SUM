@@ -32,8 +32,8 @@ for fn in files:
 # 写入干净的 .env
 env = """SRC_DB_PATH=/opt/select-coin/data/select.db
 SUM_DB_PATH=/opt/AI-SUM/select-sum.db
-DIAMOND_INST_THRESHOLD=90.0
-DIAMOND_DEX_THRESHOLD=90.0
+DIAMOND_INST_THRESHOLD=85.0
+DIAMOND_DEX_THRESHOLD=85.0
 HIDDEN_WHALE_HOLD_THRESHOLD=2.0
 """
 with sftp.open("/opt/AI-SUM/.env", "w") as f:
