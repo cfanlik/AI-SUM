@@ -1083,9 +1083,14 @@ def classify_review(result: dict) -> tuple[str, list[str]]:
     else:
         tags.append("结构中性")
 
+    # ── Gecko 市场结构标签 ──
+    gecko_tags = result.get("_gecko_tags", [])
+    tags.extend(gecko_tags)
+
     if result["snap_count"] == 1:
         review_priority = "待确认"
-    elif any(tag in tags for tag in {"单一大户主导", "高集中度", "卖压偏高"}):
+    elif any(tag in tags for tag in {"单一大户主导", "高集中度", "卖压偏高",
+                                      "市值虚高-高风险", "确认洗盘"}):
         review_priority = "谨慎复核"
     elif (result["level"] in {"S", "A"} and
           any(tag in tags for tag in {"分散吸筹", "结构良好"}) and
@@ -1505,10 +1510,91 @@ def generate_md_report(
     W("")
 
     # ================================================================
-    # §7 导出文件
+    # §8 Gecko 市场结构异常
     # ================================================================
     section_num2 = section_num + 1
-    W(f"## {section_num2}. 📁 导出文件")
+    gecko_rows = []
+    try:
+        _gecko_conn = sqlite3.connect(DB_PATH)
+        _gecko_conn.row_factory = sqlite3.Row
+        _gecko_rows = _gecko_conn.execute("""
+            SELECT g.* FROM gecko_market_data g
+            INNER JOIN (
+                SELECT chain, token_address, MAX(scan_time) as max_st
+                FROM gecko_market_data
+                GROUP BY chain, token_address
+            ) latest ON g.chain=latest.chain
+                     AND g.token_address=latest.token_address
+                     AND g.scan_time=latest.max_st
+        """).fetchall()
+        gecko_rows = [dict(r) for r in _gecko_rows]
+        _gecko_conn.close()
+    except Exception:
+        gecko_rows = []
+
+    if gecko_rows:
+        gecko_map = {r["token_address"]: r for r in gecko_rows}
+        high_fdv = [r for r in results if gecko_map.get(r["token"].lower(), {}).get("mcap_liq_ratio", 0) > 200]
+        wash_trade = [r for r in results if gecko_map.get(r["token"].lower(), {}).get("vl_ratio", 0) > 10]
+
+        W(f"## {section_num2}. 🦎 市场结构异常 (GeckoTerminal)")
+        W("")
+        W(f"> 数据源: gecko_market_data 最新快照 | 覆盖 {len(gecko_rows)} 代币")
+        W("")
+
+        if high_fdv:
+            W("### 市值虚高 (FDV/LP > 200)")
+            W("")
+            W("| # | 代币 | 等级 | comp | FDV($) | LP($) | FDV/LP | 风险 |")
+            W("|---|------|------|------|--------|-------|--------|------|")
+            high_fdv.sort(key=lambda r: gecko_map.get(r["token"].lower(), {}).get("mcap_liq_ratio", 0), reverse=True)
+            for i, r in enumerate(high_fdv[:20], 1):
+                g = gecko_map.get(r["token"].lower(), {})
+                ml = g.get("mcap_liq_ratio", 0)
+                risk = "高" if ml > 500 else "中"
+                W(f"| {i} | {r['symbol']} | {r['level']} | {r['composite']:.1f} | "
+                  f"{_fmt_mcap(g.get('fdv_usd', 0))} | {_fmt_mcap(g.get('reserve_usd', 0))} | "
+                  f"{ml:.1f} | {risk} |")
+            W("")
+            high_cnt = sum(1 for r in high_fdv if gecko_map.get(r["token"].lower(), {}).get("mcap_liq_ratio", 0) > 500)
+            mid_cnt = len(high_fdv) - high_cnt
+            W(f"> 高风险 {high_cnt} 个 (FDV/LP>500) | 中风险 {mid_cnt} 个 (200<FDV/LP≤500)")
+            W("")
+
+        if wash_trade:
+            W("### 疑似洗盘 (V/L > 10)")
+            W("")
+            W("| # | 代币 | 等级 | comp | V/L | buyTx% | LP($) | vol24h($) | 判定 |")
+            W("|---|------|------|------|-----|--------|-------|-----------|------|")
+            wash_trade.sort(key=lambda r: gecko_map.get(r["token"].lower(), {}).get("vl_ratio", 0), reverse=True)
+            for i, r in enumerate(wash_trade[:20], 1):
+                g = gecko_map.get(r["token"].lower(), {})
+                vl = g.get("vl_ratio", 0)
+                bt = g.get("buy_tx_pct", 50)
+                verdict = "确认洗盘" if 45 <= bt <= 55 else "疑似"
+                W(f"| {i} | {r['symbol']} | {r['level']} | {r['composite']:.1f} | "
+                  f"{vl:.1f} | {bt:.1f}% | {_fmt_mcap(g.get('reserve_usd', 0))} | "
+                  f"{_fmt_mcap(g.get('volume_24h', 0))} | {verdict} |")
+            W("")
+
+        if not high_fdv and not wash_trade:
+            W("> 无异常代币")
+            W("")
+    else:
+        section_num2 = section_num + 1
+        W(f"## {section_num2}. 🦎 市场结构异常 (GeckoTerminal)")
+        W("")
+        W("> 暂无 Gecko 数据。需先运行 BubbleMap 定时任务触发 Gecko 链式采集。")
+        W("")
+
+    W("---")
+    W("")
+
+    # ================================================================
+    # §9 导出文件
+    # ================================================================
+    section_num3 = section_num2 + 1
+    W(f"## {section_num3}. 📁 导出文件")
     W("")
     W("| 文件 | 路径 |")
     W("|------|------|")
@@ -1582,6 +1668,38 @@ def main():
     # Step 5: 综合评分 + 复核标签
     # ----------------------------------------------------------------
     results = []
+
+    # ── 加载 Gecko 市场标签 ──
+    _gecko_tag_map = {}  # {token_address_lower: [tag1, tag2, ...]}
+    try:
+        _gc = cursor.execute("""
+            SELECT g.token_address, g.vl_ratio, g.mcap_liq_ratio, g.buy_tx_pct
+            FROM gecko_market_data g
+            INNER JOIN (
+                SELECT chain, token_address, MAX(scan_time) as max_st
+                FROM gecko_market_data
+                GROUP BY chain, token_address
+            ) latest ON g.chain=latest.chain
+                     AND g.token_address=latest.token_address
+                     AND g.scan_time=latest.max_st
+        """).fetchall()
+        for row in _gc:
+            addr_l = row[0]
+            vl, ml, bt = row[1] or 0, row[2] or 0, row[3] or 50
+            t = []
+            if ml > 500:
+                t.append("市值虚高-高风险")
+            elif ml > 200:
+                t.append("市值虚高-中风险")
+            if vl > 10:
+                t.append("V/L异常-疑似洗盘")
+                if 45 <= bt <= 55:
+                    t.append("确认洗盘")
+            _gecko_tag_map[addr_l] = t
+        print(f"[Gecko] 加载 {len(_gecko_tag_map)} 个代币市场标签")
+    except Exception as e:
+        print(f"[Gecko] 无数据或表不存在: {e}")
+
     for tok in all_tokens:
         chain       = tok[0]
         addr        = tok[1]
@@ -1667,6 +1785,10 @@ def main():
             'level': level, 'label': label,
             'trend': trend_data.get(key),
         }
+
+        # 注入 Gecko 标签
+        result['_gecko_tags'] = _gecko_tag_map.get(addr.lower(), [])
+
         review_priority, structure_tags = classify_review(result)
         result['review_priority'] = review_priority
         result['structure_tags'] = structure_tags
