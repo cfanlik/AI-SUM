@@ -119,9 +119,9 @@ def evaluate(
 
     # ── 出货置信度 ──
     dist_checks = [
-        ("cex_declining", 3,
-         ts.cex_delta_pct < -config.DIST_CEX_DECLINE_MIN,
-         f"CEX持仓 {ts.cex_delta_pct:+.1f}%"),
+        ("cex_inflow_heavy", 3,
+         ts.cex_delta_pct > 5 and ts.cex_hold_slope > 0.3,
+         f"CEX持续流入 {ts.cex_hold_earliest:.1f}%\u2192{ts.cex_hold_latest:.1f}% (斜率{ts.cex_hold_slope:+.2f})"),
 
         ("major_seller", 3,
          hp.seller_count > 0 and any(
