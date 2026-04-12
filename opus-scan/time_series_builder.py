@@ -26,7 +26,6 @@ class TimeSeriesResult:
     cex_hold_earliest: float
     cex_hold_latest: float
     cex_delta_pct: float
-    cex_hold_slope: float = 0.0   # CEX 占比线性斜率（正=流入，负=流出）
 
     supernode_delta: int
     hidden_whale_latest: int
@@ -34,6 +33,9 @@ class TimeSeriesResult:
 
     # 阶段
     phase: str  # early_acc / plateau / accelerating / topping / distributing / unknown
+
+    # 派生斜率（有默认值，必须排在无默认值字段之后）
+    cex_hold_slope: float = 0.0   # CEX 占比线性斜率（正=流入，负=流出）
 
 
 def _linear_slope(values: list[float]) -> float:
