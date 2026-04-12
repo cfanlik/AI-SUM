@@ -22,18 +22,19 @@ def print_leaderboard(results: list[VerdictResult], elapsed: float = 0):
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     valid = [r for r in results if r.snap_count >= config.MIN_SNAPSHOTS]
 
-    # MIXED 代币不进入单方向榜，单独展示
-    non_mixed = [r for r in valid if r.verdict != "MIXED"]
-    mixed     = sorted([r for r in valid if r.verdict == "MIXED"],
-                       key=lambda r: r.acc_confidence + r.dist_confidence, reverse=True)[:5]
-
-    top_acc  = sorted(non_mixed, key=lambda r: r.acc_confidence,  reverse=True)[:config.TOP_N]
-    top_dist = sorted(non_mixed, key=lambda r: r.dist_confidence, reverse=True)[:config.TOP_N]
+    # verdict 分类驱动榜单：每个代币只出现在裁决对应的区块
+    top_acc  = sorted([r for r in valid if r.verdict == "ACCUMULATING"],
+                      key=lambda r: r.acc_confidence, reverse=True)[:config.TOP_N]
+    top_dist = sorted([r for r in valid if r.verdict == "SLOW_DISTRIBUTION"],
+                      key=lambda r: r.dist_confidence, reverse=True)[:config.TOP_N]
+    mixed    = sorted([r for r in valid if r.verdict == "MIXED"],
+                      key=lambda r: r.acc_confidence + r.dist_confidence, reverse=True)[:5]
+    n_neutral = sum(1 for r in valid if r.verdict == "NEUTRAL")
 
     sep = "=" * 90
     print(f"\n{sep}")
     print(f"  \U0001f6f0  opus-scan — 吸筹/出货双维度雷达  |  {now}")
-    print(f"  扫描总数: {len(valid)}  |  MIXED: {len(mixed)}  |  耗时: {elapsed:.1f}s")
+    print(f"  扫描总数: {len(valid)}  |  吸筹:{len(top_acc)} 出货:{len(top_dist)} 混合:{len(mixed)} 中性:{n_neutral}  |  耗时: {elapsed:.1f}s")
     print(sep)
 
     # 吸筹 Top N
@@ -116,18 +117,19 @@ def save_md_leaderboard(results: list[VerdictResult]) -> str:
     date_str = datetime.now().strftime("%Y%m%d_%H%M")
     path = os.path.join(config.REPORT_DIR, f"opus_{date_str}.md")
 
-    valid     = [r for r in results if r.snap_count >= config.MIN_SNAPSHOTS]
-    non_mixed = [r for r in valid if r.verdict != "MIXED"]
-    mixed     = sorted([r for r in valid if r.verdict == "MIXED"],
-                       key=lambda r: r.acc_confidence + r.dist_confidence, reverse=True)[:5]
-
-    top_acc  = sorted(non_mixed, key=lambda r: r.acc_confidence,  reverse=True)[:config.TOP_N]
-    top_dist = sorted(non_mixed, key=lambda r: r.dist_confidence, reverse=True)[:config.TOP_N]
+    valid    = [r for r in results if r.snap_count >= config.MIN_SNAPSHOTS]
+    top_acc  = sorted([r for r in valid if r.verdict == "ACCUMULATING"],
+                      key=lambda r: r.acc_confidence, reverse=True)[:config.TOP_N]
+    top_dist = sorted([r for r in valid if r.verdict == "SLOW_DISTRIBUTION"],
+                      key=lambda r: r.dist_confidence, reverse=True)[:config.TOP_N]
+    mixed    = sorted([r for r in valid if r.verdict == "MIXED"],
+                      key=lambda r: r.acc_confidence + r.dist_confidence, reverse=True)[:5]
+    n_neutral = sum(1 for r in valid if r.verdict == "NEUTRAL")
 
     lines = [
         f"# opus-scan 双维度雷达报 | {now}",
-        f"\n扫描总数: {len(valid)}  |  MIXED（人工研判）: {len(mixed)}",
-        "\n## \U0001f7e2 吸筹 Top 10（已排除MIXED代币）\n",
+        f"\n扫描总数: {len(valid)}  |  吸筹:{len(top_acc)} 出货:{len(top_dist)} 混合:{len(mixed)} 中性:{n_neutral}",
+        "\n## \U0001f7e2 吸筹 Top 10（verdict=ACCUMULATING）\n",
         "| 排名 | 代币 | 链 | 置信度 | acc数 | acc占比 | DEX真金 | CEX变化 | \u0394CEX | LP(USD) | 阶段 |",
         "|------|------|-----|--------|-------|---------|---------|---------|------|---------|------|",
     ]
@@ -138,7 +140,7 @@ def save_md_leaderboard(results: list[VerdictResult]) -> str:
         )
 
     lines += [
-        "\n## \U0001f534 出货 Top 10（已排除MIXED代币）\n",
+        "\n## \U0001f534 出货 Top 10（verdict=SLOW_DISTRIBUTION）\n",
         "| 排名 | 代币 | 链 | 置信度 | 出货者 | 出货占比 | 假鲸鱼 | CEX变化 | LP(USD) | 48h派发 |",
         "|------|------|-----|--------|--------|----------|--------|---------|---------|---------| ",
     ]
