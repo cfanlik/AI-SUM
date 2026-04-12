@@ -34,7 +34,7 @@ AI-SUM/
 │   ├── time_series_aligner.py
 │   └── watchlist_tracker.py
 │
-├── master-scan/                      # ★ V8.2 生产版（含钻石绞杀区）
+├── master-scan/                      # ★ V8.4 生产版（含钻石绞杀区）
 │   ├── run.py                         # 统一入口
 │   ├── config.py                      # 全局配置（.env 读取）
 │   ├── db_loader.py                   # SQL 封装 + ATTACH 只读
@@ -44,9 +44,21 @@ AI-SUM/
 │   ├── engine.py                      # 主调度器
 │   └── watchlist_tracker.py           # 追踪生命周期
 │
+├── opus-scan/                        # ★ V1.1 双维度诊断引擎（吸筹+出货置信度）
+│   ├── run.py                         # 统一入口（全库扫描/单币诊断）
+│   ├── config.py                      # 阈值配置
+│   ├── db_loader.py                   # SQL 封装，ATTACH select.db 只读
+│   ├── time_series_builder.py         # 全快照时序→斜率/增长率/CEX斜率/阶段判定
+│   ├── holder_profiler.py             # Top30 大户行为分析（真鲸/假鲸/卖家/派发者）
+│   ├── web_researcher.py             # 联网增强（Gecko Token+Pool API）
+│   ├── verdict_engine.py             # 双维度评分（acc 9信号 + dist 12信号）
+│   └── report_generator.py           # 终端双榜 + MD 报告
+│
 ├── data/                             # 独立分析库（.gitignore）
 │   └── select-sum.db
-├── report/v5/                        # 雷达报输出目录
+├── report/
+│   ├── v5/                            # master-scan 雷达报输出
+│   └── opus/                          # opus-scan 报告输出
 └── exports/                          # CSV/JSON 导出
 ```
 
@@ -191,7 +203,7 @@ composite = (d1 * 0.20 +   # 吸筹占比       → 80% = 满分
 
 | 版本 | 日期 | 关键变更 |
 |------|------|----------|
-| **V4.4** | **2026-04-10** | v7 过滤门：LP<$50K/V/L>10 否决 + FDV/LP>500 降级×0.8 + 48h cutoff 改 max(tx.date) + D5 新代币 surge=999 封顶50 |
+| **V4.4** | **2026-04-10** | v7 过滤门：LP<$50K/V/L>10 否决 + FDV/LP>500 降级×0.8 + 48h cutoff 改 max(tx.date) + D5 新代币 surge=999 封顐50 |
 | V4.3 | 2026-04-10 | Gecko 市场结构集成：classify_review 新增 FDV/LP、V/L、洗盘标签 + MD 报告第 8 节「市场结构异常」（市值虚高表+疑似洗盘表）+ 谨慎复核降级规则 |
 | **V8.4** | **2026-04-09** | A阈值适配10h周期(3%/8%)、C RED=3/4+cond4强制、cond2收紧至2%、全局DEX门10%(防空投)、ARIA回归RED |
 | V8.3 | 2026-04-09 | hop2二跳+entity聚簇穿透DEX率、近20滑动窗口中位数、阈值/隐庄配置化(.env)、双85%默认阈值 |
@@ -200,3 +212,69 @@ composite = (d1 * 0.20 +   # 吸筹占比       → 80% = 满分
 | **V5.0** | 2026-04-03 | 全新多快照时序分析：SnapshotDiff、A/B/C 三模式、Watchlist 追踪 |
 | v4.2.2 | 2026-03-27 | CMC 代理固定 `socks5://127.0.0.1:18000` |
 | v4.0 | 2026-03-19 | 8维评分(+d8)、d5时间衰减、cluster_ratio |
+
+## opus-scan V1.1 双维度诊断引擎
+
+### 架构概述
+
+基于全部历史快照时序分析，对每个代币输出 **吸筹置信度** 和 **出货置信度** 双评分。
+
+### 吸筹信号体系 (acc, 9信号, 总权重 21)
+
+| # | 信号名 | 权重 | 触发条件 |
+|---|--------|------|----------|
+| 1 | acc_trend_up | 3 | acc_cnt 斜率 > 0 |
+| 2 | acc_hold_growing | 3 | acc_hold 增长 > 阈值 |
+| 3 | dex_rate_high | 3 | DEX真金率 > 50% |
+| 4 | strong_buyers | 2 | 强买入者 ≥ 3 |
+| 5 | no_major_seller | 2 | 出货者持仓 < 5% |
+| 6 | net_inflow_positive | 2 | 吸筹者净流入全正 |
+| 7 | **cex_outflow** | **3** | **CEX占比下降>3% 且 斜率<-0.2（交易所流出=持有意图）** |
+| 8 | price_not_pumped | 1 | 24h价格未暴涨 |
+| 9 | buy_sell_person_ratio | 2 | 买/卖人数比 ≥ 0.8 |
+
+### 出货信号体系 (dist, 12信号, 总权重 24)
+
+| # | 信号名 | 权重 | 触发条件 |
+|---|--------|------|----------|
+| 1 | cex_declining | 3 | CEX持仓下降 > 阈值 |
+| 2 | major_seller | 3 | 出货者持仓 ≥ 1% |
+| 3 | fake_whales | 3 | 假鲸鱼 ≥ 2 |
+| 4 | distribution_48h | 2 | 48h派发者 ≥ 3 |
+| 5 | acc_hold_stagnant | 2 | acc增长<5% 且 斜率<0.1 |
+| 6 | seller_hold_heavy | 2 | 出货者持仓 ≥ 5% |
+| 7 | price_rising_cover | 1 | 价格上涨>10% 掩护出货 |
+| 8 | acc_insufficient | 1 | 吸筹者持仓 < 5% |
+| 9 | volume_declining | 2 | 24h量缩 |
+| 10 | lp_thin | 1 | LP不足 |
+| 11 | price_7d_drop | 1 | 7d价格下跌 |
+| 12 | **cex_inflow** | **2** | **CEX占比上升>3% 且 斜率>0.2（代币流入交易所=出货前兆）** |
+
+### V1.1 CEX 流向信号设计原理
+
+```
+CEX 地址持仓占比持续下降
+  → 代币从交易所提到个人钱包
+  → 持有者意图长期持有（否则留交易所更方便卖）
+  → = 吸筹行为的最强结构性证据
+
+CEX 地址持仓占比持续上升
+  → 代币被充入交易所
+  → 持有者准备卖出
+  → = 出货前兆信号
+```
+
+实测验证（AGT/IRYS/GWEI 三代币 45+ 快照）：
+- AGT: CEX 13.5%→09.0% (Δ-4.5%), acc 7.6%→14.4% — 完美反向相关
+- IRYS: CEX ±0.6%, 信号不触发 — 零影响
+- GWEI: CEX 14.2%→19.3% (Δ+5.1%), 价格冲高回落 — 出货前兆确认
+
+### 运行方式
+
+```bash
+# VPS 全库扫描
+cd /opt/AI-SUM && python3 opus-scan/run.py
+
+# 单币诊断
+cd /opt/AI-SUM && python3 opus-scan/run.py --symbol AGT
+```
