@@ -54,11 +54,21 @@ AI-SUM/
 │   ├── verdict_engine.py             # 双维度评分（acc 9信号 + dist 12信号）
 │   └── report_generator.py           # 终端双榜 + MD 报告
 │
+├── bigcoin/                          # ★ V1.0 庄控预警引擎（7维度置信度）
+│   ├── run.py                        # 入口（全库/单币/合约地址）
+│   ├── config.py                     # 阈值配置
+│   ├── db_loader.py                  # 复用 ATTACH 只读
+│   ├── concentration_profiler.py     # 集中度 + 锁仓
+│   ├── drift_detector.py            # 持仓漂移检测
+│   ├── whale_verdict.py             # 7维度裁决引擎
+│   └── report_generator.py          # 终端+MD
+│
 ├── data/                             # 独立分析库（.gitignore）
 │   └── select-sum.db
 ├── report/
 │   ├── v5/                            # master-scan 雷达报输出
-│   └── opus/                          # opus-scan 报告输出
+│   ├── opus/                          # opus-scan 报告输出
+│   └── whale/                        # whale-scan 庄控预警输出
 └── exports/                          # CSV/JSON 导出
 ```
 
@@ -198,6 +208,145 @@ composite = (d1 * 0.20 +   # 吸筹占比       → 80% = 满分
 | **B** | ≥ 45 | 中等吸筹 |
 | **C** | ≥ 30 | 弱吸筹 |
 | **D** | < 30 | 微弱信号 |
+
+## bigcoin/whale-scan — V1.0 庄控预警引擎
+
+### 架构
+
+```
+bigcoin/
+├── __init__.py
+├── config.py                 # .env 读取 + 7维度阈值（回测校准）
+├── db_loader.py              # ATTACH select.db 只读
+├── concentration_profiler.py # S1 集中度（Top2/5/10/20）+ S6 锁仓
+├── drift_detector.py         # S2 持仓漂移（首末快照 Top10 对比）
+├── whale_verdict.py          # S1-S7 信号融合 → 庄控置信度
+├── report_generator.py       # 终端 + MD（report/whale/）
+└── run.py                    # 入口
+```
+
+### 七维度信号体系（总权重 65）
+
+| 维度 | 信号数 | 权重 | 检测目标 |
+|------|--------|------|----------|
+| S1 集中度 | 6 | 18 | Top2/5/10/20 持仓 + DEX率 + 类型 |
+| S2 漂移 | 4 | 14 | 首末快照持仓比例被动上升 + 吸筹价格背离 |
+| S3 反向吸筹 | 4 | 8 | 低评分 + 低DEX + acc崩塌 |
+| S4 价格异动 | 3 | 10 | 暴涨 + 持续拉升 + 市值/流动性极端 |
+| S5 派发预兆 | 2 | 9 | 近期派发标签 + 48h净流出 |
+| S6 锁仓 | 2 | 4 | 合约锁仓 + 极低流通 |
+| S7 基本面 | 2 | 2 | 无市值/无Gecko数据 |
+
+### 置信度分级
+
+| 级别 | 阈值 | 含义 |
+|------|------|------|
+| 🔴 HIGH | ≥70% | 高危庄控，输出监控地址表 |
+| 🟠 MEDIUM | ≥50% | 中危观察 |
+| 🟡 LOW | ≥30% | 低危记录 |
+| ✅ CLEAN | <30% | 安全 |
+
+### 回测结果（195 代币）
+
+- RAVE: 96.9% 置信度 → 🔴第1名（21/23信号命中）
+- 第2名: AI 56.9% → 差距 40%
+- 🔴高危: 1 | 🟠中危: 6 | 🟡低危: 81 | ✅安全: 107
+
+### 运行方式
+
+```bash
+# 全库扫描
+cd /opt/AI-SUM && python3 bigcoin/run.py
+
+# 单币诊断
+cd /opt/AI-SUM && python3 bigcoin/run.py --symbol RAVE
+
+# 合约地址诊断
+cd /opt/AI-SUM && python3 bigcoin/run.py --address 0x976... --chain bsc
+```
+
+### 报告输出
+
+- 全库雷达: `report/whale/whale_YYYYMMDD_HHMM.md`
+- 单币诊断: `report/whale/SYMBOL_YYYYMMDD_HHMM.md`
+- 含 95% 覆盖监控地址表 + Top20 持仓概览
+
+
+
+## unified-scan — 三维度统一雷达引擎
+
+### 架构
+
+```
+unified-scan/
+├── __init__.py
+├── config.py                 # 全局配置（阈值/路径/代理）
+├── db_loader.py              # ATTACH select.db 只读 + 数据加载
+├── daily_scan.py             # 定时调度
+├── run.py                    # 主入口（全库扫描 + 联网增强）
+├── verdict_engine.py         # 三维度评分 + G1/G2/G3 门控 + 综合裁决
+├── report_generator.py       # 终端 + MD 雷达报
+└── analyzers/
+    ├── diamond_checker.py    # A1: 钻石绞杀检测
+    ├── diff_analyzer.py      # A2: 地址聚合 + A3: 新鲸下场
+    ├── cex_flow.py          # A4/D1: CEX 流向
+    ├── holder_profiler.py   # D2: 出货者画像
+    ├── drift_detector.py    # D3: 被动漂移检测
+    ├── concentration.py     # S1: 极端集中度
+    └── market_context.py    # S2: M/L 泡沫比 + S3: 买卖人数比 + S4: V/L 换手
+```
+
+### 信号编码体系
+
+| 编码 | 维度 | 权重 | 含义 |
+|------|------|------|------|
+| A1(DIAMOND) | ACC | 8 | BubbleMap 吸筹标签 |
+| A2(YELLOW/RED) | ACC | 5 | 地址聚合指标 |
+| A3 | ACC | 4 | 新鲸下场 |
+| A4(CEX流出) | ACC | 5 | CEX→链上(买入持有) |
+| D1(CEX流入) | DIST | 5 | 链上→CEX(准备卖出) |
+| D2(出货者) | DIST | 4 | 出货行为地址 |
+| D3(被动漂移) | DIST | 6 | 持仓不变价格跌 |
+| S1(极端集中) | STRUCT | 5 | Top地址持仓极度集中 |
+| S2(M/L=Nx) | STRUCT | 4 | 市值/流动性泡沫比 |
+| S3(买>卖) | STRUCT | 2 | 买卖人数比 |
+| S4(V/L=x) | 标记 | 0 | 换手效率>10x(标记不计分) |
+| G2(LP=$x) | 门控 | - | LP<$30K降级, <$10K否决 |
+| G3(死池) | 门控 | - | V/L<0.01+Vol<$100否决ACC |
+
+### 门控体系
+
+```
+G1: DEX 质量门 — DEX真金率 < 10% → 取消 A2/A3 信号（DIAMOND 豁免）
+G2: LP 流动性门 — LP < $10K → 否决所有信号 → NEUTRAL
+                   LP < $30K → DIAMOND/STRONG_ACC 降级为 MODERATE_ACC
+G3: 死池门 — V/L < 0.01 且 Vol24h < $100 → 否决 ACC 信号
+```
+
+### 裁决规则
+
+| 判定 | 条件 |
+|------|------|
+| DIAMOND | A1(DIAMOND) 触发 |
+| WHALE_DUMP | D3+S1 联合 或 DIST≥50%+STRUCT≥60% |
+| SLOW_DISTRIBUTION | DIST≥50% |
+| STRONG_ACC | ACC≥60% |
+| MODERATE_ACC | ACC≥30% |
+| NEUTRAL | 其余 |
+
+### 报告输出
+
+11列: `代币 | 链 | ACC% | DIST% | STRUCT% | 机构控盘 | DEX真金 | CEX变化 | LP($) | V/L | 触发信号`
+
+输出: `report/unified/unified_YYYYMMDD_HHMM.md`
+
+### 版本历史
+
+| 版本 | 日期 | 变更 |
+|------|------|------|
+| V1.1 | 2026-04-17 | S2修复(预算mcap_liq_ratio+FDV fallback) + S1放宽(合约锁仓>70%触发) |
+| V1.2 | 2026-04-17 | E1~E4: S4(V/L标记) + G2(LP门控) + G3(死池否决) + 报告新增LP/VL列 |
+| V1.0 | 2026-04-17 | 初版三维度(ACC/DIST/STRUCT)统一引擎 |
 
 ## 版本历史
 
