@@ -136,7 +136,7 @@ def save_md_leaderboard(results: list[VerdictResult]) -> str:
     for i, r in enumerate(top_acc, 1):
         lp_s = f"${r.lp_usd:,.0f}" if r.lp_usd else "-"
         lines.append(
-            f"| {i} | {r.symbol} | {r.chain} | {r.acc_confidence:.1f}% | {r.acc_cnt} | {r.acc_hold_pct:.1f}% | {r.dex_verified_pct:.1f}% | {r.cex_delta_pct:+.1f}% | {_cex_arrow(r.cex_delta_pct)} | {lp_s} | {PHASE_CN.get(r.phase, r.phase)} |"
+            f"| {i} | {r.symbol} | {r.chain} | {r.acc_confidence:.1f}% | {r.acc_cnt} | {r.acc_hold_pct:.1f}% | {r.dex_verified_pct:.1f}% | {r.cex_delta_pct:+.1f}% | {_cex_arrow(r.cex_delta_pct)} | {lp_s} | {r.mcap_liq_ratio:.0f}x | {r.vl_ratio:.2f} | {PHASE_CN.get(r.phase, r.phase)} |"
         )
 
     lines += [
@@ -147,7 +147,7 @@ def save_md_leaderboard(results: list[VerdictResult]) -> str:
     for i, r in enumerate(top_dist, 1):
         lp_s = f"${r.lp_usd:,.0f}" if r.lp_usd else "-"
         lines.append(
-            f"| {i} | {r.symbol} | {r.chain} | {r.dist_confidence:.1f}% | {r.seller_count} | {r.seller_hold_pct:.1f}% | {r.fake_whale_count} | {r.cex_delta_pct:+.1f}% | {lp_s} | {r.dist_48h_count}个 |"
+            f"| {i} | {r.symbol} | {r.chain} | {r.dist_confidence:.1f}% | {r.seller_count} | {r.seller_hold_pct:.1f}% | {r.fake_whale_count} | {r.cex_delta_pct:+.1f}% | {lp_s} | {r.mcap_liq_ratio:.0f}x | {r.vl_ratio:.2f} | {r.dist_48h_count}个 |"
         )
 
     if mixed:

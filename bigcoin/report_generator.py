@@ -122,8 +122,8 @@ def save_md_radar(results: list[WhaleVerdict]) -> str:
     if high:
         lines.append(f"## 🔴 高危庄控 (≥{config.LEVEL_HIGH:.0f}%)")
         lines.append("")
-        lines.append("| 代币 | 链 | 置信度 | Top2% | Top10% | DEX率 | W1漂移 | 价格24h | M/L比 | C95 | 状态 |")
-        lines.append("|------|----|---------:|------:|-------:|------:|------:|-------:|------:|----:|------|")
+        lines.append("| 代币 | 链 | 置信度 | Top2% | Top10% | DEX率 | W1漂移 | 价格24h | M/L比 | LP($) | V/L | C95 | 状态 |")
+        lines.append("|------|----|---------:|------:|-------:|------:|------:|-------:|------:|--------:|-----:|----:|------|")
         for v in high:
             cp = v.concentration
             dr = v.drift

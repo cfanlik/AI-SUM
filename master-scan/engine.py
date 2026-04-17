@@ -58,7 +58,34 @@ def run_full_scan(
     if verbose:
         print(f"红色 {len(reds)} | 黄色 {len(yellows)}")
 
-    # Step 4: 更新 Watchlist
+    # Step 3.5: Gecko LP/VL/FDV-LP + G2/G3
+    if verbose:
+        print("  Step 3.5/5: Gecko + G2/G3...", end=" ")
+    g2_cnt = 0
+    g3_cnt = 0
+    for r in all_results:
+        gecko = db_loader.load_gecko_latest(conn, r.chain, r.token_address)
+        if not gecko:
+            continue
+        r.lp_usd = gecko.get("reserve_usd") or 0
+        r.vl_ratio = gecko.get("vl_ratio") or 0
+        mcap = gecko.get("fdv_usd") or gecko.get("market_cap_usd") or 0
+        reserve = gecko.get("reserve_usd") or 1
+        r.mcap_liq_ratio = mcap / reserve if reserve > 0 else 0
+        if 0 < r.lp_usd < 10000:
+            r.composite_level = None
+            r.triggered_patterns = [f"G2(LP=${r.lp_usd:,.0f})"]
+            g2_cnt += 1
+            continue
+        vol = gecko.get("volume_24h") or 0
+        if r.vl_ratio < 0.01 and vol < 100 and r.composite_level:
+            r.composite_level = None
+            r.triggered_patterns = ["G3(dead)"]
+            g3_cnt += 1
+    if verbose:
+        print(f"G2={g2_cnt} G3={g3_cnt}")
+
+        # Step 4: 更新 Watchlist
     if verbose:
         print("  Step 4/5: 更新 Watchlist...", end=" ")
     wl_stats = update_watchlist(conn, all_results)

@@ -54,6 +54,16 @@ def _analyze_token(conn, chain: str, addr: str, sym: str):
 
     # 裁决
     verdict = evaluate(chain, addr, sym, cp, dr, scores, gecko, latest_holders)
+
+    # G2: LP<$10K
+    if verdict.lp_usd > 0 and verdict.lp_usd < 10000:
+        verdict.confidence = 0
+        verdict.level = "CLEAN"
+    # G3: dead pool
+    _vol = (gecko or {}).get("volume_24h") or 0
+    if verdict.vl_ratio < 0.01 and _vol < 100 and verdict.confidence > 0:
+        verdict.confidence = 0
+        verdict.level = "CLEAN"
     return verdict
 
 

@@ -482,3 +482,14 @@ def record_scan_run(
     )
     conn.commit()
     return cursor.lastrowid
+
+
+def load_gecko_latest(conn, chain: str, addr: str):
+    try:
+        row = conn.execute(
+            "SELECT * FROM src_db.gecko_market_data WHERE chain=? AND token_address=? ORDER BY rowid DESC LIMIT 1",
+            (chain, addr)
+        ).fetchone()
+        return dict(row) if row else None
+    except Exception:
+        return None
