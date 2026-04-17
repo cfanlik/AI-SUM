@@ -134,7 +134,7 @@ def save_md_radar(results: list[WhaleVerdict]) -> str:
                 f"| {v.symbol} | {v.chain} | {v.confidence:.1f}% | "
                 f"{cp.top2_hold:.1f}% | {cp.top10_hold:.1f}% | {t2d} | {w1d} | "
                 f"+{v.price_change_24h:.0f}% | {v.mcap_liq_ratio:.0f}x | "
-                f"{cp.cov95_count} | {status} |"
+                f"${v.lp_usd:,.0f} | {v.vl_ratio:.2f} | {cp.cov95_count} | {status} |"
             )
         lines.append("")
 
