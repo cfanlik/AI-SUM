@@ -51,17 +51,20 @@ def _format_row(r: PatternResult, md: bool = False) -> str:
     hw    = f"{r.hidden_whale_count}个"
     dex   = f"{r.dex_verified_pct:.1f}%"
     acc   = str(r.acc_count_new)
+    lp    = f"${r.lp_usd:,.0f}" if r.lp_usd > 0 else "N/A"
+    vl    = f"{r.vl_ratio:.2f}" if r.vl_ratio > 0 else "0"
+    ml    = f"{r.mcap_liq_ratio:.0f}x" if r.mcap_liq_ratio > 0 else "N/A"
 
     if md:
-        return f"| {sym} | {chain} | {level} | {pat} | {inst} | {hw} | {dex} | {acc} |"
+        return f"| {sym} | {chain} | {level} | {pat} | {inst} | {hw} | {dex} | {acc} | {lp} | {ml} | {vl} |"
     else:
-        return f"  {sym:<10} {chain:<5} {level:<22} {pat:<24} {inst:>8} {hw:>8} {dex:>8} {acc:>6}"
+        return f"  {sym:<10} {chain:<5} {level:<22} {pat:<24} {inst:>8} {hw:>8} {dex:>8} {acc:>6} {lp:>12} {ml:>8} {vl:>6}"
 
 
 def _md_table_header() -> str:
     return (
-        "| 代币 | 链 | 信号级别 | 触发模式 | 机构控盘率 | 隐庄 | DEX真金率 | 吸筹数 |\n"
-        "|------|----|---------|---------|-----------:|-----:|--------:|------:|"
+        "| 代币 | 链 | 信号级别 | 触发模式 | 机构控盘率 | 隐庄 | DEX真金率 | 吸筹数 | LP($) | FDV/LP | V/L |\n"
+        "|------|----|---------|---------|-----------:|-----:|--------:|------:|--------:|-------:|-----:|"
     )
 
 
@@ -88,7 +91,7 @@ def print_terminal_report(
     def _section(title, items):
         if items:
             print(f"\n  {title} — {len(items)} 个")
-            print(f"  {'代币':<10} {'链':<5} {'级别':<22} {'触发模式':<24} {'机构占比':>8} {'隐庄':>8} {'真金率':>8} {'吸筹数':>6}")
+            print(f"  {'代币':<10} {'链':<5} {'级别':<22} {'触发模式':<24} {'机构占比':>8} {'隐庄':>8} {'真金率':>8} {'吸筹数':>6} {'LP($)':>12} {'FDV/LP':>8} {'V/L':>6}")
             print("  " + "-" * 98)
             for r in items:
                 print(_format_row(r, md=False))

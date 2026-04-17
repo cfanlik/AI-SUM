@@ -48,6 +48,8 @@ def _print_table(items: list[WhaleVerdict]):
         w1d = f"+{dr.whale1_hold_delta:.1f}" if dr else "?"
         pchg = f"+{v.price_change_24h:.0f}%" if v.price_change_24h > 0 else f"{v.price_change_24h:.0f}%"
         ml = f"{v.mcap_liq_ratio:.0f}x" if v.mcap_liq_ratio > 0 else "N/A"
+        lp = f"${v.lp_usd:,.0f}" if v.lp_usd > 0 else "N/A"
+        vl = f"{v.vl_ratio:.2f}" if v.vl_ratio > 0 else "0"
         c95 = cp.cov95_count if cp else 0
         print(fmt.format(
             i,

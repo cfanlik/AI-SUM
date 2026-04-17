@@ -130,7 +130,7 @@ def save_md_leaderboard(results: list[VerdictResult]) -> str:
         f"# opus-scan 双维度雷达报 | {now}",
         f"\n扫描总数: {len(valid)}  |  吸筹:{len(top_acc)} 出货:{len(top_dist)} 混合:{len(mixed)} 中性:{n_neutral}",
         "\n## \U0001f7e2 吸筹 Top 10（verdict=ACCUMULATING）\n",
-        "| 排名 | 代币 | 链 | 置信度 | acc数 | acc占比 | DEX真金 | CEX变化 | \u0394CEX | LP(USD) | 阶段 |",
+        "| 排名 | 代币 | 链 | 置信度 | acc数 | acc占比 | DEX真金 | CEX变化 | \u0394CEX | LP(USD) | FDV/LP | V/L | 阶段 |",
         "|------|------|-----|--------|-------|---------|---------|---------|------|---------|------|",
     ]
     for i, r in enumerate(top_acc, 1):
@@ -141,7 +141,7 @@ def save_md_leaderboard(results: list[VerdictResult]) -> str:
 
     lines += [
         "\n## \U0001f534 出货 Top 10（verdict=SLOW_DISTRIBUTION）\n",
-        "| 排名 | 代币 | 链 | 置信度 | 出货者 | 出货占比 | 假鲸鱼 | CEX变化 | LP(USD) | 48h派发 |",
+        "| 排名 | 代币 | 链 | 置信度 | 出货者 | 出货占比 | 假鲸鱼 | CEX变化 | LP(USD) | FDV/LP | V/L | 48h派发 |",
         "|------|------|-----|--------|--------|----------|--------|---------|---------|---------| ",
     ]
     for i, r in enumerate(top_dist, 1):

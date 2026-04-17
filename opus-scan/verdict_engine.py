@@ -47,6 +47,8 @@ class VerdictResult:
     phase: str = ""
     volume_24h: Optional[float] = None
     lp_usd: Optional[float] = None
+    vl_ratio: float = 0.0
+    mcap_liq_ratio: float = 0.0
 
 
 def evaluate(
@@ -73,6 +75,8 @@ def evaluate(
         phase=ts.phase,
         volume_24h=mc.pool_volume_24h or mc.volume_24h,
         lp_usd=mc.lp_usd,
+        vl_ratio=mc.vl_ratio,
+        mcap_liq_ratio=mc.mcap_liq_ratio,
     )
 
     # ── 吸筹置信度 ──
@@ -171,6 +175,26 @@ def evaluate(
     ]
 
     _calc_confidence(vr, dist_checks, is_acc=False)
+
+    # ── G2: LP 流动性门控 ──
+    _lp = mc.lp_usd or mc.pool_lp_usd or 0
+    if _lp > 0:
+        if _lp < config.G2_LP_VETO_USD:
+            vr.acc_confidence = 0
+            vr.dist_confidence = 0
+            vr.verdict = "NEUTRAL"
+            vr.verdict_detail = f"G2 否决: LP=${_lp:,.0f}"
+            return vr
+        elif _lp < config.G2_LP_THIN_USD:
+            vr.verdict_detail = f"G2 降级: LP=${_lp:,.0f}"
+
+    # ── G3: 死池检测 ──
+    _vol = mc.pool_volume_24h or mc.volume_24h or 0
+    if mc.vl_ratio < config.G3_DEAD_POOL_VL and (_vol or 0) < config.G3_DEAD_POOL_VOL:
+        vr.acc_confidence = 0
+        vr.verdict = "NEUTRAL"
+        vr.verdict_detail = "G3 死池: V/L≈0 + Vol≈0"
+        return vr
 
     # ── 裁决 ──
     _determine_verdict(vr)

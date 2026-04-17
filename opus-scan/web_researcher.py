@@ -34,6 +34,8 @@ class MarketContext:
     buy_sell_person_ratio: Optional[float] = None
     volume_declining: bool = False
     lp_thin: bool = False
+    vl_ratio: float = 0.0
+    mcap_liq_ratio: float = 0.0
 
     # 联网状态
     gecko_api_ok: bool = False
@@ -58,6 +60,8 @@ def research(
         ctx.volume_24h = gecko_db.get("volume_24h_usd") or gecko_db.get("volume_24h")
         ctx.lp_usd = gecko_db.get("reserve_usd") or gecko_db.get("lp_usd")
         ctx.price_change_24h = gecko_db.get("price_change_24h")
+        ctx.vl_ratio = gecko_db.get("vl_ratio") or 0
+        ctx.mcap_liq_ratio = gecko_db.get("mcap_liq_ratio") or 0
 
     # 2. 联网 GeckoTerminal API
     if online:

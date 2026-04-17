@@ -70,6 +70,9 @@ class PatternResult:
     institutional_hold_v8: float = 0.0
     hidden_whale_count: int = 0
     dex_verified_pct: float = 0.0
+    lp_usd: float = 0.0
+    vl_ratio: float = 0.0
+    mcap_liq_ratio: float = 0.0
 
     @property
     def has_signal(self) -> bool:

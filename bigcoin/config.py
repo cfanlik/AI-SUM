@@ -63,3 +63,10 @@ REPORT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "report", 
 Path(REPORT_DIR).mkdir(parents=True, exist_ok=True)
 MIN_SNAPSHOTS = 3
 TOP_N_REPORT = 20
+
+# ═══ LP/VL 增强 (E1~E4) ═══
+S4_VL_WASH_THRESHOLD: float = 10.0    # V/L > 10 → 疑似洗盘标记
+G2_LP_THIN_USD: float = 30000.0
+G2_LP_VETO_USD: float = 10000.0
+G3_DEAD_POOL_VL: float = 0.01
+G3_DEAD_POOL_VOL: float = 100.0

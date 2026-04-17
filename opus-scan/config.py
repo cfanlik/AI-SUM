@@ -61,3 +61,10 @@ Path(REPORT_DIR).mkdir(parents=True, exist_ok=True)
 TOP_N = 10
 MIN_SNAPSHOTS = 3
 TOP_HOLDERS_N = 30
+
+# ═══ LP/VL 增强 (E1~E4) ═══
+S4_VL_HIGH_THRESHOLD: float = 10.0    # V/L > 10 → 极端换手标记
+G2_LP_THIN_USD: float = 30000.0       # LP < $30K → 降级
+G2_LP_VETO_USD: float = 10000.0       # LP < $10K → 否决所有信号
+G3_DEAD_POOL_VL: float = 0.01
+G3_DEAD_POOL_VOL: float = 100.0

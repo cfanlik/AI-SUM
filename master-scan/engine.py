@@ -8,6 +8,7 @@ import time
 from datetime import datetime
 
 import config, db_loader
+# LP/VL/FDV-LP 增强: 从 gecko_market_data 获取
 from time_series_aligner import batch_build_time_series, build_time_series
 from pattern_detector import scan_all, detect
 from watchlist_tracker import update_watchlist, print_watchlist_table

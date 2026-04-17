@@ -29,6 +29,8 @@ class WhaleVerdict:
     snap_count: int = 0
     price_change_24h: float = 0.0
     mcap_liq_ratio: float = 0.0
+    vl_ratio: float = 0.0
+    lp_usd: float = 0.0
 
 
 def evaluate(
@@ -125,6 +127,8 @@ def evaluate(
     mcap = (gecko or {}).get("market_cap_usd", 0) or 0
     mcap_liq = mcap / reserve if reserve > 0 else 0
     v.mcap_liq_ratio = mcap_liq
+    v.vl_ratio = (gecko or {}).get("vl_ratio", 0) or 0
+    v.lp_usd = reserve if reserve > 1 else 0
 
     sigs.append(_sig("S4", "pump_100pct", 4,
                       price_chg > config.PUMP_PCT_THRESHOLD,
@@ -135,6 +139,12 @@ def evaluate(
     sigs.append(_sig("S4", "extreme_mcap_liq", 4,
                       mcap_liq > config.MCAP_LIQ_THRESHOLD,
                       f"M/L={mcap_liq:.1f}x"))
+
+    # S4b: V/L 换手异常
+    vl = v.vl_ratio
+    sigs.append(_sig("S4", "extreme_vl", 2,
+                      vl > config.S4_VL_WASH_THRESHOLD,
+                      f"V/L={vl:.1f}"))
 
     # ════════════════════════════════════════
     # S5: 派发预兆 (weight=9)
