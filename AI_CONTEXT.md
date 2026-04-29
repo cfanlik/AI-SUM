@@ -1,15 +1,17 @@
 # AI-SUM — AI 可读项目文档
 
-> **全局吸筹扫描分析系统**：基于 BubbleMap 数据库（Top 300 持有者），对所有代币做多维评分与行为模式识别，输出钻石/红色/黄色三级雷达预警。
+> **全链路吸筹扫描分析系统**：六引擎架构，基于 BubbleMap 数据库（Top 300 持有者），对所有代币做多维评分与行为模式识别，最终由 meta-verdict 仲裁层汇总输出综合排名。
 
 ## 技术栈
 
 | 层 | 技术 |
 |---|---|
 | 语言 | Python 3.13 |
-| 数据库 | SQLite（外部共享 `select-coin/data/select.db`，独立分析库 `select-sum.db`） |
-| 输出 | 终端 + Markdown 雷达报 + CSV/JSON 导出 |
-| 部署 | 本地 Windows + VPS Linux（`/opt/AI-SUM/`） |
+| 数据库 | SQLite（源库 `select.db`，汇总库 `select-sum.db`） |
+| 输出 | 终端 + Markdown 雷达报 |
+| 部署 | VPS Linux（`/opt/AI-SUM/`） |
+
+---
 
 ## 目录结构
 
@@ -17,90 +19,87 @@
 AI-SUM/
 ├── AI_CONTEXT.md                     # ★ 本文件：AI 项目索引
 ├── .env                              # 环境配置（SRC_DB_PATH/SUM_DB_PATH/阈值）
-├── .gitignore
-├── requirements.txt
+├── persist_helper.py                 # ★ 三引擎持久化辅助（opus/whale/unified → select-sum.db）
+├── patch_engines.py                  # 一次性注入补丁脚本（已执行）
 │
-├── accumulation_scan_v3.py           # V3 主脚本（截面评分 S/A/B/C/D）
-├── AI-SUM-0408.py                    # V5 顶层入口（路由 python-ai/）
-├── run_v5.py                         # V5 备用入口
-├── vps_deploy_master.py              # VPS 一键部署+执行+下载报告
+├── master-scan/                      # ★ V8.4 生产版（BubbleMap 时序+模式识别）
+├── opus-scan/                        # ★ V1.3 双维度诊断（吸筹+出货置信度）
+├── unified-scan/                     # ★ V1.2 三维度统一雷达
+├── bigcoin/                          # ★ V1.0 庄控预警（7维度置信度）
+├── cost-basis-scan/                  # ★ V1.1 成本基础扫描（8信号+SQUEEZE_ACC分层）
+├── meta-verdict/                     # ★ NEW 五引擎仲裁层（加权积分+生命周期）
 │
-├── python-ai/                        # V5 原版模块（基线，不含 V8.2）
-│   ├── config.py
-│   ├── db_loader.py
-│   ├── engine.py
-│   ├── pattern_detector.py            # A/B/C 三模式
-│   ├── report_generator.py
-│   ├── time_series_aligner.py
-│   └── watchlist_tracker.py
-│
-├── master-scan/                      # ★ V8.4 生产版（含钻石绞杀区）
-│   ├── run.py                         # 统一入口
-│   ├── config.py                      # 全局配置（.env 读取）
-│   ├── db_loader.py                   # SQL 封装 + ATTACH 只读
-│   ├── time_series_aligner.py         # SnapshotDiff + V8.2 计算
-│   ├── pattern_detector.py            # A/B/C/E 四模式识别
-│   ├── report_generator.py            # 雷达报生成（钻石+红色）
-│   ├── engine.py                      # 主调度器
-│   └── watchlist_tracker.py           # 追踪生命周期
-│
-├── opus-scan/                        # ★ V1.1 双维度诊断引擎（吸筹+出货置信度）
-│   ├── run.py                         # 统一入口（全库扫描/单币诊断）
-│   ├── config.py                      # 阈值配置
-│   ├── db_loader.py                   # SQL 封装，ATTACH select.db 只读
-│   ├── time_series_builder.py         # 全快照时序→斜率/增长率/CEX斜率/阶段判定
-│   ├── holder_profiler.py             # Top30 大户行为分析（真鲸/假鲸/卖家/派发者）
-│   ├── web_researcher.py             # 联网增强（Gecko Token+Pool API）
-│   ├── verdict_engine.py             # 双维度评分（acc 9信号 + dist 12信号）
-│   └── report_generator.py           # 终端双榜 + MD 报告
-│
-├── bigcoin/                          # ★ V1.0 庄控预警引擎（7维度置信度）
-│   ├── run.py                        # 入口（全库/单币/合约地址）
-│   ├── config.py                     # 阈值配置
-│   ├── db_loader.py                  # 复用 ATTACH 只读
-│   ├── concentration_profiler.py     # 集中度 + 锁仓
-│   ├── drift_detector.py            # 持仓漂移检测
-│   ├── whale_verdict.py             # 7维度裁决引擎
-│   └── report_generator.py          # 终端+MD
-│
-├── data/                             # 独立分析库（.gitignore）
-│   └── select-sum.db
+├── select-sum.db                     # 汇总分析库（watchlist/cost_basis_snapshots/opus_snapshots/whale_snapshots/meta_snapshots/token_lifecycle）
 ├── report/
-│   ├── v5/                            # master-scan 雷达报输出
-│   ├── opus/                          # opus-scan 报告输出
-│   └── whale/                        # whale-scan 庄控预警输出
-└── exports/                          # CSV/JSON 导出
+│   ├── v5/                           # master-scan 雷达报
+│   ├── opus/                         # opus-scan 报告
+│   ├── whale/                        # whale-scan 庄控预警
+│   ├── unified/                      # unified-scan 报告
+│   ├── cost-basis/                   # cost-basis-scan 报告
+│   └── meta/                         # ★ meta-verdict 综合仲裁报告
+└── log/
+    ├── master.log / opus.log / unified.log
+    ├── whale.log / cost-basis.log / meta.log
+    └── （logrotate 每周轮转，保留 4 份，单文件 10M 上限）
 ```
+
+---
 
 ## 数据源
 
 | 项 | 说明 |
 |---|---|
-| 本地源库 | `C:\Users\Administrator\.gemini\antigravity\playground\select-coin\data\select.db` |
 | VPS 源库 | `/opt/select-coin/data/select.db` |
-| 主表 | `bubblemap_holders` — 每行 = 地址在某代币某快照的持仓 + 评分 |
+| 汇总库 | `/opt/AI-SUM/select-sum.db` |
+| 主表 | `bubblemap_holders` — 每行 = 地址在某代币某快照的持仓+评分 |
 | 辅表 | `token_names` — 代币名称/符号/市值 |
 | 评分表 | `token_scores` — 历次扫描的 8 维评分 |
-| 市场表 | `gecko_market_data` — GeckoTerminal LP/交易量/FDV 快照（链式触发自动写入） |
+| 市场表 | `gecko_market_data` — GeckoTerminal LP/交易量/FDV 快照 |
 
-### bubblemap_holders 关键字段
+---
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `chain` | TEXT | 链名 (bsc/eth/base) |
-| `token_address` | TEXT | 代币合约地址 |
-| `snapshot_time` | TEXT | 快照时间 |
-| `rank` | INTEGER | 持仓排名 (1-300) |
-| `hold_percentage` | REAL | 持仓占比 (%, 100进制: 2.5=2.5%) |
-| `acc_score` | REAL | 地址级吸筹评分 (0-100) |
-| `is_accumulating` | INTEGER | 是否吸筹 (0/1) |
-| `is_cex` / `is_dex` / `is_contract` / `is_supernode` | INTEGER | 地址分类 |
-| `dex_ratio` | REAL | 直接 DEX 交互比例 (0-1) |
-| `dex_ratio_hop2` | REAL | 二跳 DEX 来源比例 (0-1) |
-| `gmgn_verified` | INTEGER | GMGN swap 级验证 (0/1/2) |
-| `entity_id` | TEXT | 聚类实体 ID |
+## 定时调度（Crontab）
 
-## V8.4 Master-Scan 架构
+```
+00:00 master-scan     → /opt/AI-SUM/log/master.log
+00:10 opus-scan       → /opt/AI-SUM/log/opus.log
+00:20 unified-scan    → /opt/AI-SUM/log/unified.log
+00:30 whale-scan      → /opt/AI-SUM/log/whale.log
+00:40 cost-basis-scan → /opt/AI-SUM/log/cost-basis.log
+00:50 meta-verdict    → /opt/AI-SUM/log/meta.log
+12:xx 同上（每天两轮）
+```
+
+---
+
+## 六引擎架构总览
+
+| 引擎 | 定位 | 核心输出 | 积分权重 |
+|------|------|----------|---------|
+| master-scan | 时序模式识别（A/B/C/E） | DIAMOND / RED / YELLOW | +4 / +2 / +1 |
+| opus-scan | 双维度诊断（吸筹+出货） | acc_confidence / dist_confidence | acc×0.04 |
+| unified-scan | 三维度统一雷达 | 综合信号级别 | +4 / +2 / +1 |
+| whale-scan | 庄控预警（7维度） | HIGH / MEDIUM / LOW | +3 / +2 / +1 |
+| cost-basis-scan | 成本基础扫描（8信号） | SQUEEZE_ACC_HIGH/MED/LOW / IRON_HOLD 等 | +3 / +2 / +1 |
+| **meta-verdict** | **★ 五引擎仲裁汇总** | **综合积分 + 生命周期阶段** | — |
+
+---
+
+## master-scan — V8.4 生产版
+
+### 架构
+
+```
+master-scan/
+├── run.py                  # 统一入口
+├── config.py               # 全局配置（.env 读取）
+├── db_loader.py            # SQL 封装 + ATTACH 只读
+├── time_series_aligner.py  # SnapshotDiff + V8.2 计算
+├── pattern_detector.py     # A/B/C/E 四模式识别
+├── report_generator.py     # 雷达报生成
+├── engine.py               # 主调度器
+└── watchlist_tracker.py    # 追踪生命周期 → 写入 watchlist 表
+```
 
 ### 四大行为模式
 
@@ -108,332 +107,286 @@ AI-SUM/
 |------|----------|------|
 | **A 地址聚合** | 10h 换手率 >3%(黄)/8%(红) + 新吸筹涌入 | 底层筹码重组 |
 | **B 新鲸下场** | 新进地址均分≥72 + 纯买入≥80% + 持仓>0.5% | 高质量鲸鱼入场 |
-| **C 爆发前静默** | 3/4条件(历史高位+换手<2%+吸筹不减+只买不卖≥70%) + RED需cond_4必须 | 吸筹完毕静待拉升 |
-| **E 钻石绞杀** | 机构控盘率≥阈值 + DEX真金率≥阈值（默认双85%） | 极低流通+真金吸筹 |
+| **C 爆发前静默** | 3/4条件(历史高位+换手<2%+吸筹不减+只买不卖≥70%) | 吸筹完毕静待拉升 |
+| **E 钻石绞杀** | 机构控盘率≥85% + DEX真金率≥85% | 极低流通+真金吸筹 |
 
-### 全局信号质量门（V8.4 新增）
-
-```
-DEX 真金率 < MIN_SIGNAL_DEX_PCT (默认10%) → 该代币所有 A/B/C 信号被取消
-E(DIAMOND) 豁免此过滤
-用途：过滤空投/伪信号代币（如 HOLO dex=0%、42 dex=7.5%）
-```
-
-### V8.3 核心指标计算
-
-#### 机构控盘率 (institutional_hold_v8)
-```
-基础设施地址(is_cex/is_contract/is_supernode) 持仓
-+ 持仓≥2% 的大户持仓
-= 机构控盘率 (100进制)
-```
-
-#### 隐庄 (hidden_whale_count)
-```
-非基础设施 + 持仓≥2% 的地址数量
-```
-
-#### DEX真金率 (dex_verified_pct) — V8.3
-```
-吸筹地址中满足以下任一条件:
-  1. dex_ratio ≥ 0.5
-  2. dex_ratio_hop2 ≥ 0.5（二跳穿透）
-  3. gmgn_verified ≥ 1
-  4. 同 entity_id 组内有地址满足上述条件（聚簇穿透）
-/ 吸筹地址总数 × 100 (100进制)
-```
-
-### 已知限制
-
-| 问题 | 状态 | 优化方向 |
-|------|------|----------|
-| A→B→C 多跳转账导致 C 的 dex_ratio=0 | ✅ V8.3 已修复 | `dex_ratio_hop2` 二跳穿透 |
-| 同主体多钱包未穿透 | ✅ V8.3 已修复 | `entity_id` 聚簇共享 |
-| 小地址噪声拉低 DEX率 | 待定 | 持仓加权替代数量占比 |
-| 历史中位数被早期低值拉低 | ✅ V8.3 已修复 | 近20快照滑动窗口 |
-| 无价格维度 | 待定 | 引入价格-持仓背离检测 |
-
-### 报告输出格式
-
-仅展示两个核心区块：
-1. **💎 钻石绞杀区** — 双阈值严格通过（默认双85%，可通过 .env 调整）
-2. **🔴 红色预警** — A/B/C 模式触发
-
-统一8列：`代币 | 链 | 信号级别 | 触发模式 | 机构控盘率 | 隐庄 | DEX真金率 | 吸筹数`
-
-不展示：🟡 黄色关注、📋 Watchlist（避免报告冗长）
-
-### 运行方式
+### 运行
 
 ```bash
-# 本地执行
-python master-scan/run.py
-
-# VPS 一键部署+执行+下载报告
-python vps_deploy_master.py
+cd /opt/AI-SUM && python3 master-scan/run.py
 ```
 
-### 环境配置 (.env)
+### 报告输出
 
-```env
-SRC_DB_PATH=C:\Users\Administrator\.gemini\antigravity\playground\select-coin\data\select.db
-SUM_DB_PATH=E:\AI-SUM\data\select-sum.db
-DIAMOND_INST_THRESHOLD=85.0
-DIAMOND_DEX_THRESHOLD=85.0
-HIDDEN_WHALE_HOLD_THRESHOLD=2.0
-MIN_SIGNAL_DEX_PCT=10.0
+`report/v5/radar_YYYYMMDD_HHMM.md`
+
+---
+
+## opus-scan — V1.3 双维度诊断引擎
+
+### 架构
+
+```
+opus-scan/
+├── run.py                  # 主入口（支持 --offline / --top N）
+├── db_loader.py
+├── time_series_builder.py  # 全快照时序→斜率/增长率/CEX斜率/阶段判定
+├── holder_profiler.py      # Top30 大户行为分析（真鲸/假鲸/卖家/派发者）
+├── web_researcher.py       # 联网增强（Gecko Token+Pool API）
+├── verdict_engine.py       # 双维度评分（acc 9信号 + dist 12信号）
+└── report_generator.py
 ```
 
-## V3 截面评分（保留）
+### 持久化（★ 新增）
 
-### 八维综合评分
+每次扫描完成后自动调用 `persist_helper.save_opus(results)` 将非 NEUTRAL 结果写入 `select-sum.db → opus_snapshots`，供 meta-verdict 读取。
 
-```python
-composite = (d1 * 0.20 +   # 吸筹占比       → 80% = 满分
-             d2 * 0.15 +   # 吸筹均分       → 55-100 映射
-             d3 * 0.14 +   # 持仓控制度     → 40% = 满分
-             d4 * 0.12 +   # 卖出抑制       → 66.7% = 满分
-             d5 * 0.06 +   # 趋势稳定性
-             d6 * 0.13 +   # 信号质量
-             d7 * 0.10 +   # 集中度
-             d8 * 0.10)    # 实时活跃度
+### 运行
+
+```bash
+cd /opt/AI-SUM && python3 opus-scan/run.py --offline   # 定时任务使用
+cd /opt/AI-SUM && python3 opus-scan/run.py             # 手动（含 Gecko 联网增强）
 ```
 
-### 五级评价
+### 报告输出
 
-| 等级 | 阈值 | 含义 |
-|------|------|------|
-| **S** | ≥ 75 | 极强吸筹 |
-| **A** | ≥ 60 | 强吸筹 |
-| **B** | ≥ 45 | 中等吸筹 |
-| **C** | ≥ 30 | 弱吸筹 |
-| **D** | < 30 | 微弱信号 |
+`report/opus/opus_YYYYMMDD_HHMM.md`
 
-## bigcoin/whale-scan — V1.0 庄控预警引擎
+---
+
+## bigcoin (whale-scan) — V1.0 庄控预警引擎
 
 ### 架构
 
 ```
 bigcoin/
-├── __init__.py
-├── config.py                 # .env 读取 + 7维度阈值（回测校准）
-├── db_loader.py              # ATTACH select.db 只读
-├── concentration_profiler.py # S1 集中度（Top2/5/10/20）+ S6 锁仓
-├── drift_detector.py         # S2 持仓漂移（首末快照 Top10 对比）
-├── whale_verdict.py          # S1-S7 信号融合 → 庄控置信度
-├── report_generator.py       # 终端 + MD（report/whale/）
-└── run.py                    # 入口
+├── run.py
+├── concentration_profiler.py   # 集中度 + 锁仓
+├── drift_detector.py           # 持仓漂移检测
+├── whale_verdict.py            # 7维度裁决引擎（S1-S7）
+└── report_generator.py
 ```
 
-### 七维度信号体系（总权重 65）
+### 持久化（★ 新增）
 
-| 维度 | 信号数 | 权重 | 检测目标 |
-|------|--------|------|----------|
-| S1 集中度 | 6 | 18 | Top2/5/10/20 持仓 + DEX率 + 类型 |
-| S2 漂移 | 4 | 14 | 首末快照持仓比例被动上升 + 吸筹价格背离 |
-| S3 反向吸筹 | 4 | 8 | 低评分 + 低DEX + acc崩塌 |
-| S4 价格异动 | 3 | 10 | 暴涨 + 持续拉升 + 市值/流动性极端 |
-| S5 派发预兆 | 2 | 9 | 近期派发标签 + 48h净流出 |
-| S6 锁仓 | 2 | 4 | 合约锁仓 + 极低流通 |
-| S7 基本面 | 2 | 2 | 无市值/无Gecko数据 |
+每次扫描完成后自动调用 `persist_helper.save_whale(results)` 将非 CLEAN 结果写入 `select-sum.db → whale_snapshots`，供 meta-verdict 读取。
 
-### 置信度分级
-
-| 级别 | 阈值 | 含义 |
-|------|------|------|
-| 🔴 HIGH | ≥70% | 高危庄控，输出监控地址表 |
-| 🟠 MEDIUM | ≥50% | 中危观察 |
-| 🟡 LOW | ≥30% | 低危记录 |
-| ✅ CLEAN | <30% | 安全 |
-
-### 回测结果（195 代币）
-
-- RAVE: 96.9% 置信度 → 🔴第1名（21/23信号命中）
-- 第2名: AI 56.9% → 差距 40%
-- 🔴高危: 1 | 🟠中危: 6 | 🟡低危: 81 | ✅安全: 107
-
-### 运行方式
+### 运行
 
 ```bash
-# 全库扫描
 cd /opt/AI-SUM && python3 bigcoin/run.py
-
-# 单币诊断
-cd /opt/AI-SUM && python3 bigcoin/run.py --symbol RAVE
-
-# 合约地址诊断
-cd /opt/AI-SUM && python3 bigcoin/run.py --address 0x976... --chain bsc
 ```
 
 ### 报告输出
 
-- 全库雷达: `report/whale/whale_YYYYMMDD_HHMM.md`
-- 单币诊断: `report/whale/SYMBOL_YYYYMMDD_HHMM.md`
-- 含 95% 覆盖监控地址表 + Top20 持仓概览
+`report/whale/whale_YYYYMMDD_HHMM.md`
 
+---
 
-
-## unified-scan — 三维度统一雷达引擎
+## unified-scan — V1.2 三维度统一雷达引擎
 
 ### 架构
 
 ```
 unified-scan/
-├── __init__.py
-├── config.py                 # 全局配置（阈值/路径/代理）
-├── db_loader.py              # ATTACH select.db 只读 + 数据加载
-├── daily_scan.py             # 定时调度
-├── run.py                    # 主入口（全库扫描 + 联网增强）
-├── verdict_engine.py         # 三维度评分 + G1/G2/G3 门控 + 综合裁决
-├── report_generator.py       # 终端 + MD 雷达报
+├── run.py
+├── verdict_engine.py           # 三维度评分 + G1/G2/G3 门控
+├── report_generator.py
 └── analyzers/
-    ├── diamond_checker.py    # A1: 钻石绞杀检测
-    ├── diff_analyzer.py      # A2: 地址聚合 + A3: 新鲸下场
-    ├── cex_flow.py          # A4/D1: CEX 流向
-    ├── holder_profiler.py   # D2: 出货者画像
-    ├── drift_detector.py    # D3: 被动漂移检测
-    ├── concentration.py     # S1: 极端集中度
-    └── market_context.py    # S2: M/L 泡沫比 + S3: 买卖人数比 + S4: V/L 换手
+    ├── diamond_checker.py      # A1: 钻石绞杀检测
+    ├── diff_analyzer.py        # A2/A3: 地址聚合 + 新鲸下场
+    ├── cex_flow.py             # A4/D1: CEX 流向
+    ├── holder_profiler.py      # D2: 出货者画像
+    ├── drift_detector.py       # D3: 被动漂移检测
+    ├── concentration.py        # S1: 极端集中度
+    └── market_context.py       # S2/S3/S4: 市场结构
 ```
 
-### 信号编码体系
+### 运行
 
-| 编码 | 维度 | 权重 | 含义 |
-|------|------|------|------|
-| A1(DIAMOND) | ACC | 8 | BubbleMap 吸筹标签 |
-| A2(YELLOW/RED) | ACC | 5 | 地址聚合指标 |
-| A3 | ACC | 4 | 新鲸下场 |
-| A4(CEX流出) | ACC | 5 | CEX→链上(买入持有) |
-| D1(CEX流入) | DIST | 5 | 链上→CEX(准备卖出) |
-| D2(出货者) | DIST | 4 | 出货行为地址 |
-| D3(被动漂移) | DIST | 6 | 持仓不变价格跌 |
-| S1(极端集中) | STRUCT | 5 | Top地址持仓极度集中 |
-| S2(M/L=Nx) | STRUCT | 4 | 市值/流动性泡沫比 |
-| S3(买>卖) | STRUCT | 2 | 买卖人数比 |
-| S4(V/L=x) | 标记 | 0 | 换手效率>10x(标记不计分) |
-| G2(LP=$x) | 门控 | - | LP<$30K降级, <$10K否决 |
-| G3(死池) | 门控 | - | V/L<0.01+Vol<$100否决ACC |
-
-### 门控体系
-
+```bash
+cd /opt/AI-SUM && python3 unified-scan/run.py --offline   # 定时任务使用
 ```
-G1: DEX 质量门 — DEX真金率 < 10% → 取消 A2/A3 信号（DIAMOND 豁免）
-G2: LP 流动性门 — LP < $10K → 否决所有信号 → NEUTRAL
-                   LP < $30K → DIAMOND/STRONG_ACC 降级为 MODERATE_ACC
-G3: 死池门 — V/L < 0.01 且 Vol24h < $100 → 否决 ACC 信号
-```
-
-### 裁决规则
-
-| 判定 | 条件 |
-|------|------|
-| DIAMOND | A1(DIAMOND) 触发 |
-| WHALE_DUMP | D3+S1 联合 或 DIST≥50%+STRUCT≥60% |
-| SLOW_DISTRIBUTION | DIST≥50% |
-| STRONG_ACC | ACC≥60% |
-| MODERATE_ACC | ACC≥30% |
-| NEUTRAL | 其余 |
 
 ### 报告输出
 
-11列: `代币 | 链 | ACC% | DIST% | STRUCT% | 机构控盘 | DEX真金 | CEX变化 | LP($) | V/L | 触发信号`
+`report/unified/unified_YYYYMMDD_HHMM.md`
 
-输出: `report/unified/unified_YYYYMMDD_HHMM.md`
+---
 
-### 版本历史
+## cost-basis-scan — V1.1 成本基础扫描
 
-| 版本 | 日期 | 变更 |
+### 架构
+
+```
+cost-basis-scan/
+├── run.py
+├── config.py          # 阈值 + C1-C8 权重
+├── db_loader.py       # ATTACH 双库只读
+├── cost_profiler.py   # 四成本带分层 + VWAP + CV + C8净流量
+├── gravity_tracker.py # 重心漂移 + watchlist 跃迁检测
+├── verdict_engine.py  # 8信号评分 + 三层裁决
+└── report_generator.py
+```
+
+### 8 信号体系
+
+| 信号 | 维度 | 权重 | 含义 |
+|------|------|------|------|
+| C1 | ACC | 7 (间距>48h降至3) | 水下逆势加仓（被套仍买） |
+| C2 | ACC | 6 | 成本聚集（一致行动人，CV<0.15） |
+| C3 | ACC | 5 | 暴利区坚定持有（不卖≥50%） |
+| C4 | DIST | 7 | 暴利出逃预警 |
+| C5 | DIST | 5 | 高位派发（新地址成本≈现价+老鲸减仓） |
+| C6 | STRUCT | 5 | 流动性危机（暴利区>40%+LP<$500K） |
+| C7 | STRUCT | 4 | 成本倒挂（Top5 VWAP > 尾部 VWAP） |
+| **C8** | **DIST** | **4** | **★新 暴利区48h净流出>持仓10%** |
+
+### SQUEEZE_ACC 分层（★ V1.1 新增）
+
+| 层级 | 触发条件 | 含义 |
+|------|----------|------|
+| SQUEEZE_ACC_LOW | 历史RED + C1 | 单信号，仅水下加仓 |
+| SQUEEZE_ACC_MED | 历史RED + C1 + (C2 或 有历史对比) | 中等置信，有佐证 |
+| SQUEEZE_ACC_HIGH | 历史RED + C1 + C2 + 有历史对比 | 高置信，多信号共振 |
+
+### 三层裁决
+
+```
+第一层: watchlist 跃迁（SQUEEZE_ACC_LOW/MED/HIGH / DEATH_SPIRAL）
+第二层: 成本带组合（STEALTH_ACC / IRON_HOLD / LIQUIDITY_CRISIS / PROFIT_EXIT / BAG_PASSING）
+第三层: 通用方向（ACCUMULATING / DISTRIBUTING / NEUTRAL）
+```
+
+### 快照间距降权
+
+```
+C1 信号触发时，若当前快照与上一快照间距 > 48h
+→ C1 权重从 7 降至 3，标注 ⚠间距Xh(降权)
+原因：间距过大则加仓判定失真
+```
+
+### 持久化
+
+结果写入 `select-sum.db → cost_basis_snapshots`（原有机制）。
+
+### 运行
+
+```bash
+cd /opt/AI-SUM && python3 cost-basis-scan/run.py
+cd /opt/AI-SUM && python3 cost-basis-scan/run.py --symbol SKYAI    # 单币
+```
+
+### 报告输出
+
+`report/cost-basis/cb_YYYYMMDD_HHMM.md`
+
+---
+
+## meta-verdict — ★ 五引擎综合仲裁层
+
+### 架构
+
+```
+meta-verdict/
+├── run.py              # 主入口（仲裁 + 生命周期更新）
+├── config.py           # 积分权重配置
+├── collector.py        # 从 select-sum.db 收集 5 引擎最新结果
+├── arbitrator.py       # 加权仲裁 + 生命周期推断
+└── report_generator.py # 综合雷达报（终端 + MD）
+```
+
+### 积分权重体系
+
+| 引擎 | 信号 | 积分 |
 |------|------|------|
-| V1.1 | 2026-04-17 | S2修复(预算mcap_liq_ratio+FDV fallback) + S1放宽(合约锁仓>70%触发) |
-| V1.2 | 2026-04-17 | E1~E4: S4(V/L标记) + G2(LP门控) + G3(死池否决) + 报告新增LP/VL列 |
-| V1.0 | 2026-04-17 | 初版三维度(ACC/DIST/STRUCT)统一引擎 |
+| master-scan | DIAMOND / RED / YELLOW | +4 / +2 / +1 |
+| opus-scan | acc_confidence × 0.04 — dist_confidence × 0.04 | 动态 |
+| unified-scan | DIAMOND / RED / YELLOW | +4 / +2 / +1 |
+| whale-scan | HIGH / MEDIUM / LOW | +3 / +2 / +1 |
+| cost-basis-scan | SQUEEZE_ACC_HIGH/STEALTH_ACC(+3) / SQUEEZE_ACC_MED(+2) / SQUEEZE_ACC_LOW/IRON_HOLD(+1) / DEATH_SPIRAL(-5) / LIQUIDITY_CRISIS(-3) | 见左 |
+
+### 裁决阈值
+
+```
+综合积分 ≥ 3  → 🎯 ACC（吸筹）
+综合积分 ≤ -2 → 💀 DIST（出货）
+其余         → NEUTRAL
+```
+
+### 生命周期状态机（Phase 3）
+
+| 阶段 | 触发条件 |
+|------|----------|
+| 🔒 CONTROLLED | master DIAMOND + whale HIGH |
+| 🎯 ACCUMULATING | meta_verdict=ACC + master 非 DIAMOND |
+| 👀 WATCHLIST | master RED/YELLOW + 综合未达阈值 |
+| 💀 DISTRIBUTING | meta_verdict=DIST 或 DEATH_SPIRAL/LIQUIDITY_CRISIS |
+| ─ NEUTRAL | 无信号 |
+
+关键跃迁告警：`ACCUMULATING → DISTRIBUTING` 时记录 `⚡ 跃迁` 并写入日志。
+
+### 数据流
+
+```
+master-scan → watchlist 表
+opus-scan   → opus_snapshots 表      ┐
+whale-scan  → whale_snapshots 表     ├ 均通过 persist_helper.py 写入
+unified-scan → unified_snapshots 表  ┘  (SUM_DB_PATH from .env)
+cost-basis-scan → cost_basis_snapshots 表
+
+meta-verdict → 读取全部 5 表 → 仲裁 → meta_snapshots + token_lifecycle
+```
+
+### 运行
+
+```bash
+cd /opt/AI-SUM && python3 meta-verdict/run.py
+cd /opt/AI-SUM && python3 meta-verdict/run.py --symbol TRADOOR  # 单币
+```
+
+### 报告输出
+
+`report/meta/meta_YYYYMMDD_HHMM.md`
+
+---
+
+## select-sum.db 表结构
+
+| 表 | 写入方 | 用途 |
+|---|--------|------|
+| `watchlist` | master-scan | DIAMOND/RED/YELLOW 历史状态，cost-basis 读取做跃迁联动 |
+| `cost_basis_snapshots` | cost-basis-scan | 成本快照历史，meta-verdict 读取 |
+| `opus_snapshots` | persist_helper.save_opus | opus 扫描结果，meta-verdict 读取 |
+| `whale_snapshots` | persist_helper.save_whale | whale 扫描结果，meta-verdict 读取 |
+| `unified_snapshots` | persist_helper.save_unified（待注入） | unified 扫描结果 |
+| `meta_snapshots` | meta-verdict | 仲裁结果历史 |
+| `token_lifecycle` | meta-verdict | 代币生命周期状态机 |
+
+---
 
 ## 版本历史
 
 | 版本 | 日期 | 关键变更 |
 |------|------|----------|
-| **V4.4** | **2026-04-10** | v7 过滤门：LP<$50K/V/L>10 否决 + FDV/LP>500 降级×0.8 + 48h cutoff 改 max(tx.date) + D5 新代币 surge=999 封顐50 |
-| V4.3 | 2026-04-10 | Gecko 市场结构集成：classify_review 新增 FDV/LP、V/L、洗盘标签 + MD 报告第 8 节「市场结构异常」（市值虚高表+疑似洗盘表）+ 谨慎复核降级规则 |
-| **V8.5** | **2026-04-17** | LP/FDV-LP/V-L 三指标升级: 报告新增 LP($)/FDV-LP/V-L 列(8列→11列) |
-| **V8.4** | **2026-04-09** | A阈值适配10h周期(3%/8%)、C RED=3/4+cond4强制、cond2收紧至2%、全局DEX门10%(防空投)、ARIA回归RED |
-| V8.3 | 2026-04-09 | hop2二跳+entity聚簇穿透DEX率、近20滑动窗口中位数、阈值/隐庄配置化(.env)、双85%默认阈值 |
-| V8.2 | 2026-04-08 | master-scan 生产版：钻石绞杀区(模式E)、V8.2 三指标(机构控盘/隐庄/DEX真金率)、统一8列报告格式 |
-| **V5.1.2** | 2026-04-07 | `accumulation_scan_v3.py` 适配 `.env`，修复 Linux 兼容 |
-| **V5.0** | 2026-04-03 | 全新多快照时序分析：SnapshotDiff、A/B/C 三模式、Watchlist 追踪 |
-| v4.2.2 | 2026-03-27 | CMC 代理固定 `socks5://127.0.0.1:18000` |
-| v4.0 | 2026-03-19 | 8维评分(+d8)、d5时间衰减、cluster_ratio |
+| **meta-verdict V1.0** | **2026-04-29** | 五引擎仲裁层上线；token_lifecycle 生命周期状态机；验证：122代币→26吸筹，TRADOOR综合7.5分 |
+| **cost-basis-scan V1.1** | **2026-04-29** | SQUEEZE_ACC 三级分层(LOW/MED/HIGH)；C8 暴利区48h净流出信号；C1快照间距>48h降权 |
+| **persist_helper** | **2026-04-29** | opus/whale 引擎持久化注入；读取 .env SUM_DB_PATH 避免路径分裂 |
+| **Crontab 定时** | **2026-04-29** | 6引擎每天00:xx/12:xx双轮，间隔10分钟；Logrotate每周/10M/4份 |
+| cost-basis-scan V1.0 | 2026-04-28 | 8信号成本基础扫描框架上线 |
+| **V8.5** | 2026-04-17 | LP/FDV-LP/V-L 三指标升级 |
+| **V8.4** | 2026-04-09 | A阈值适配10h周期、C RED强制条件、全局DEX门10% |
+| V8.3 | 2026-04-09 | hop2二跳+entity聚簇穿透DEX率 |
+| V8.2 | 2026-04-08 | 钻石绞杀区(E模式)、V8.2三指标 |
+| V5.0 | 2026-04-03 | 全新多快照时序分析：SnapshotDiff、A/B/C三模式 |
 
-## opus-scan 版本历史
+---
 
-| 版本 | 日期 | 关键变更 |
-|------|------|----------|
-| **V1.3** | **2026-04-17** | LP/VL/FDV-LP 增强: vl_ratio/mcap_liq_ratio 字段 + G2门控(LP<$10K否决/$30K降级) + G3死池(V/L<0.01+Vol<$100否决) |
-| **V1.2** | **2026-04-13** | 修复 `cex_declining` 方向错误（CEX流出→出货分，实为吸筹信号）→ 替换为 `cex_inflow_heavy`（CEX流入>5%且斜率>0.3）；MIXED代币从吸筹/出货榜剔除，新增🟡混合信号区块（终端+MD）|
-| V1.1 | 2026-04-13 | CEX流向信号：`cex_outflow`(acc w3) + `cex_inflow`(dist w2)；报告吸筹/出货双榜新增ΔCEX列 |
-| V1.0 | 2026-04-12 | 初版双维度评分引擎上线：acc 9信号 + dist 11信号，全快照时序分析 |
+## 已知限制与优化方向
 
-## opus-scan V1.1 双维度诊断引擎
-
-### 架构概述
-
-基于全部历史快照时序分析，对每个代币输出 **吸筹置信度** 和 **出货置信度** 双评分。
-
-### 吸筹信号体系 (acc, 9信号, 总权重 21)
-
-| # | 信号名 | 权重 | 触发条件 |
-|---|--------|------|----------|
-| 1 | acc_trend_up | 3 | acc_cnt 斜率 > 0 |
-| 2 | acc_hold_growing | 3 | acc_hold 增长 > 阈值 |
-| 3 | dex_rate_high | 3 | DEX真金率 > 50% |
-| 4 | strong_buyers | 2 | 强买入者 ≥ 3 |
-| 5 | no_major_seller | 2 | 出货者持仓 < 5% |
-| 6 | net_inflow_positive | 2 | 吸筹者净流入全正 |
-| 7 | **cex_outflow** | **3** | **CEX占比下降>3% 且 斜率<-0.2（交易所流出=持有意图）** |
-| 8 | price_not_pumped | 1 | 24h价格未暴涨 |
-| 9 | buy_sell_person_ratio | 2 | 买/卖人数比 ≥ 0.8 |
-
-### 出货信号体系 (dist, 12信号, 总权重 24)
-
-| # | 信号名 | 权重 | 触发条件 |
-|---|--------|------|----------|
-| 1 | cex_declining | 3 | CEX持仓下降 > 阈值 |
-| 2 | major_seller | 3 | 出货者持仓 ≥ 1% |
-| 3 | fake_whales | 3 | 假鲸鱼 ≥ 2 |
-| 4 | distribution_48h | 2 | 48h派发者 ≥ 3 |
-| 5 | acc_hold_stagnant | 2 | acc增长<5% 且 斜率<0.1 |
-| 6 | seller_hold_heavy | 2 | 出货者持仓 ≥ 5% |
-| 7 | price_rising_cover | 1 | 价格上涨>10% 掩护出货 |
-| 8 | acc_insufficient | 1 | 吸筹者持仓 < 5% |
-| 9 | volume_declining | 2 | 24h量缩 |
-| 10 | lp_thin | 1 | LP不足 |
-| 11 | price_7d_drop | 1 | 7d价格下跌 |
-| 12 | **cex_inflow** | **2** | **CEX占比上升>3% 且 斜率>0.2（代币流入交易所=出货前兆）** |
-
-### V1.1 CEX 流向信号设计原理
-
-```
-CEX 地址持仓占比持续下降
-  → 代币从交易所提到个人钱包
-  → 持有者意图长期持有（否则留交易所更方便卖）
-  → = 吸筹行为的最强结构性证据
-
-CEX 地址持仓占比持续上升
-  → 代币被充入交易所
-  → 持有者准备卖出
-  → = 出货前兆信号
-```
-
-实测验证（AGT/IRYS/GWEI 三代币 45+ 快照）：
-- AGT: CEX 13.5%→09.0% (Δ-4.5%), acc 7.6%→14.4% — 完美反向相关
-- IRYS: CEX ±0.6%, 信号不触发 — 零影响
-- GWEI: CEX 14.2%→19.3% (Δ+5.1%), 价格冲高回落 — 出货前兆确认
-
-### 运行方式
-
-```bash
-# VPS 全库扫描
-cd /opt/AI-SUM && python3 opus-scan/run.py
-
-# 单币诊断
-cd /opt/AI-SUM && python3 opus-scan/run.py --symbol AGT
-```
+| 优先级 | 项目 | 说明 |
+|--------|------|------|
+| P2 | unified-scan 持久化注入 | `save_unified` 注入已在 `persist_helper.py` 中实现，待 `unified-scan/run.py` 注入 |
+| P2 | master-scan 降级逻辑 | 连续 N 次无信号自动从 DIAMOND 降级为 YELLOW |
+| P3 | 回测验证 | 对历史 watchlist 代币统计信号后 7d/14d/30d 价格变化 |
+| P3 | opus CEX 绝对量级门控 | CEX delta abs > 0.5% 才计入，防小市值虚假信号 |

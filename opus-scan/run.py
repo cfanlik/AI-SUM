@@ -86,6 +86,11 @@ def run_full_scan(top_n: int = 10, offline: bool = False, proxy: str = None):
         print_leaderboard(results, elapsed)
         path = save_md_leaderboard(results)
         print(f"  报告已保存: {path}")
+        try:
+            import sys as _sys; _sys.path.insert(0, "/opt/AI-SUM")
+            from persist_helper import save_opus; save_opus(results)
+        except Exception as _e:
+            print(f"  [persist] opus 保存失败: {_e}")
         conn.close()
         return results
 
@@ -134,7 +139,11 @@ def run_full_scan(top_n: int = 10, offline: bool = False, proxy: str = None):
 
     path = save_md_leaderboard(final_results)
     print(f"  报告已保存: {path}")
-
+    try:
+        import sys as _sys; _sys.path.insert(0, "/opt/AI-SUM")
+        from persist_helper import save_opus; save_opus(final_results)
+    except Exception as _e:
+        print(f"  [persist] opus保存失败: {_e}")
     conn.close()
     return final_results
 

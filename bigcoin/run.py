@@ -97,6 +97,12 @@ def run_full_scan(top_n: int = 20):
     # MD 报告
     path = save_md_radar(results)
     print(f"\n  报告已保存: {path}")
+    try:
+        import sys as _sys; _sys.path.insert(0, "/opt/AI-SUM")
+        from persist_helper import save_whale; save_whale(results)
+    except Exception as _e:
+        print(f"  [persist] whale保存失败: {_e}")
+
 
     return results
 
