@@ -36,7 +36,8 @@ gecko_market_data ──┼── src.db ──┤  opus-scan    → opus_snapsh
 │   ├── arbitrator.py    # 加权仲裁 + 出货抑制 + 生命周期
 │   ├── trend_analyzer.py# 跨轮趋势分析
 │   ├── conflict_detector.py  # 引擎矛盾检测(5规则)
-│   └── report_generator.py   # 终端+MD 双输出(7区块)
+│   ├── report_generator.py   # 终端+MD 双输出(7区块)
+│   └── history_report.py     # 长期分析报告（回测+迁移+时序+画像）
 ├── persist_helper.py    # 引擎持久化注入（opus/whale/unified）
 ├── select-sum.db        # 分析数据库
 ├── report/              # 报告输出目录
@@ -45,7 +46,8 @@ gecko_market_data ──┼── src.db ──┤  opus-scan    → opus_snapsh
 │   ├── unified/         # unified-scan 报告
 │   ├── whale/           # whale-scan 报告
 │   ├── cost-basis/      # cost-basis-scan 报告
-│   └── meta/            # meta-verdict 综合报告
+│   ├── meta/            # meta-verdict 综合报告
+│   └── history/         # history_report 长期分析报告
 └── log/                 # 运行日志
 ```
 
@@ -188,6 +190,20 @@ gecko_market_data ──┼── src.db ──┤  opus-scan    → opus_snapsh
 - `meta_snapshots`: 全部有信号代币（含 NEUTRAL），含 5 列分项积分
 - `token_lifecycle`: 生命周期状态 + 跃迁记录
 
+### history_report.py — 长期分析报告
+
+5 模块融合报告，输出 `report/history/history_YYYYMMDD.md`：
+
+| 模块 | 功能 |
+|------|------|
+| 信号回测 | 首次信号时间(meta_snapshots/unified_results) × 7d/14d/至今收益，过滤当天信号 |
+| Holder 迁移 | 7d + 14d 留存率对比、遗漏检测(Top10Δ复合条件)、底部吸筹识别 |
+| 积分时序 | 斜率/σ/连续ACC/引擎稳定性，σ<0.1平序列强制归零 |
+| 信号×收益 | 按综合分/引擎数分桶胜率，样本<5标注⚠ |
+| 单币画像 | Top 10 ACC 完整档案，含 vs 昨天Δ对比 |
+
+写入 `token_history` 表持久化（含无信号但有迁移数据的代币）。
+
 ---
 
 ## select-sum.db 表结构
@@ -201,6 +217,7 @@ gecko_market_data ──┼── src.db ──┤  opus-scan    → opus_snapsh
 | `cost_basis_snapshots` | cost-basis-scan | verdict, vwap, gecko_price, acc_pct | 成本分层 |
 | `meta_snapshots` | meta-verdict | meta_score, meta_verdict, stage, 5×分项积分 | 仲裁结果 |
 | `token_lifecycle` | meta-verdict | current_stage, prev_stage, transition | 生命周期 |
+| `token_history` | history_report | computed_date, signal_first_seen, price_*_ret, retention_*, score_slope | 长期跟踪 |
 
 ---
 
@@ -218,6 +235,9 @@ cd /opt/AI-SUM && python3 meta-verdict/run.py
 # 单币诊断
 cd /opt/AI-SUM && python3 meta-verdict/run.py --symbol GWEI
 cd /opt/AI-SUM && python3 cost-basis-scan/run.py --symbol SKYAI
+
+# 长期分析报告
+cd /opt/AI-SUM && python3 meta-verdict/history_report.py
 ```
 
 ---
@@ -226,6 +246,8 @@ cd /opt/AI-SUM && python3 cost-basis-scan/run.py --symbol SKYAI
 
 | 版本 | 日期 | 关键变更 |
 |------|------|----------|
+| **history_report V2.0** | **2026-05-03** | 回测时间基准修复+遗漏检测Top10Δ复合条件+斜率平序列归零+14d校验+单币画像增强+vs昨天Δ+token_history扩展 |
+| **history_report V1.0** | **2026-05-03** | 4模块融合: 信号回测+holder迁移+积分时序+信号×收益 |
 | **meta-verdict V2.0** | **2026-05-03** | EXPIRED纳入+出货抑制+分项积分持久化+矛盾检测(5规则)+全量保存+趋势分析 |
 | **meta-verdict V1.5** | **2026-05-03** | P1: 趋势分析+引擎健康自检+报告重构(7区块)+unified出货映射 |
 | **meta-verdict V1.0** | 2026-04-29 | 五引擎仲裁层上线; token_lifecycle; 122代币→26吸筹 |

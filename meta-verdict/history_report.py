@@ -259,15 +259,26 @@ def migration_analysis(src, sumdb):
 
         r14 = _calc_retention(src, addr, latest, old14)
 
+        # P4: 14d 有效性校验 — old14 和 old7 差距 < 3天时标记不可靠
+        r14_reliable = True
+        if r14 and old14 and old7:
+            try:
+                gap_days = abs((datetime.strptime(old7[:19], "%Y-%m-%d %H:%M:%S")
+                               - datetime.strptime(old14[:19], "%Y-%m-%d %H:%M:%S")).days)
+                if gap_days < 3:
+                    r14_reliable = False
+            except Exception:
+                pass
+
         row = {
             "symbol": sym, "addr": addr,
             "retention_7d": r7["retention"],
             "entered_7d": r7["entered"], "exited_7d": r7["exited"],
             "top10_now": r7["top10_now"], "top10_delta_7d": r7["top10_delta"],
             "acc_now": r7["acc_now"], "acc_delta_7d": r7["acc_delta"],
-            "retention_14d": r14["retention"] if r14 else None,
-            "top10_delta_14d": r14["top10_delta"] if r14 else None,
-            "acc_delta_14d": r14["acc_delta"] if r14 else None,
+            "retention_14d": r14["retention"] if r14 and r14_reliable else None,
+            "top10_delta_14d": r14["top10_delta"] if r14 and r14_reliable else None,
+            "acc_delta_14d": r14["acc_delta"] if r14 and r14_reliable else None,
             "old_snap": old7[:10], "new_snap": latest[:10],
             "meta_verdict": meta_verdict_map.get(sym, ""),
         }
@@ -317,17 +328,30 @@ def migration_analysis(src, sumdb):
             r14_str = f"{r['retention_14d']:.0f}%" if r["retention_14d"] is not None else "—"
             lines.append(f"| {r['symbol']} | {r['retention_7d']:.0f}% | {r14_str} | {r['exited_7d']} | {r['top10_delta_7d']:+.1f}% | {meaning} |")
 
-    # P-ENRICH: 遗漏检测 — 留存<50% 但 meta 未标 DIST
-    missed = [r for r in results if r["retention_7d"] < 50 and r["symbol"]
-              and r["meta_verdict"] not in ("DIST", "")]
-    if missed:
-        lines += ["", "### 🚨 遗漏检测（留存<50% 但 meta 未标 DIST）", "",
+    # P1: 遗漏检测 — 留存<50% 且 Top10Δ<0 但 meta 未标 DIST（排除底部吸筹假阳性）
+    real_missed = [r for r in results if r["retention_7d"] < 50 and r["symbol"]
+                   and r["meta_verdict"] not in ("DIST", "")
+                   and r["top10_delta_7d"] < 0]  # Top10在减少才是真出货
+    bottom_acc = [r for r in results if r["retention_7d"] < 50 and r["symbol"]
+                  and r["meta_verdict"] not in ("DIST", "")
+                  and r["top10_delta_7d"] >= 0]  # Top10在增加=底部吸筹
+    if real_missed:
+        lines += ["", "### 🚨 遗漏检测（留存<50% + Top10下降 但 meta≠DIST）", "",
                   "| 代币 | 7d留存% | Top10Δ | meta判定 | 建议 |",
                   "|------|---------|--------|---------|------|"]
-        for r in missed[:10]:
+        for r in real_missed[:10]:
             lines.append(
                 f"| {r['symbol']} | {r['retention_7d']:.0f}% "
                 f"| {r['top10_delta_7d']:+.1f}% | {r['meta_verdict']} | 应标记 DIST |"
+            )
+    if bottom_acc:
+        lines += ["", "### 💡 底部吸筹（留存<50% 但 Top10 增加）", "",
+                  "| 代币 | 7d留存% | Top10Δ | meta判定 | 含义 |",
+                  "|------|---------|--------|---------|------|"]
+        for r in bottom_acc[:10]:
+            lines.append(
+                f"| {r['symbol']} | {r['retention_7d']:.0f}% "
+                f"| {r['top10_delta_7d']:+.1f}% | {r['meta_verdict']} | 散户换手，大户加仓 |"
             )
 
     lines.append("")
@@ -362,6 +386,10 @@ def score_timeseries(sumdb):
 
         # 波动
         sigma = statistics.stdev(scores) if len(scores) >= 2 else 0
+
+        # P2: 平序列修复 — σ < 0.1 时 slope 强制归零
+        if sigma < 0.1:
+            slope = 0.0
 
         # 连续 ACC 轮次（从末尾数）
         consec = 0
@@ -491,7 +519,9 @@ def signal_price_corr(backtest_results, sumdb):
             return f"{sum(1 for x in lst if x > 0) / len(lst) * 100:.0f}%" if lst else "—"
         def avg(lst):
             return f"{sum(lst) / len(lst):+.1f}%" if lst else "—"
-        lines.append(f"| {name} | {len(grp)} | {wr(r7)} | {avg(r7)} | {wr(rnow)} | {avg(rnow)} |")
+        # P3: 样本 < 5 时标注
+        note = " ⚠" if len(grp) < 5 else ""
+        lines.append(f"| {name}{note} | {len(grp)} | {wr(r7)} | {avg(r7)} | {wr(rnow)} | {avg(rnow)} |")
 
     # 按引擎数分桶
     eng_buckets = [("≥4", 4, 99), ("3", 3, 3), ("2", 2, 2), ("1", 1, 1)]
@@ -558,6 +588,9 @@ def save_token_history(sumdb, bt_data, mig_data, ts_data):
     ts_map = {r["symbol"]: r for r in ts_data}
 
     count = 0
+    written_addrs = set()
+
+    # 1. 写入有回测数据的代币
     for bt in bt_data:
         addr = bt.get("addr", "")
         sym = bt["symbol"]
@@ -583,6 +616,36 @@ def save_token_history(sumdb, bt_data, mig_data, ts_data):
                 ts.get("slope"), ts.get("sigma"), ts.get("consec_acc", 0),
             ))
             count += 1
+            written_addrs.add(addr)
+        except Exception:
+            pass
+
+    # P6: 2. 写入有迁移数据但无回测数据的代币
+    for mig in mig_data:
+        addr = mig.get("addr", "")
+        if addr in written_addrs or not mig.get("symbol"):
+            continue
+        sym = mig["symbol"]
+        ts = ts_map.get(sym, {})
+        try:
+            sumdb.execute("""
+                INSERT OR REPLACE INTO token_history
+                (computed_date, token_address, token_symbol, signal_first_seen,
+                 signal_level, entry_price, price_7d_ret, price_14d_ret, price_now_ret,
+                 retention_7d, retention_14d, whale_entered, whale_exited,
+                 top10_pct, top10_delta, acc_count, acc_delta,
+                 score_slope, score_sigma, consec_acc)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                today, addr, sym, None,
+                'NONE', 0, None, None, None,
+                mig.get("retention_7d"), mig.get("retention_14d"),
+                mig.get("entered_7d", 0), mig.get("exited_7d", 0),
+                mig.get("top10_now"), mig.get("top10_delta_7d"),
+                mig.get("acc_now", 0), mig.get("acc_delta_7d", 0),
+                ts.get("slope"), ts.get("sigma"), ts.get("consec_acc", 0),
+            ))
+            count += 1
         except Exception:
             pass
 
@@ -595,7 +658,6 @@ def save_token_history(sumdb, bt_data, mig_data, ts_data):
 # ══════════════════════════════════════════════════════════════
 def coin_profile(bt_data, mig_data, ts_data, sumdb):
     """Top 10 ACC 代币的完整画像"""
-    # 找 ACC 代币中 meta_score 最高的
     meta_map = {}
     try:
         for r in sumdb.execute(
@@ -617,14 +679,45 @@ def coin_profile(bt_data, mig_data, ts_data, sumdb):
     ts_map = {r["symbol"]: r for r in ts_data}
     bt_map = {r["symbol"]: r for r in bt_data}
 
+    # P7: 读取昨天 token_history
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    yday_map = {}
+    try:
+        for r in sumdb.execute(
+            "SELECT token_symbol, price_now_ret, retention_7d FROM token_history WHERE computed_date=?",
+            (yesterday,)
+        ):
+            yday_map[r["token_symbol"]] = {"ret": r["price_now_ret"], "retention": r["retention_7d"]}
+    except Exception:
+        pass
+
     lines = ["## 🎯 Top ACC 单币画像", ""]
+    if yday_map:
+        lines.append(f"> vs 昨日对比: {yesterday} | {len(yday_map)} 个代币有历史数据")
+    else:
+        lines.append("> vs 昨日: 无历史数据（首次运行，明日开始生效）")
+    lines.append("")
 
     for sym, meta in acc_tokens[:10]:
         mig = mig_sym_map.get(sym, {})
         ts = ts_map.get(sym, {})
         bt = bt_map.get(sym, {})
+        yday = yday_map.get(sym, {})
 
-        lines.append(f"### {sym}")
+        # P5: 留存异常标注
+        warnings = []
+        retention_7d = mig.get('retention_7d', 0)
+        if retention_7d < 60 and retention_7d > 0:
+            warnings.append(f"⚠ 7d留存仅{retention_7d:.0f}%")
+        if mig.get('top10_delta_7d', 0) < -5:
+            warnings.append(f"⚠ Top10Δ{mig.get('top10_delta_7d',0):+.1f}%")
+        if mig.get('acc_delta_7d', 0) < -5:
+            warnings.append(f"⚠ 吸筹数{mig.get('acc_delta_7d',0):+d}")
+
+        title = f"### {sym}"
+        if warnings:
+            title += " " + " ".join(warnings)
+        lines.append(title)
         lines.append("")
         lines.append("| 维度 | 数据 |")
         lines.append("|------|------|")
@@ -632,14 +725,31 @@ def coin_profile(bt_data, mig_data, ts_data, sumdb):
         lines.append(f"| 引擎命中 | {meta.get('engine_hits', 0)} |")
         lines.append(f"| 生命周期 | {meta.get('stage', '—')} |")
 
+        # P5: 增加完整价格数据
         if bt:
             lines.append(f"| 首次信号日 | {bt.get('date', '—')} |")
             lines.append(f"| 入场价 | ${bt.get('entry', 0):.4f} |")
+            lines.append(f"| 现价 | ${bt.get('price_now', 0):.4f} |")
+            r7 = bt.get('ret_7d')
+            r14 = bt.get('ret_14d')
             ret_now = bt.get('ret_now')
-            lines.append(f"| 至今收益 | {ret_now:+.1f}% |" if ret_now is not None else "| 至今收益 | — |")
+            lines.append(f"| 7d 收益 | {r7:+.1f}% |" if r7 is not None else "| 7d 收益 | — |")
+            lines.append(f"| 14d 收益 | {r14:+.1f}% |" if r14 is not None else "| 14d 收益 | — |")
+            ret_str = f"{ret_now:+.1f}%" if ret_now is not None else "—"
+            # P7: vs 昨天收益对比
+            if yday.get("ret") is not None and ret_now is not None:
+                delta_ret = ret_now - yday["ret"]
+                ret_str += f" (Δ{delta_ret:+.1f}%)"
+            lines.append(f"| 至今收益 | {ret_str} |")
+            lines.append(f"| 持有天数 | {bt.get('days_held', 0)}d |")
 
         if mig:
-            lines.append(f"| 7d 留存率 | {mig.get('retention_7d', 0):.0f}% |")
+            ret_7d_str = f"{retention_7d:.0f}%"
+            # P7: vs 昨天留存对比
+            if yday.get("retention") is not None:
+                delta_ret = retention_7d - yday["retention"]
+                ret_7d_str += f" (Δ{delta_ret:+.0f}%)"
+            lines.append(f"| 7d 留存率 | {ret_7d_str} |")
             r14 = mig.get('retention_14d')
             lines.append(f"| 14d 留存率 | {r14:.0f}% |" if r14 is not None else "| 14d 留存率 | — |")
             lines.append(f"| Top10 集中度 | {mig.get('top10_now', 0):.1f}% (Δ{mig.get('top10_delta_7d', 0):+.1f}%) |")
