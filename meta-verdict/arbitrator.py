@@ -41,7 +41,7 @@ class MetaResult:
     cb_signals:     str   = ""
 
     # 生命周期
-    stage: str = ""   # NEW / ACCUMULATING / CONTROLLED / DISTRIBUTING / DEAD
+    stage: str = ""   # ACCUMULATING / CONTROLLED / DISTRIBUTING / WATCHLIST / NEUTRAL
 
 
 def arbitrate(data: TokenEngineData) -> MetaResult:
@@ -76,8 +76,11 @@ def arbitrate(data: TokenEngineData) -> MetaResult:
     r.opus_score = round(data.opus_acc_conf * config.OPUS_ACC_SCALE
                          - data.opus_dist_conf * config.OPUS_DIST_SCALE, 2)
 
-    # ── unified-scan 积分 ──
-    r.unified_score = config.UNIFIED_SCORE.get(data.unified_signal, 0)
+    # ── unified-scan 积分（吸筹方向 + 出货方向）──
+    if data.unified_signal in config.UNIFIED_DIST_SCORE:
+        r.unified_score = config.UNIFIED_DIST_SCORE[data.unified_signal]
+    else:
+        r.unified_score = config.UNIFIED_SCORE.get(data.unified_signal, 0)
 
     # ── whale-scan 积分 ──
     whale_map = {
@@ -90,9 +93,8 @@ def arbitrate(data: TokenEngineData) -> MetaResult:
     # ── cost-basis-scan 积分 ──
     r.cb_score = config.CB_SCORE.get(data.cb_verdict, 0)
 
-
-    # ── [P0.3] master/unified 信号去重 ──
-    if r.master_signal and r.unified_signal == r.master_signal:
+    # ── master/unified DIAMOND 信号去重（仅 DIAMOND 同源去重）──
+    if r.master_signal == "DIAMOND" and r.unified_signal == "DIAMOND":
         r.unified_score = round(r.unified_score * 0.5, 2)
 
     # ── 综合积分 ──
