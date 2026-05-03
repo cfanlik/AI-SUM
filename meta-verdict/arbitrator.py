@@ -90,6 +90,11 @@ def arbitrate(data: TokenEngineData) -> MetaResult:
     # ── cost-basis-scan 积分 ──
     r.cb_score = config.CB_SCORE.get(data.cb_verdict, 0)
 
+
+    # ── [P0.3] master/unified 信号去重 ──
+    if r.master_signal and r.unified_signal == r.master_signal:
+        r.unified_score = round(r.unified_score * 0.5, 2)
+
     # ── 综合积分 ──
     r.meta_score = round(
         r.master_score + r.opus_score + r.unified_score + r.whale_score + r.cb_score, 2

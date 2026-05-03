@@ -184,6 +184,13 @@ def run_full_scan(offline: bool = False) -> list[UnifiedResult]:
     conn.close()
 
     print(f"\n  持久化完成: unified_results + daily_summary")
+    # ── [P0.1] 持久化到 select-sum.db ──
+    try:
+        import sys as _sys; _sys.path.insert(0, "/opt/AI-SUM")
+        from persist_helper import save_unified; save_unified(results)
+    except Exception as _e:
+        print(f"  [persist] unified 保存失败: {_e}")
+
     if new_alerts:
         print(f"  新增预警: {', '.join(new_alerts)}")
 

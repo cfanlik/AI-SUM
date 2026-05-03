@@ -3,6 +3,7 @@ meta-verdict 数据收集器
 从 select-sum.db 读取 5 个引擎的最新扫描结果
 """
 from __future__ import annotations
+import os
 import sqlite3
 import logging
 from dataclasses import dataclass, field
@@ -155,23 +156,27 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
         tokens[k].opus_verdict   = r["verdict"] or ""
         tokens[k].engine_hits += 1
 
-    # ── 3. unified-scan ──
+    # ── 3. unified-scan (读 unified_results 表) ──
     rows = conn.execute("""
         SELECT u.*
-        FROM unified_snapshots u
+        FROM unified_results u
         INNER JOIN (
             SELECT chain, token_address, MAX(scan_time) AS latest
-            FROM unified_snapshots GROUP BY chain, token_address
+            FROM unified_results GROUP BY chain, token_address
         ) m ON u.chain=m.chain AND u.token_address=m.token_address AND u.scan_time=m.latest
-        WHERE u.signal_level != ''
+        WHERE u.verdict NOT IN ('NEUTRAL', '')
     """).fetchall()
     for r in rows:
         k = key(r["chain"], r["token_address"])
         if k not in tokens:
             tokens[k] = TokenEngineData(chain=r["chain"], token_address=r["token_address"],
                                          token_symbol=r["token_symbol"] or "?")
-        tokens[k].unified_signal = r["signal_level"] or ""
-        tokens[k].unified_score  = r["score"] or 0
+        # unified_results 用 verdict 字段 (DIAMOND/STRONG_ACC/MODERATE_ACC/SLOW_DISTRIBUTION)
+        verdict = r["verdict"] or ""
+        signal_map = {"DIAMOND": "DIAMOND", "STRONG_ACC": "RED", "MODERATE_ACC": "YELLOW",
+                      "WHALE_DUMP": "WHALE_DUMP", "SLOW_DISTRIBUTION": "SLOW_DIST"}
+        tokens[k].unified_signal = signal_map.get(verdict, verdict)
+        tokens[k].unified_score  = r["acc_score"] or 0
         tokens[k].engine_hits += 1
 
     # ── 4. whale-scan ──
@@ -216,6 +221,26 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
         tokens[k].cb_windfall_pct = r["windfall_pct"] or 0
         tokens[k].cb_signals      = r["triggered_signals"] or ""
         tokens[k].engine_hits += 1
+
+
+    # ── [P0.2] 价格补全: 从 gecko_market_data 读取 ──
+    try:
+        src_db = os.environ.get("SRC_DB_PATH", "/opt/select-coin/data/select.db")
+        conn.execute(f"ATTACH '{src_db}' AS src")
+        for k, t in tokens.items():
+            if t.cb_gecko_price == 0:
+                row = conn.execute(
+                    "SELECT price_usd FROM src.gecko_market_data "
+                    "WHERE chain=? AND token_address=? AND price_usd>0 "
+                    "ORDER BY scan_time DESC LIMIT 1",
+                    (t.chain, t.token_address)
+                ).fetchone()
+                if row:
+                    t.cb_gecko_price = row[0]
+        conn.execute("DETACH src")
+    except Exception as _e:
+        import logging
+        logging.getLogger("meta-verdict").warning(f"价格补全失败: {_e}")
 
     return list(tokens.values())
 
