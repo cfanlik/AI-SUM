@@ -97,6 +97,16 @@ def arbitrate(data: TokenEngineData) -> MetaResult:
     if r.master_signal == "DIAMOND" and r.unified_signal == "DIAMOND":
         r.unified_score = round(r.unified_score * 0.5, 2)
 
+    # ── 出货方向 master 抑制 ──
+    # 当 opus/unified 明确出货时，master 正分不应抵消出货积分
+    is_dist_signal = (
+        data.opus_verdict == "SLOW_DISTRIBUTION"
+        or data.unified_signal in ("SLOW_DIST", "WHALE_DUMP")
+        or data.cb_verdict in ("DEATH_SPIRAL", "LIQUIDITY_CRISIS")
+    )
+    if is_dist_signal and r.master_score > 0:
+        r.master_score = 0
+
     # ── 综合积分 ──
     r.meta_score = round(
         r.master_score + r.opus_score + r.unified_score + r.whale_score + r.cb_score, 2

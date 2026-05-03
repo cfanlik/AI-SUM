@@ -60,8 +60,9 @@ def main():
     acc_list, dist_list = run_arbitration(all_data)
     all_results = acc_list + dist_list
 
-    # 保存仲裁结果
-    for r in all_results:
+    # 保存全部有信号代币（含 NEUTRAL）— 用于审计和趋势分析
+    all_arbitrated = [arbitrate(d) for d in all_data]
+    for r in all_arbitrated:
         save_meta_result(conn, {
             "scan_time":      scan_time,
             "chain":          r.chain,
@@ -76,7 +77,16 @@ def main():
             "whale_level":    r.whale_level,
             "cb_verdict":     r.cb_verdict,
             "stage":          r.stage,
+            "master_score":   r.master_score,
+            "opus_score":     r.opus_score,
+            "unified_score":  r.unified_score,
+            "whale_score":    r.whale_score,
+            "cb_score":       r.cb_score,
         })
+
+    # ── 矛盾检测 ──
+    from conflict_detector import detect_conflicts
+    conflicts = detect_conflicts(all_arbitrated, all_data)
 
     # ── 趋势分析（对比上一轮）──
     trend = analyze_trend(conn, all_results, scan_time)
@@ -89,8 +99,8 @@ def main():
     # 更新生命周期表
     _update_lifecycle(conn, all_results, scan_time)
 
-    # 生成报告（含趋势+健康）
-    generate_report(acc_list, dist_list, len(all_data), scan_time, trend, health)
+    # 生成报告（含趋势+健康+矛盾）
+    generate_report(acc_list, dist_list, len(all_data), scan_time, trend, health, conflicts)
     conn.close()
 
 

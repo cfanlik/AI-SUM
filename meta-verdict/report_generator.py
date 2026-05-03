@@ -26,6 +26,7 @@ def generate_report(
     scan_time: str,
     trend: TrendReport = None,
     health: list[dict] = None,
+    conflicts: list = None,
 ) -> str:
     """终端 + MD 双输出"""
 
@@ -84,8 +85,14 @@ def generate_report(
             print(f"  {r.token_symbol:<8} {r.meta_score:>5.1f} {r.stage:<12} "
                   f"unified={r.unified_signal} cb={r.cb_verdict}")
 
+    # ── 终端: 矛盾 ──
+    if conflicts:
+        print(f"\n⚠ 引擎矛盾 — {len(conflicts)} 个")
+        for c in conflicts[:10]:
+            print(f"  [{c.rule}] {c.symbol:<10} {c.detail}")
+
     # ── Markdown ──
-    md = _build_md(acc_list, dist_list, all_count, scan_time, trend, health)
+    md = _build_md(acc_list, dist_list, all_count, scan_time, trend, health, conflicts)
     report_dir = Path(config.REPORT_DIR)
     report_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M")
@@ -102,6 +109,7 @@ def _build_md(
     scan_time: str,
     trend: TrendReport = None,
     health: list[dict] = None,
+    conflicts: list = None,
 ) -> str:
     lines = [
         f"# 🔮 meta-verdict 五引擎综合仲裁 — {scan_time}",
@@ -235,6 +243,16 @@ def _build_md(
                 f"| {r.unified_score:.0f} | {r.whale_score:.0f} "
                 f"| {r.cb_score:.0f} | {r.engine_hits} |"
             )
+        lines.append("")
+
+    # ── 7. 引擎矛盾 ──
+    if conflicts:
+        lines.append(f"## ⚠ 引擎矛盾 — {len(conflicts)} 个")
+        lines.append("")
+        lines.append("| 代币 | 规则 | 综合分 | 详情 |")
+        lines.append("|------|------|--------|------|")
+        for c in conflicts:
+            lines.append(f"| {c.symbol} | {c.rule} | {c.score:.1f} | {c.detail} |")
         lines.append("")
 
     lines.append("---")

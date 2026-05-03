@@ -8,57 +8,53 @@ import sqlite3
 import logging
 from dataclasses import dataclass, field
 from typing import Optional
-import config
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("meta-verdict")
 
 
 @dataclass
 class TokenEngineData:
-    """单个代币的跨引擎数据"""
     chain: str
     token_address: str
     token_symbol: str = "?"
+    engine_hits: int = 0
 
     # master-scan
-    master_signal:  str   = ""   # DIAMOND / RED / YELLOW / ""
-    master_pattern: str   = ""
+    master_signal:  str = ""
+    master_pattern: str = ""
 
     # opus-scan
     opus_acc_conf:  float = 0.0
     opus_dist_conf: float = 0.0
-    opus_verdict:   str   = ""
+    opus_verdict:   str = ""
 
     # unified-scan
-    unified_signal: str   = ""
+    unified_signal: str = ""
     unified_score:  float = 0.0
 
     # whale-scan
-    whale_level:    str   = ""
-    whale_conf:     float = 0.0
+    whale_level: str = ""
+    whale_conf:  float = 0.0
 
     # cost-basis-scan
-    cb_verdict:     str   = ""
-    cb_acc_pct:     float = 0.0
-    cb_dist_pct:    float = 0.0
-    cb_vwap:        float = 0.0
-    cb_gecko_price: float = 0.0
-    cb_windfall_pct:float = 0.0
-    cb_signals:     str   = ""
-
-    # 计算结果
-    meta_score:     float = 0.0
-    engine_hits:    int   = 0     # 有数据的引擎数
+    cb_verdict:      str   = ""
+    cb_acc_pct:      float = 0.0
+    cb_dist_pct:     float = 0.0
+    cb_vwap:         float = 0.0
+    cb_gecko_price:  float = 0.0
+    cb_windfall_pct: float = 0.0
+    cb_signals:      str   = ""
 
 
 def get_connection() -> sqlite3.Connection:
+    import config
     conn = sqlite3.connect(config.SUM_DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
 
 def ensure_tables(conn: sqlite3.Connection):
-    """确保所有引擎的持久化表存在"""
+    """确保所有表存在"""
     conn.executescript("""
         -- opus-scan 结果表
         CREATE TABLE IF NOT EXISTS opus_snapshots (
@@ -122,19 +118,28 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
         return f"{chain}:{addr.lower()}"
 
     # ── 1. master-scan (watchlist 表) ──
+    # 包含 EXPIRED 代币 — 它们仍有历史信号价值
     rows = conn.execute("""
-        SELECT chain, token_address, token_symbol, signal_level, trigger_pattern
+        SELECT chain, token_address, token_symbol, signal_level, trigger_pattern, status
         FROM watchlist
-        WHERE status = 'ACTIVE'
     """).fetchall()
     for r in rows:
         k = key(r["chain"], r["token_address"])
         if k not in tokens:
             tokens[k] = TokenEngineData(chain=r["chain"], token_address=r["token_address"],
                                          token_symbol=r["token_symbol"] or "?")
-        tokens[k].master_signal  = r["signal_level"] or ""
+        # ACTIVE 代币直接计分；EXPIRED 代币降一级
+        status = r["status"] or "ACTIVE"
+        signal = r["signal_level"] or ""
+        if status == "ACTIVE":
+            tokens[k].master_signal = signal
+        else:
+            # EXPIRED: DIAMOND→YELLOW, RED→YELLOW, YELLOW→保留
+            expired_map = {"DIAMOND": "YELLOW", "RED": "YELLOW", "YELLOW": "YELLOW"}
+            tokens[k].master_signal = expired_map.get(signal, "")
         tokens[k].master_pattern = r["trigger_pattern"] or ""
-        tokens[k].engine_hits += 1
+        if tokens[k].master_signal:
+            tokens[k].engine_hits += 1
 
     # ── 2. opus-scan ──
     rows = conn.execute("""
@@ -171,7 +176,6 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
         if k not in tokens:
             tokens[k] = TokenEngineData(chain=r["chain"], token_address=r["token_address"],
                                          token_symbol=r["token_symbol"] or "?")
-        # unified_results 用 verdict 字段 (DIAMOND/STRONG_ACC/MODERATE_ACC/SLOW_DISTRIBUTION)
         verdict = r["verdict"] or ""
         signal_map = {"DIAMOND": "DIAMOND", "STRONG_ACC": "RED", "MODERATE_ACC": "YELLOW",
                       "WHALE_DUMP": "WHALE_DUMP", "SLOW_DISTRIBUTION": "SLOW_DIST"}
@@ -222,8 +226,7 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
         tokens[k].cb_signals      = r["triggered_signals"] or ""
         tokens[k].engine_hits += 1
 
-
-    # ── [P0.2] 价格补全: 从 gecko_market_data 读取 ──
+    # ── 价格补全: 从 gecko_market_data 读取 ──
     try:
         src_db = os.environ.get("SRC_DB_PATH", "/opt/select-coin/data/select.db")
         conn.execute(f"ATTACH '{src_db}' AS src")
@@ -239,14 +242,13 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
                     t.cb_gecko_price = row[0]
         conn.execute("DETACH src")
     except Exception as _e:
-        import logging
-        logging.getLogger("meta-verdict").warning(f"价格补全失败: {_e}")
+        logger.warning(f"价格补全失败: {_e}")
 
     return list(tokens.values())
 
 
 def save_meta_result(conn: sqlite3.Connection, result: dict):
-    """保存 meta-verdict 仲裁结果"""
+    """保存 meta-verdict 仲裁结果 — 含分项积分"""
     conn.execute("""
         CREATE TABLE IF NOT EXISTS meta_snapshots (
             id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -263,15 +265,22 @@ def save_meta_result(conn: sqlite3.Connection, result: dict):
             whale_level    TEXT DEFAULT '',
             cb_verdict     TEXT DEFAULT '',
             stage          TEXT DEFAULT '',
+            master_score   REAL DEFAULT 0,
+            opus_score     REAL DEFAULT 0,
+            unified_score  REAL DEFAULT 0,
+            whale_score    REAL DEFAULT 0,
+            cb_score       REAL DEFAULT 0,
             UNIQUE(chain, token_address, scan_time)
         )
     """)
     conn.execute("""
         INSERT OR REPLACE INTO meta_snapshots
         (scan_time, chain, token_address, token_symbol, meta_score, meta_verdict,
-         engine_hits, master_signal, opus_verdict, unified_signal, whale_level, cb_verdict, stage)
+         engine_hits, master_signal, opus_verdict, unified_signal, whale_level, cb_verdict, stage,
+         master_score, opus_score, unified_score, whale_score, cb_score)
         VALUES (:scan_time, :chain, :token_address, :token_symbol, :meta_score, :meta_verdict,
                 :engine_hits, :master_signal, :opus_verdict, :unified_signal, :whale_level,
-                :cb_verdict, :stage)
+                :cb_verdict, :stage,
+                :master_score, :opus_score, :unified_score, :whale_score, :cb_score)
     """, result)
     conn.commit()
