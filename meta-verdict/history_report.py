@@ -185,7 +185,7 @@ def backtest_watchlist(src, sumdb):
     # 全量 precision 统计
     all_acc_rnow = [r["ret_now"] for r in results if r["ret_now"] is not None]
     precision = f"{sum(1 for x in all_acc_rnow if x > 0) / len(all_acc_rnow) * 100:.0f}%" if all_acc_rnow else "—"
-    lines.append(f"> 信号整体 Precision（盈利/总信号）: **{precision}** ({sum(1 for x in all_acc_rnow if x > 0)}/{len(all_acc_rnow)})")
+    lines.append(f"> 信号 Precision（全信号口径: 盈利/总DIAMOND+RED+YELLOW）: **{precision}** ({sum(1 for x in all_acc_rnow if x > 0)}/{len(all_acc_rnow)})")
     lines.append("")
     for sig in ["DIAMOND", "RED", "YELLOW"]:
         grp = [r for r in results if r["signal"] == sig]
@@ -469,13 +469,14 @@ def score_timeseries(sumdb):
 
     lines = ["## 📈 积分时序分析", ""]
 
-    # 信号增强
-    rising = sorted([r for r in results if r["slope"] > 0.02 and r["verdict"] == "ACC"],
+    # 信号增强（V3.1: 过滤近5轮全相同的常量序列）
+    rising = sorted([r for r in results if r["slope"] > 0.02 and r["verdict"] == "ACC"
+                     and len(set(r["last5"].split("→"))) > 1],  # 排除常量
                     key=lambda r: r["slope"], reverse=True)
     if rising:
         lines += ["### 信号增强 Top 10", "",
-                  "| 代币 | 当前分 | 斜率 | 方向 | σ | 连续ACC | 引擎 | 序列(最近5轮) |",
-                  "|------|--------|------|------|---|---------|------|-------------|"]
+                  "| 代币 | 当前分 | 斜率 | 方向 | σ(全量) | 连续ACC | 引擎 | 序列(最近5轮) |",
+                  "|------|--------|------|------|---------|---------|------|-------------|"]
         for r in rising[:10]:
             lines.append(
                 f"| {r['symbol']} | {r['score']:.1f} | {r['slope']:+.2f} "
@@ -516,73 +517,11 @@ def score_timeseries(sumdb):
 
 
 # ══════════════════════════════════════════════════════════════
-# 模块 4: 信号×收益分布
+# 模块 4: (V3.1: 已合并到 signal_quality)
 # ══════════════════════════════════════════════════════════════
 def signal_price_corr(backtest_results, sumdb):
-    """按积分区间和引擎数分桶统计胜率"""
-    # 获取每个代币的 meta_score
-    meta_map = {}
-    for r in sumdb.execute("""
-        SELECT token_symbol, meta_score, engine_hits
-        FROM meta_snapshots WHERE scan_time=(SELECT MAX(scan_time) FROM meta_snapshots)
-    """):
-        meta_map[r["token_symbol"]] = {"score": r["meta_score"], "engines": r["engine_hits"]}
-
-    # 合并
-    merged = []
-    for bt in backtest_results:
-        m = meta_map.get(bt["symbol"])
-        if m:
-            bt["meta_score"] = m["score"]
-            bt["engines"] = m["engines"]
-            merged.append(bt)
-
-    lines = ["## 📉 信号强度 × 收益分布", ""]
-
-    # 按积分分桶
-    buckets = [
-        ("≥7 (极强)", lambda r: r["meta_score"] >= 7),
-        ("5-7 (强)", lambda r: 5 <= r["meta_score"] < 7),
-        ("3-5 (中)", lambda r: 3 <= r["meta_score"] < 5),
-        ("0-3 (弱)", lambda r: 0 <= r["meta_score"] < 3),
-        ("<0 (负)", lambda r: r["meta_score"] < 0),
-    ]
-    lines += ["### 按综合分分桶", "",
-              "| 积分区间 | 样本 | 7d胜率 | 7d均收益 | 至今胜率 | 至今均收益 |",
-              "|----------|------|--------|---------|---------|----------|"]
-    for name, pred in buckets:
-        grp = [r for r in merged if pred(r)]
-        if not grp:
-            continue
-        r7 = [r["ret_7d"] for r in grp if r["ret_7d"] is not None]
-        rnow = [r["ret_now"] for r in grp if r["ret_now"] is not None]
-        def wr(lst):
-            return f"{sum(1 for x in lst if x > 0) / len(lst) * 100:.0f}%" if lst else "—"
-        def avg(lst):
-            return f"{sum(lst) / len(lst):+.1f}%" if lst else "—"
-        # P3: 样本 < 5 时标注
-        note = " ⚠" if len(grp) < 5 else ""
-        lines.append(f"| {name}{note} | {len(grp)} | {wr(r7)} | {avg(r7)} | {wr(rnow)} | {avg(rnow)} |")
-
-    # 按引擎数分桶
-    eng_buckets = [("≥4", 4, 99), ("3", 3, 3), ("2", 2, 2), ("1", 1, 1)]
-    lines += ["", "### 按引擎数分桶", "",
-              "| 引擎数 | 样本 | 7d胜率 | 7d均收益 | 至今胜率 | 至今均收益 |",
-              "|--------|------|--------|---------|---------|----------|"]
-    for name, lo, hi in eng_buckets:
-        grp = [r for r in merged if lo <= r.get("engines", 0) <= hi]
-        if not grp:
-            continue
-        r7 = [r["ret_7d"] for r in grp if r["ret_7d"] is not None]
-        rnow = [r["ret_now"] for r in grp if r["ret_now"] is not None]
-        def wr(lst):
-            return f"{sum(1 for x in lst if x > 0) / len(lst) * 100:.0f}%" if lst else "—"
-        def avg(lst):
-            return f"{sum(lst) / len(lst):+.1f}%" if lst else "—"
-        lines.append(f"| {name} | {len(grp)} | {wr(r7)} | {avg(r7)} | {wr(rnow)} | {avg(rnow)} |")
-
-    lines.append("")
-    return "\n".join(lines)
+    """V3.1: 已合并到 signal_quality, 保留空壳兼容"""
+    return ""
 
 
 # ══════════════════════════════════════════════════════════════
@@ -643,7 +582,7 @@ def liquidity_health(src, sumdb):
         avg7_vol = sum(r[0] for r in rows7) / max(len(rows7), 1) if rows7 else 0
         vol_change = ((vol - avg7_vol) / avg7_vol * 100) if avg7_vol > 0 else 0
 
-        turnover = (vol / mcap * 100) if mcap > 0 else 0
+        turnover = (vol / mcap * 100) if mcap > 0 else None
         bs_ratio = buyers / max(sellers, 1)
 
         # 量价背离检测
@@ -654,7 +593,7 @@ def liquidity_health(src, sumdb):
             vpd = "价跌量增"
 
         # 评级
-        if vol < 1000 or (avg7_vol > 0 and vol < avg7_vol * 0.3):
+        if vol < 1000 or (avg7_vol > 0 and vol < avg7_vol * 0.3 and vol < 100000):
             grade = "❌枯竭"
         elif reserve < 10000:
             grade = "⚠低LP"
@@ -681,14 +620,15 @@ def liquidity_health(src, sumdb):
     lines += ["### ACC 代币交易活跃度", "",
               "| 代币 | 24h量 | 7d均量 | 量变化 | LP深度 | 换手率 | 买入占比 | 买/卖人数 | 评级 |",
               "|------|-------|--------|--------|--------|--------|---------|----------|------|"]
+    def _fmtk(v):
+        if v is None: return "—"
+        if v >= 1e6: return f"${v/1e6:.1f}M"
+        if v >= 1e3: return f"${v/1e3:.0f}K"
+        return f"${v:.0f}"
     for r in results[:25]:
-        def _fmtk(v):
-            if v >= 1e6: return f"${v/1e6:.1f}M"
-            if v >= 1e3: return f"${v/1e3:.0f}K"
-            return f"${v:.0f}"
         lines.append(
             f"| {r['symbol']} | {_fmtk(r['vol_24h'])} | {_fmtk(r['avg7_vol'])} "
-            f"| {r['vol_change']:+.0f}% | {_fmtk(r['reserve'])} | {r['turnover']:.1f}% "
+            f"| {r['vol_change']:+.0f}% | {_fmtk(r['reserve'])} | {f'{r["turnover"]:.1f}%' if r['turnover'] is not None else '—'} "
             f"| {r['buy_pct']:.0f}% | {r['bs_ratio']:.1f}x | {r['grade']} |"
         )
 
@@ -767,17 +707,30 @@ def signal_quality(backtest_results, sumdb):
               "| 引擎组合 | 样本 | 至今胜率 | 至今均收 | 至今中位 | MDD中位 |",
               "|----------|------|---------|---------|---------|---------|"]
     sorted_combos = sorted(combo_stats.items(), key=lambda x: len(x[1]), reverse=True)
-    for combo, items in sorted_combos[:12]:
+    other_items = []
+    for combo, items in sorted_combos:
         rnow = [r["ret_now"] for r in items if r["ret_now"] is not None]
         mdds = [r["mdd"] for r in items if r["mdd"] is not None]
         if not rnow:
+            continue
+        if len(items) < 3:
+            other_items.extend(items)
             continue
         wr = f"{sum(1 for x in rnow if x > 0) / len(rnow) * 100:.0f}%"
         avg_r = f"{sum(rnow) / len(rnow):+.1f}%"
         med_r = f"{statistics.median(rnow):+.1f}%"
         med_mdd = f"{statistics.median(mdds):+.1f}%" if mdds else "—"
-        note = " ⚠" if len(items) < 5 else ""
-        lines.append(f"| {combo}{note} | {len(items)} | {wr} | {avg_r} | {med_r} | {med_mdd} |")
+        lines.append(f"| {combo} | {len(items)} | {wr} | {avg_r} | {med_r} | {med_mdd} |")
+    # 折叠小样本
+    if other_items:
+        rnow = [r["ret_now"] for r in other_items if r["ret_now"] is not None]
+        mdds = [r["mdd"] for r in other_items if r["mdd"] is not None]
+        if rnow:
+            wr = f"{sum(1 for x in rnow if x > 0) / len(rnow) * 100:.0f}%"
+            avg_r = f"{sum(rnow) / len(rnow):+.1f}%"
+            med_r = f"{statistics.median(rnow):+.1f}%"
+            med_mdd = f"{statistics.median(mdds):+.1f}%" if mdds else "—"
+            lines.append(f"| 其他(N<3) | {len(other_items)} | {wr} | {avg_r} | {med_r} | {med_mdd} |")
 
     # --- 单引擎 precision ---
     lines += ["", "### 单引擎 Precision", "",
@@ -840,6 +793,47 @@ def signal_quality(backtest_results, sumdb):
                 f"| {r['symbol']} | {r.get('meta_verdict','—')} | {r.get('meta_score',0):.1f} "
                 f"| {r['ret_now']:+.1f}% | {r['signal']} | {reason} |"
             )
+
+    # --- V3.1: 按积分分桶（原模块4合入） ---
+    lines += ["", "### 按综合分分桶", "",
+              "| 积分区间 | 样本 | 至今胜率 | 至今均收 | 至今中位 | 备注 |",
+              "|----------|------|---------|---------|---------|------|"]
+    buckets = [
+        ("≥7", lambda r: r.get("meta_score", 0) >= 7),
+        ("5-7", lambda r: 5 <= r.get("meta_score", 0) < 7),
+        ("3-5", lambda r: 3 <= r.get("meta_score", 0) < 5),
+        ("0-3", lambda r: 0 <= r.get("meta_score", 0) < 3),
+        ("<0", lambda r: r.get("meta_score", 0) < 0),
+    ]
+    for name, pred in buckets:
+        grp = [r for r in merged if pred(r)]
+        if not grp:
+            continue
+        rnow = [r["ret_now"] for r in grp if r["ret_now"] is not None]
+        if not rnow:
+            continue
+        wr = f"{sum(1 for x in rnow if x > 0) / len(rnow) * 100:.0f}%"
+        avg_r = f"{sum(rnow) / len(rnow):+.1f}%"
+        med_r = f"{statistics.median(rnow):+.1f}%"
+        note = "⚠小样本" if len(grp) < 10 else ""
+        lines.append(f"| {name} | {len(grp)} | {wr} | {avg_r} | {med_r} | {note} |")
+
+    # --- V3.1: 按引擎数分桶 ---
+    lines += ["", "### 按引擎数分桶", "",
+              "| 引擎数 | 样本 | 至今胜率 | 至今均收 | 至今中位 | 备注 |",
+              "|--------|------|---------|---------|---------|------|"]
+    for name, lo, hi in [("≥4", 4, 99), ("3", 3, 3), ("2", 2, 2), ("1", 1, 1)]:
+        grp = [r for r in merged if lo <= r.get("engines", 0) <= hi]
+        if not grp:
+            continue
+        rnow = [r["ret_now"] for r in grp if r["ret_now"] is not None]
+        if not rnow:
+            continue
+        wr = f"{sum(1 for x in rnow if x > 0) / len(rnow) * 100:.0f}%"
+        avg_r = f"{sum(rnow) / len(rnow):+.1f}%"
+        med_r = f"{statistics.median(rnow):+.1f}%"
+        note = "⚠小样本" if len(grp) < 10 else ""
+        lines.append(f"| {name} | {len(grp)} | {wr} | {avg_r} | {med_r} | {note} |")
 
     lines.append("")
     return "\n".join(lines)
@@ -979,7 +973,7 @@ def save_token_history(sumdb, bt_data, mig_data, ts_data, liq_data=None):
 # P-ENRICH: 单币画像（Top ACC 代币完整档案）
 # ══════════════════════════════════════════════════════════════
 def coin_profile(bt_data, mig_data, ts_data, sumdb, liq_data=None):
-    """Top 10 ACC 代币的完整画像（V3: 增加流动性+MDD）"""
+    """V3.1: Top ACC 表格看板（精简版，排除遗漏检测标记的代币）"""
     meta_map = {}
     try:
         for r in sumdb.execute(
@@ -990,115 +984,68 @@ def coin_profile(bt_data, mig_data, ts_data, sumdb, liq_data=None):
     except Exception:
         pass
 
+    # A2: 排除被遗漏检测标记的代币（留存<50% + Top10下降）
+    mig_sym_map = {r["symbol"]: r for r in mig_data if r.get("symbol")}
+    excluded = set()
+    for sym, mig in mig_sym_map.items():
+        retention = mig.get("retention_7d", 100)
+        top10_delta = mig.get("top10_delta_7d", 0)
+        if retention < 50 and top10_delta < 0:
+            excluded.add(sym)
+
     acc_tokens = [(sym, info) for sym, info in meta_map.items()
-                  if info.get("meta_verdict") == "ACC"]
+                  if info.get("meta_verdict") == "ACC" and sym not in excluded]
     acc_tokens.sort(key=lambda x: x[1].get("meta_score", 0), reverse=True)
 
     if not acc_tokens:
         return ""
 
-    mig_sym_map = {r["symbol"]: r for r in mig_data if r.get("symbol")}
     ts_map = {r["symbol"]: r for r in ts_data}
     bt_map = {r["symbol"]: r for r in bt_data}
     liq_map = {r["symbol"]: r for r in (liq_data or [])}
 
-    # P7: 读取昨天 token_history
-    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-    yday_map = {}
-    try:
-        for r in sumdb.execute(
-            "SELECT token_symbol, price_now_ret, retention_7d FROM token_history WHERE computed_date=?",
-            (yesterday,)
-        ):
-            yday_map[r["token_symbol"]] = {"ret": r["price_now_ret"], "retention": r["retention_7d"]}
-    except Exception:
-        pass
+    def _fk(v):
+        if v is None: return "—"
+        if v >= 1e6: return f"${v/1e6:.1f}M"
+        if v >= 1e3: return f"${v/1e3:.0f}K"
+        return f"${v:.0f}"
 
-    lines = ["## 🎯 Top ACC 单币画像", ""]
-    if yday_map:
-        lines.append(f"> vs 昨日对比: {yesterday} | {len(yday_map)} 个代币有历史数据")
-    else:
-        lines.append("> vs 昨日: 无历史数据（首次运行，明日开始生效）")
-    lines.append("")
+    lines = ["## 🎯 Top ACC 综合看板", ""]
+    if excluded:
+        lines.append(f"> 已排除遗漏检测标记代币: {', '.join(sorted(excluded))}")
+        lines.append("")
+    lines += [
+        "| 代币 | 分数 | 引擎 | 阶段 | 至今收益 | MDD | 7d留存 | 24h量 | LP | 斜率 | ACC轮 | 评级 |",
+        "|------|------|------|------|---------|-----|--------|-------|-----|------|-------|------|",
+    ]
 
-    for sym, meta in acc_tokens[:10]:
+    stage_map = {"CONTROLLED": "CTRL", "ACCUMULATING": "ACC", "DISTRIBUTING": "DIST",
+                 "WATCHLIST": "WATCH", "NEUTRAL": "—"}
+
+    for sym, meta in acc_tokens[:15]:
         mig = mig_sym_map.get(sym, {})
         ts = ts_map.get(sym, {})
         bt = bt_map.get(sym, {})
-        yday = yday_map.get(sym, {})
-
-        # P5: 留存异常标注
-        warnings = []
-        retention_7d = mig.get('retention_7d', 0)
-        if retention_7d < 60 and retention_7d > 0:
-            warnings.append(f"⚠ 7d留存仅{retention_7d:.0f}%")
-        if mig.get('top10_delta_7d', 0) < -5:
-            warnings.append(f"⚠ Top10Δ{mig.get('top10_delta_7d',0):+.1f}%")
-        if mig.get('acc_delta_7d', 0) < -5:
-            warnings.append(f"⚠ 吸筹数{mig.get('acc_delta_7d',0):+d}")
-
-        title = f"### {sym}"
-        if warnings:
-            title += " " + " ".join(warnings)
-        lines.append(title)
-        lines.append("")
-        lines.append("| 维度 | 数据 |")
-        lines.append("|------|------|")
-        lines.append(f"| meta 综合分 | {meta.get('meta_score', 0):.1f} |")
-        lines.append(f"| 引擎命中 | {meta.get('engine_hits', 0)} |")
-        lines.append(f"| 生命周期 | {meta.get('stage', '—')} |")
-
-        # P5: 增加完整价格数据
-        if bt:
-            lines.append(f"| 首次信号日 | {bt.get('date', '—')} |")
-            lines.append(f"| 入场价 | ${bt.get('entry', 0):.4f} |")
-            lines.append(f"| 现价 | ${bt.get('price_now', 0):.4f} |")
-            r7 = bt.get('ret_7d')
-            r14 = bt.get('ret_14d')
-            ret_now = bt.get('ret_now')
-            lines.append(f"| 7d 收益 | {r7:+.1f}% |" if r7 is not None else "| 7d 收益 | — |")
-            lines.append(f"| 14d 收益 | {r14:+.1f}% |" if r14 is not None else "| 14d 收益 | — |")
-            ret_str = f"{ret_now:+.1f}%" if ret_now is not None else "—"
-            # P7: vs 昨天收益对比
-            if yday.get("ret") is not None and ret_now is not None:
-                delta_ret = ret_now - yday["ret"]
-                ret_str += f" (Δ{delta_ret:+.1f}%)"
-            lines.append(f"| 至今收益 | {ret_str} |")
-            lines.append(f"| 持有天数 | {bt.get('days_held', 0)}d |")
-
-        if mig:
-            ret_7d_str = f"{retention_7d:.0f}%"
-            # P7: vs 昨天留存对比
-            if yday.get("retention") is not None:
-                delta_ret = retention_7d - yday["retention"]
-                ret_7d_str += f" (Δ{delta_ret:+.0f}%)"
-            lines.append(f"| 7d 留存率 | {ret_7d_str} |")
-            r14 = mig.get('retention_14d')
-            lines.append(f"| 14d 留存率 | {r14:.0f}% |" if r14 is not None else "| 14d 留存率 | — |")
-            lines.append(f"| Top10 集中度 | {mig.get('top10_now', 0):.1f}% (Δ{mig.get('top10_delta_7d', 0):+.1f}%) |")
-            lines.append(f"| 吸筹数变化 | {mig.get('acc_delta_7d', 0):+d} |")
-
-        if ts:
-            lines.append(f"| 积分斜率 | {ts.get('slope', 0):+.2f} |")
-            lines.append(f"| 连续 ACC | {ts.get('consec_acc', 0)} 轮 |")
-            lines.append(f"| 序列 | {ts.get('last5', '—')} |")
-
-        # V3: 流动性+MDD
         liq = liq_map.get(sym, {})
-        if liq:
-            def _fk(v):
-                if v >= 1e6: return f"${v/1e6:.1f}M"
-                if v >= 1e3: return f"${v/1e3:.0f}K"
-                return f"${v:.0f}"
-            lines.append(f"| 24h交易量 | {_fk(liq.get('vol_24h', 0))} ({liq.get('vol_change',0):+.0f}%) |")
-            lines.append(f"| LP深度 | {_fk(liq.get('reserve', 0))} |")
-            lines.append(f"| 买入占比 | {liq.get('buy_pct', 0):.0f}% |")
-            lines.append(f"| 流动性评级 | {liq.get('grade', '—')} |")
-        if bt and bt.get("mdd") is not None:
-            lines.append(f"| 最大回撤 | {bt['mdd']:+.1f}% |")
 
-        lines.append("")
+        score = f"{meta.get('meta_score', 0):.1f}"
+        engines = meta.get("engine_hits", 0)
+        stage = stage_map.get(meta.get("stage", ""), "—")
+        ret_now = f"{bt['ret_now']:+.1f}%" if bt.get("ret_now") is not None else "—"
+        mdd = f"{bt['mdd']:+.1f}%" if bt.get("mdd") is not None else "—"
+        retention = f"{mig.get('retention_7d', 0):.0f}%" if mig.get("retention_7d") is not None else "—"
+        vol = _fk(liq.get("vol_24h"))
+        lp = _fk(liq.get("reserve"))
+        slope = f"{ts.get('slope', 0):+.2f}" if ts else "—"
+        consec = ts.get("consec_acc", 0) if ts else 0
+        grade = liq.get("grade", "—")
 
+        lines.append(
+            f"| {sym} | {score} | {engines} | {stage} | {ret_now} | {mdd} "
+            f"| {retention} | {vol} | {lp} | {slope} | {consec} | {grade} |"
+        )
+
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -1108,7 +1055,7 @@ def coin_profile(bt_data, mig_data, ts_data, sumdb, liq_data=None):
 def main():
     import time
     t0 = time.time()
-    print(f"AI-SUM 长期分析报告 | {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    print(f"AI-SUM 长期分析报告 V3.1 | {datetime.now().strftime('%Y-%m-%d %H:%M')}")
 
     src = connect(SRC_DB, readonly=True)
     sumdb = connect(SUM_DB)
@@ -1116,58 +1063,53 @@ def main():
     # P-DB: 确保表存在
     ensure_token_history_table(sumdb)
 
-    # 模块 1
-    print("  [1/9] 信号回测（1d/3d/7d/14d + MDD）...")
+    # 模块 1: 信号回测
+    print("  [1/7] 信号回测（1d/3d/7d/14d + MDD）...")
     bt_md, bt_data = backtest_watchlist(src, sumdb)
     print(f"        {len(bt_data)} 个代币有回测数据")
 
-    # 模块 2
-    print("  [2/9] holder 迁移（14d + 遗漏检测）...")
+    # 模块 2: holder 迁移
+    print("  [2/7] holder 迁移（14d + 遗漏检测）...")
     mig_md, mig_data = migration_analysis(src, sumdb)
     print(f"        {len(mig_data)} 个代币有迁移数据")
 
-    # 模块 3
-    print("  [3/9] 积分时序...")
+    # 模块 3: 积分时序
+    print("  [3/7] 积分时序...")
     ts_md, ts_data = score_timeseries(sumdb)
     print(f"        {len(ts_data)} 个代币有时序数据")
 
-    # 模块 4
-    print("  [4/9] 信号×收益分布...")
-    corr_md = signal_price_corr(bt_data, sumdb)
-
-    # 模块 5: 流动性健康度 (V3)
-    print("  [5/9] 流动性健康度...")
+    # 模块 4: 流动性健康度
+    print("  [4/7] 流动性健康度...")
     liq_md, liq_data = liquidity_health(src, sumdb)
     print(f"        {len(liq_data)} 个ACC代币有流动性数据")
 
-    # 模块 6: 信号质量 (V3)
-    print("  [6/9] 信号质量评估...")
+    # 模块 5: 信号质量（含原模块4分桶+引擎矩阵+P/R/F1+失败+漏网）
+    print("  [5/7] 信号质量评估...")
     quality_md = signal_quality(bt_data, sumdb)
 
-    # 模块 7: 单币画像
-    print("  [7/9] 单币画像...")
+    # 模块 6: Top ACC 综合看板
+    print("  [6/7] ACC综合看板...")
     profile_md = coin_profile(bt_data, mig_data, ts_data, sumdb, liq_data)
 
-    # P-DB: 写入 token_history（V3: 含流动性+MDD+meta补漏）
+    # P-DB: 写入 token_history
     saved = save_token_history(sumdb, bt_data, mig_data, ts_data, liq_data)
     print(f"  [DB] token_history 写入 {saved} 行")
 
     # 组装报告
     today = datetime.now().strftime("%Y-%m-%d")
-    header = f"""# 📊 AI-SUM 长期分析报告 V3.0 — {today}
+    header = f"""# 📊 AI-SUM 长期分析报告 V3.1 — {today}
 
 > 时间基准: 首次信号时间（meta_snapshots/unified_results）
 > 数据源: bubblemap + gecko(20字段) + meta {len(ts_data)}代币
-> 新增: 流动性健康度 | 信号质量评估 | 失败案例 | 漏网之鱼
-> 生成: history_report.py V3 | 耗时: {{elapsed:.1f}}s
+> 生成: history_report.py V3.1 | 耗时: {{elapsed:.1f}}s
 
 ---
 
 """
-    parts = [bt_md, mig_md, ts_md, corr_md, liq_md, quality_md]
+    parts = [bt_md, mig_md, ts_md, liq_md, quality_md]
     if profile_md:
         parts.append(profile_md)
-    body = "\n---\n\n".join(parts)
+    body = "\n---\n\n".join(p for p in parts if p)
     elapsed = time.time() - t0
     md = header.format(elapsed=elapsed) + body
     md += f"\n\n---\n*生成时间: {datetime.now().isoformat()} | 耗时: {elapsed:.1f}s*\n"
