@@ -1,6 +1,6 @@
 # AI-SUM 六引擎综合分析系统
 
-> 版本: V2.0 | 更新: 2026-05-03 | VPS: `/opt/AI-SUM/`
+> 版本: V3.0 | 更新: 2026-05-05 | VPS: `/opt/AI-SUM/`
 > GitHub: https://github.com/cfanlik/AI-SUM | DB: `select-sum.db`
 
 ---
@@ -190,19 +190,47 @@ gecko_market_data ──┼── src.db ──┤  opus-scan    → opus_snapsh
 - `meta_snapshots`: 全部有信号代币（含 NEUTRAL），含 5 列分项积分
 - `token_lifecycle`: 生命周期状态 + 跃迁记录
 
-### history_report.py — 长期分析报告
+### history_report.py — 长期分析报告 V3.0
 
-5 模块融合报告，输出 `report/history/history_YYYYMMDD.md`：
+9 模块融合报告，输出 `report/history/history_YYYYMMDD.md`：
 
-| 模块 | 功能 |
-|------|------|
-| 信号回测 | 首次信号时间(meta_snapshots/unified_results) × 7d/14d/至今收益，过滤当天信号 |
-| Holder 迁移 | 7d + 14d 留存率对比、遗漏检测(Top10Δ复合条件)、底部吸筹识别 |
-| 积分时序 | 斜率/σ/连续ACC/引擎稳定性，σ<0.1平序列强制归零 |
-| 信号×收益 | 按综合分/引擎数分桶胜率，样本<5标注⚠ |
-| 单币画像 | Top 10 ACC 完整档案，含 vs 昨天Δ对比 |
+| 模块 | 功能 | 数据源字段 |
+|------|------|-----------|
+| 信号回测 | 首次信号时间 × 1d/3d/7d/14d/至今收益 + MDD + Precision | price_usd |
+| Holder 迁移 | 7d+14d 留存率、遗漏检测(Top10Δ复合条件)、底部吸筹 | bubblemap_holders |
+| 积分时序 | 斜率/σ/连续ACC/引擎稳定性，σ<0.05平序列强制归零 | meta_snapshots |
+| 信号×收益 | 按综合分/引擎数分桶胜率，样本<5标注⚠ | meta_snapshots |
+| **流动性健康度** | 24h量/7d均量/量变化/LP深度/换手率/买卖比/量价背离/枯竭告警 | **volume_24h, reserve_usd, buy_tx_pct, buyers/sellers** |
+| **信号质量评估** | 引擎组合矩阵/单引擎Precision/P-R-F1/失败案例/漏网之鱼 | meta_snapshots 5列分项积分 |
+| 单币画像 | Top 10 ACC 完整档案，含流动性+MDD+vs昨天Δ | 全字段 |
 
-写入 `token_history` 表持久化（含无信号但有迁移数据的代币）。
+#### V3 关键增强
+
+| 增强项 | 说明 |
+|--------|------|
+| gecko 字段激活 | 20字段中从2个→10个（volume_24h/6h/1h, buys/sells, reserve_usd, buy_tx_pct, market_cap等） |
+| 中位数 | 回测汇总增加 median 列，消除极端值(如SPACE +243%)拉偏 |
+| MDD | 信号后最大回撤，贯穿回测+画像+token_history |
+| meta补漏 | save_token_history 增加 meta_snapshots ACC/DIST 全量遍历，解决 KAVA 类丢失 |
+| 量价背离 | 价涨量缩=拉盘无力 / 价跌量增=恐慌抛售 |
+| 流动性枯竭 | volume < 7d_avg * 30% 或 reserve < $10K 触发告警 |
+| 引擎组合矩阵 | 统计 M+O/M+W/M+O+W 等组合的独立胜率 |
+| P/R/F1 | Precision=ACC中盈利比 / Recall=盈利中被ACC命中比 / F1 |
+| 失败案例 | ACC but ret < -15% 的代币清单+引擎组合+MDD |
+| 漏网之鱼 | 非ACC but ret > +30% 的漏网代币清单 |
+
+#### V3 实测知识（2026-05-05）
+
+| 发现 | 数据 | 含义 |
+|------|------|------|
+| whale引擎拖低组合胜率 | M+W(32%) vs M+O(52%) | whale_score 权重可能需调降 |
+| unified引擎最准 | 56% precision | 但命中数仅9, 样本偏小 |
+| 信号F1偏低 | P=55%, R=40%, F1=46% | Recall低=漏网多, 需扩大覆盖 |
+| 流动性枯竭≠信号失败 | BSB: ACC+MDD-47%+量衰-80% | holder稳但无人交易=信息茧房 |
+| 极端漏网 | TAC(+374%), SPACE(+243%) 非ACC | 单引擎覆盖不足 |
+
+写入 `token_history` 表持久化（V3新增: volume_24h, reserve_usd, buy_tx_pct, turnover_ratio, mdd）。
+meta_snapshots ACC/DIST 代币全量写入，解决丢失问题。
 
 ---
 
@@ -217,7 +245,7 @@ gecko_market_data ──┼── src.db ──┤  opus-scan    → opus_snapsh
 | `cost_basis_snapshots` | cost-basis-scan | verdict, vwap, gecko_price, acc_pct | 成本分层 |
 | `meta_snapshots` | meta-verdict | meta_score, meta_verdict, stage, 5×分项积分 | 仲裁结果 |
 | `token_lifecycle` | meta-verdict | current_stage, prev_stage, transition | 生命周期 |
-| `token_history` | history_report | computed_date, signal_first_seen, price_*_ret, retention_*, score_slope | 长期跟踪 |
+| `token_history` | history_report | computed_date, signal_first_seen, price_*_ret, retention_*, score_slope, **volume_24h, reserve_usd, buy_tx_pct, turnover_ratio, mdd** | 长期跟踪(V3扩展) |
 
 ---
 
@@ -246,6 +274,7 @@ cd /opt/AI-SUM && python3 meta-verdict/history_report.py
 
 | 版本 | 日期 | 关键变更 |
 |------|------|----------|
+| **history_report V3.0** | **2026-05-05** | 9模块融合: +流动性健康度+信号质量评估+失败案例+漏网之鱼; gecko 20字段激活(2→10); 中位数+MDD+P/R/F1+引擎组合矩阵; meta补漏(ACC 100%覆盖); token_history +5列 |
 | **history_report V2.0** | **2026-05-03** | 回测时间基准修复+遗漏检测Top10Δ复合条件+斜率平序列归零+14d校验+单币画像增强+vs昨天Δ+token_history扩展 |
 | **history_report V1.0** | **2026-05-03** | 4模块融合: 信号回测+holder迁移+积分时序+信号×收益 |
 | **meta-verdict V2.0** | **2026-05-03** | EXPIRED纳入+出货抑制+分项积分持久化+矛盾检测(5规则)+全量保存+趋势分析 |
@@ -260,13 +289,18 @@ cd /opt/AI-SUM && python3 meta-verdict/history_report.py
 
 ---
 
-## 实测数据（2026-05-03 20:47）
+## 实测数据（2026-05-05 21:26）
 
 | 指标 | 数值 |
 |------|------|
-| 有信号代币 | 158 |
-| 🎯 吸筹 | 44 |
-| 💀 出货 | 2 (BAS, UB) |
-| ⚠ 矛盾 | 7 (C1×4, C3×3) |
-| meta_snapshots 保存 | 158 条/轮（含 NEUTRAL） |
-| 引擎健康 | master ⚠(8h) opus/whale/CB/unified ✅ |
+| 有信号代币 | 153 |
+| 🎯 吸筹 | 41 |
+| 💀 出货 | 2 |
+| token_history 覆盖 | ACC 41/41 (100%, V3修复) |
+| history_report 模块 | 9 (V3: +4) |
+| gecko 字段使用 | 10/20 (V3: 从2→10) |
+| 信号 Precision | 47% (53/112) |
+| 信号 F1 | 46% (P=55%, R=40%) |
+| 流动性枯竭 | 2 (BSB -80%, GENIUS -99%) |
+| 量价背离 | 3 (TAG价跌量增, OL价涨量缩, HYPER价跌量增) |
+| 报告耗时 | 20.5s, 16.4KB |
