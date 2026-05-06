@@ -62,10 +62,11 @@ gecko_market_data ──┼── src.db ──┤  opus-scan    → opus_snapsh
 30 0,12 * * * cd /opt/AI-SUM && python3 bigcoin/run.py        >> log/whale.log 2>&1
 40 0,12 * * * cd /opt/AI-SUM && python3 cost-basis-scan/run.py >> log/cost-basis.log 2>&1
 50 0,12 * * * cd /opt/AI-SUM && python3 meta-verdict/run.py   >> log/meta.log 2>&1
+55 0,12 * * * cd /opt/AI-SUM && python3 meta-verdict/history_report.py >> log/history.log 2>&1
 ```
 
 **执行顺序**: master(00) → opus(10) → unified(20) → whale(30) → CB(40) → meta(50)
-**频率**: 每天 2 轮（00:xx / 12:xx UTC）
+**频率**: 每天 2 轮（00:xx / 12:xx UTC），含 history_report
 **依赖链**: opus/unified/CB 依赖 master 的 watchlist → 间隔 10 分钟足够（master 通常 3-5 分钟完成）
 
 ---
@@ -304,3 +305,35 @@ cd /opt/AI-SUM && python3 meta-verdict/history_report.py
 | 流动性枯竭 | 2 (BSB -80%, GENIUS -99%) |
 | 量价背离 | 3 (TAG价跌量增, OL价涨量缩, HYPER价跌量增) |
 | 报告耗时 | 20.5s, 16.4KB |
+
+---
+
+## 方法论与实践文档
+
+> 详细文档拆分到 AI_CONTEXT/ 目录
+
+| 文件 | 内容 |
+|------|------|
+| AI_CONTEXT/methodology.md | 7 模块方法论定义 + 4 个待验证假设(H1-H4) + 实测基线数据 |
+
+### 关键方法论摘要
+
+| 模块 | 核心公式/阈值 | 已知局限 |
+|------|-------------|---------|
+| 信号回测 | ret = (price_now - entry) / entry × 100, MDD从信号日起算 | 当天信号过滤 |
+| Holder 迁移 | retention = old∩new / old × 100 | 低留存≠出货（SKYAI案例） |
+| 积分时序 | slope = polyfit(scores, deg=1), σ<0.05归零 | 平序列斜率无意义 |
+| 流动性 | vol_change = (24h - 7d_avg) / 7d_avg × 100 | ~60代币volume=0 |
+| 信号质量 | P=64%, R=38%, F1=48% (2026-05-06) | 3引擎最佳(67%)，≥4反降(14%) |
+
+### 跟踪验证
+
+- 脚本: meta-verdict/tracking_validator.py
+- 基线: 2026-05-06
+- 下次验证: 2026-05-10
+- 验证 4 个假设: H1(低留存后续) H2(引擎数) H3(积分分桶) H4(2分阈值)
+
+### 日志轮转
+
+- 配置: /etc/logrotate.d/ai-sum
+- 策略: 每日轮转, 保留 60 天, gzip 压缩, copytruncate
