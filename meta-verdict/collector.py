@@ -284,3 +284,141 @@ def save_meta_result(conn: sqlite3.Connection, result: dict):
                 :master_score, :opus_score, :unified_score, :whale_score, :cb_score)
     """, result)
     conn.commit()
+
+
+# ── hop2 跟踪采集（v5 新增）──
+
+def ensure_hop2_tracking_table(conn: sqlite3.Connection):
+    """确保 hop2_tracking 表存在"""
+    conn.execute("""CREATE TABLE IF NOT EXISTS hop2_tracking (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        scan_time       TEXT NOT NULL,
+        chain           TEXT NOT NULL DEFAULT 'bsc',
+        token_address   TEXT NOT NULL,
+        token_symbol    TEXT,
+        total_holders   INTEGER DEFAULT 0,
+        acc_count       INTEGER DEFAULT 0,
+        hop2_high_count INTEGER DEFAULT 0,
+        hop2_acc_count  INTEGER DEFAULT 0,
+        tier_98_count   INTEGER DEFAULT 0,
+        tier_90_count   INTEGER DEFAULT 0,
+        tier_30_count   INTEGER DEFAULT 0,
+        tier_80_count   INTEGER DEFAULT 0,
+        entity_count    INTEGER DEFAULT 0,
+        unique_entities INTEGER DEFAULT 0,
+        hop2_acc_pct    REAL DEFAULT 0,
+        hop2_avg        REAL DEFAULT 0,
+        price_usd       REAL DEFAULT 0,
+        UNIQUE(token_address, scan_time)
+    )""")
+    conn.commit()
+
+
+def collect_hop2_tracking(sum_conn: sqlite3.Connection, scan_time: str):
+    """
+    每轮 meta-verdict 运行时，从 src.bubblemap_holders 采集 hop2 统计。
+    前置条件: src DB 已通过 ATTACH 挂载为 'src'。
+    
+    字段名对照 bubblemap_holders 表:
+      - dex_ratio_hop2  (REAL, nullable)
+      - gmgn_verified   (INTEGER, nullable, 0/1/2)
+      - entity_id       (TEXT, default '')
+      - is_accumulating (INTEGER, default 0)
+      - batch_id        (TEXT)
+    """
+    import config as _cfg
+    src_db = os.environ.get("SRC_DB_PATH", _cfg.SRC_DB_PATH)
+    
+    # 获取 watchlist 中的代币
+    tokens = sum_conn.execute(
+        "SELECT chain, token_address, token_symbol FROM watchlist"
+    ).fetchall()
+    
+    if not tokens:
+        logger.info("[HOP2] watchlist 为空，跳过采集")
+        return 0
+    
+    # ATTACH src DB
+    try:
+        sum_conn.execute(f"ATTACH '{src_db}' AS src")
+    except Exception:
+        pass  # 可能已 ATTACH
+    
+    saved = 0
+    for t in tokens:
+        chain = t["chain"]
+        addr = t["token_address"]
+        sym = t["token_symbol"] or "?"
+        
+        row = sum_conn.execute("""
+            SELECT
+                COUNT(*)                                                              AS total_holders,
+                COALESCE(SUM(is_accumulating), 0)                                     AS acc_count,
+                SUM(CASE WHEN dex_ratio_hop2 IS NOT NULL AND dex_ratio_hop2 >= 0.5
+                         THEN 1 ELSE 0 END)                                           AS hop2_high_count,
+                SUM(CASE WHEN is_accumulating = 1
+                         AND dex_ratio_hop2 IS NOT NULL AND dex_ratio_hop2 >= 0.5
+                         THEN 1 ELSE 0 END)                                           AS hop2_acc_count,
+                SUM(CASE WHEN entity_id IS NOT NULL AND entity_id != ''
+                         THEN 1 ELSE 0 END)                                           AS entity_count,
+                COUNT(DISTINCT CASE WHEN entity_id IS NOT NULL AND entity_id != ''
+                              THEN entity_id END)                                      AS unique_entities,
+                SUM(CASE WHEN gmgn_verified = 2 AND dex_ratio_hop2 >= 0.5
+                         THEN 1 ELSE 0 END)                                           AS tier_98_count,
+                SUM(CASE WHEN gmgn_verified = 1 AND dex_ratio_hop2 >= 0.5
+                         THEN 1 ELSE 0 END)                                           AS tier_90_count,
+                SUM(CASE WHEN gmgn_verified = 0 AND dex_ratio_hop2 >= 0.5
+                         THEN 1 ELSE 0 END)                                           AS tier_30_count,
+                SUM(CASE WHEN gmgn_verified IS NULL AND dex_ratio_hop2 >= 0.5
+                         THEN 1 ELSE 0 END)                                           AS tier_80_count,
+                AVG(CASE WHEN is_accumulating = 1 THEN dex_ratio_hop2 END)            AS hop2_avg
+            FROM src.bubblemap_holders
+            WHERE token_address = ?
+              AND batch_id = (
+                  SELECT MAX(batch_id) FROM src.bubblemap_holders WHERE token_address = ?
+              )
+        """, [addr, addr]).fetchone()
+        
+        if not row or (row["total_holders"] or 0) == 0:
+            continue
+        
+        acc = row["acc_count"] or 0
+        hop2_acc = row["hop2_acc_count"] or 0
+        hop2_acc_pct = hop2_acc / max(acc, 1)
+        
+        # 获取最新价格
+        price_row = sum_conn.execute(
+            "SELECT price_usd FROM src.gecko_market_data "
+            "WHERE token_address = ? AND price_usd > 0 "
+            "ORDER BY scan_time DESC LIMIT 1",
+            [addr]
+        ).fetchone()
+        price = price_row[0] if price_row else 0
+        
+        sum_conn.execute("""
+            INSERT OR REPLACE INTO hop2_tracking
+            (scan_time, chain, token_address, token_symbol,
+             total_holders, acc_count, hop2_high_count, hop2_acc_count,
+             tier_98_count, tier_90_count, tier_30_count, tier_80_count,
+             entity_count, unique_entities, hop2_acc_pct, hop2_avg, price_usd)
+            VALUES (?, ?, ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?)
+        """, [
+            scan_time, chain, addr, sym,
+            row["total_holders"], acc, row["hop2_high_count"] or 0, hop2_acc,
+            row["tier_98_count"] or 0, row["tier_90_count"] or 0,
+            row["tier_30_count"] or 0, row["tier_80_count"] or 0,
+            row["entity_count"] or 0, row["unique_entities"] or 0,
+            round(hop2_acc_pct, 4), round(row["hop2_avg"] or 0, 4), price
+        ])
+        saved += 1
+    
+    sum_conn.commit()
+    try:
+        sum_conn.execute("DETACH src")
+    except Exception:
+        pass
+    logger.info(f"[HOP2] hop2_tracking 写入 {saved}/{len(tokens)} 条")
+    return saved

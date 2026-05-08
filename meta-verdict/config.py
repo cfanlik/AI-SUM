@@ -63,3 +63,10 @@ META_TOP_N          = 20
 # ── 趋势分析 ──
 TREND_JUMP_THRESHOLD = 1.5    # 积分跃变阈值
 ENGINE_HEALTH_MAX_HOURS = 3   # 引擎健康告警阈值（小时）
+
+# ── hop2 庄控跟踪积分 (v5) ──
+HOP2_ACC_BONUS = {
+    "high":   1.5,   # hop2_acc_pct >= 30%
+    "medium": 0.8,   # hop2_acc_pct >= 15%
+    "low":    0.0,   # hop2_acc_pct < 15%
+}

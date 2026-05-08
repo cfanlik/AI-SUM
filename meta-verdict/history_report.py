@@ -469,7 +469,7 @@ def score_timeseries(sumdb):
 
     lines = ["## 📈 积分时序分析", ""]
 
-    # 信号增强（V3.1: 过滤近5轮全相同的常量序列）
+    # 信号增强（V4.0: 过滤近5轮全相同的常量序列）
     rising = sorted([r for r in results if r["slope"] > 0.02 and r["verdict"] == "ACC"
                      and len(set(r["last5"].split("→"))) > 1],  # 排除常量
                     key=lambda r: r["slope"], reverse=True)
@@ -517,10 +517,10 @@ def score_timeseries(sumdb):
 
 
 # ══════════════════════════════════════════════════════════════
-# 模块 4: (V3.1: 已合并到 signal_quality)
+# 模块 4: (V4.0: 已合并到 signal_quality)
 # ══════════════════════════════════════════════════════════════
 def signal_price_corr(backtest_results, sumdb):
-    """V3.1: 已合并到 signal_quality, 保留空壳兼容"""
+    """V4.0: 已合并到 signal_quality, 保留空壳兼容"""
     return ""
 
 
@@ -794,7 +794,7 @@ def signal_quality(backtest_results, sumdb):
                 f"| {r['ret_now']:+.1f}% | {r['signal']} | {reason} |"
             )
 
-    # --- V3.1: 按积分分桶（原模块4合入） ---
+    # --- V4.0: 按积分分桶（原模块4合入） ---
     lines += ["", "### 按综合分分桶", "",
               "| 积分区间 | 样本 | 至今胜率 | 至今均收 | 至今中位 | 备注 |",
               "|----------|------|---------|---------|---------|------|"]
@@ -818,7 +818,7 @@ def signal_quality(backtest_results, sumdb):
         note = "⚠小样本" if len(grp) < 10 else ""
         lines.append(f"| {name} | {len(grp)} | {wr} | {avg_r} | {med_r} | {note} |")
 
-    # --- V3.1: 按引擎数分桶 ---
+    # --- V4.0: 按引擎数分桶 ---
     lines += ["", "### 按引擎数分桶", "",
               "| 引擎数 | 样本 | 至今胜率 | 至今均收 | 至今中位 | 备注 |",
               "|--------|------|---------|---------|---------|------|"]
@@ -973,7 +973,7 @@ def save_token_history(sumdb, bt_data, mig_data, ts_data, liq_data=None):
 # P-ENRICH: 单币画像（Top ACC 代币完整档案）
 # ══════════════════════════════════════════════════════════════
 def coin_profile(bt_data, mig_data, ts_data, sumdb, liq_data=None):
-    """V3.1: Top ACC 表格看板（精简版，排除遗漏检测标记的代币）"""
+    """V4.0: Top ACC 表格看板（精简版，排除遗漏检测标记的代币）"""
     meta_map = {}
     try:
         for r in sumdb.execute(
@@ -1052,10 +1052,192 @@ def coin_profile(bt_data, mig_data, ts_data, sumdb, liq_data=None):
 # ══════════════════════════════════════════════════════════════
 # 主入口
 # ══════════════════════════════════════════════════════════════
+
+def hop2_analysis(src, sumdb):
+    """Hop2 隐蔽吸筹置信度分析（独立统计维度）"""
+    tokens = sumdb.execute("""
+        SELECT token_address, token_symbol, signal_level
+        FROM watchlist WHERE signal_level IN ('DIAMOND','RED','YELLOW')
+    """).fetchall()
+
+    if not tokens:
+        return ""
+
+    stats = []
+    # 全局累计
+    total_with_hop2 = 0
+    total_tokens = len(tokens)
+
+    for t in tokens:
+        addr = t["token_address"]
+        sym = t["token_symbol"] or "?"
+        sig = t["signal_level"]
+
+        row = src.execute("""
+            SELECT
+                COUNT(*)                                                              AS total_holders,
+                COALESCE(SUM(is_accumulating), 0)                                     AS acc_count,
+                SUM(CASE WHEN dex_ratio_hop2 IS NOT NULL AND dex_ratio_hop2 >= 0.5
+                         THEN 1 ELSE 0 END)                                           AS hop2_high,
+                SUM(CASE WHEN is_accumulating = 1
+                         AND dex_ratio_hop2 IS NOT NULL AND dex_ratio_hop2 >= 0.5
+                         THEN 1 ELSE 0 END)                                           AS hop2_acc,
+                SUM(CASE WHEN entity_id IS NOT NULL AND entity_id != ''
+                         THEN 1 ELSE 0 END)                                           AS entity_cnt,
+                COUNT(DISTINCT CASE WHEN entity_id IS NOT NULL AND entity_id != ''
+                              THEN entity_id END)                                      AS uniq_ent,
+                SUM(CASE WHEN gmgn_verified = 2 AND dex_ratio_hop2 >= 0.5
+                         THEN 1 ELSE 0 END)                                           AS t98,
+                SUM(CASE WHEN gmgn_verified = 1 AND dex_ratio_hop2 >= 0.5
+                         THEN 1 ELSE 0 END)                                           AS t90,
+                SUM(CASE WHEN gmgn_verified = 0 AND dex_ratio_hop2 >= 0.5
+                         THEN 1 ELSE 0 END)                                           AS t30,
+                SUM(CASE WHEN gmgn_verified IS NULL AND dex_ratio_hop2 >= 0.5
+                         THEN 1 ELSE 0 END)                                           AS t80,
+                AVG(CASE WHEN is_accumulating = 1 THEN dex_ratio_hop2 END)            AS hop2_avg
+            FROM bubblemap_holders
+            WHERE token_address = ?
+              AND batch_id = (
+                  SELECT MAX(batch_id) FROM bubblemap_holders WHERE token_address = ?
+              )
+        """, [addr, addr]).fetchone()
+
+        if not row or (row["total_holders"] or 0) == 0:
+            continue
+
+        acc = row["acc_count"] or 0
+        hop2_acc = row["hop2_acc"] or 0
+        hop2_high = row["hop2_high"] or 0
+        hop2_pct = hop2_acc / max(acc, 1)
+        ent_rate = (row["entity_cnt"] or 0) / max(row["total_holders"], 1)
+
+        if hop2_high > 0:
+            total_with_hop2 += 1
+
+        # 关联回测收益
+        ret_7d = None
+        ret_14d = None
+        first = sumdb.execute("""
+            SELECT scan_time FROM meta_snapshots
+            WHERE token_address = ? AND meta_verdict = 'ACC'
+            ORDER BY scan_time LIMIT 1
+        """, [addr]).fetchone()
+        if first:
+            sig_date = first[0][:19]
+            try:
+                from datetime import datetime as _dt2, timedelta as _td
+                sd = _dt2.strptime(sig_date, "%Y-%m-%d %H:%M:%S")
+                p0 = src.execute(
+                    "SELECT price_usd FROM gecko_market_data "
+                    "WHERE token_address=? AND scan_time>=? AND price_usd>0 "
+                    "ORDER BY scan_time LIMIT 1", (addr, sig_date)
+                ).fetchone()
+                if p0 and p0[0] > 0:
+                    entry = p0[0]
+                    d7 = (sd + _td(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+                    p7 = src.execute(
+                        "SELECT price_usd FROM gecko_market_data "
+                        "WHERE token_address=? AND scan_time>=? AND price_usd>0 "
+                        "ORDER BY scan_time LIMIT 1", (addr, d7)
+                    ).fetchone()
+                    if p7:
+                        ret_7d = (p7[0] - entry) / entry * 100
+                    d14 = (sd + _td(days=14)).strftime("%Y-%m-%d %H:%M:%S")
+                    p14 = src.execute(
+                        "SELECT price_usd FROM gecko_market_data "
+                        "WHERE token_address=? AND scan_time>=? AND price_usd>0 "
+                        "ORDER BY scan_time LIMIT 1", (addr, d14)
+                    ).fetchone()
+                    if p14:
+                        ret_14d = (p14[0] - entry) / entry * 100
+            except Exception:
+                pass
+
+        stats.append({
+            "symbol": sym, "signal": sig,
+            "total": row["total_holders"], "acc": acc,
+            "hop2_high": hop2_high, "hop2_acc": hop2_acc,
+            "hop2_pct": hop2_pct, "ent_rate": ent_rate,
+            "t98": row["t98"] or 0, "t90": row["t90"] or 0,
+            "t30": row["t30"] or 0, "t80": row["t80"] or 0,
+            "hop2_avg": row["hop2_avg"] or 0,
+            "uniq_ent": row["uniq_ent"] or 0,
+            "ret_7d": ret_7d, "ret_14d": ret_14d,
+        })
+
+    if not stats:
+        return ""
+
+    # ── 分组对比 ──
+    high_grp = [s for s in stats if s["hop2_pct"] >= 0.3]
+    low_grp  = [s for s in stats if s["hop2_pct"] < 0.3]
+
+    def _win(lst, key):
+        valid = [s for s in lst if s[key] is not None]
+        if not valid:
+            return "—"
+        w = sum(1 for s in valid if s[key] > 0)
+        return f"{w}/{len(valid)} ({w/len(valid)*100:.0f}%)"
+
+    def _avg(lst, key):
+        valid = [s[key] for s in lst if s[key] is not None]
+        if not valid:
+            return "—"
+        return f"{sum(valid)/len(valid):+.1f}%"
+
+    # 置信度分档汇总
+    sum_t98 = sum(s["t98"] for s in stats)
+    sum_t90 = sum(s["t90"] for s in stats)
+    sum_t30 = sum(s["t30"] for s in stats)
+    sum_t80 = sum(s["t80"] for s in stats)
+    tier_total = max(sum_t98 + sum_t90 + sum_t30 + sum_t80, 1)
+
+    hop2_coverage = total_with_hop2 / max(total_tokens, 1)
+    avg_hop2_pct = sum(s["hop2_pct"] for s in stats) / len(stats) if stats else 0
+    avg_ent_rate = sum(s["ent_rate"] for s in stats) / len(stats) if stats else 0
+
+    md = "## 🔬 Hop2 隐蔽吸筹置信度分析\n\n"
+
+    md += "### 全局统计\n\n"
+    md += "| 指标 | 值 |\n|------|-----|\n"
+    md += f"| watchlist 代币数 | {total_tokens} |\n"
+    md += f"| hop2 覆盖率 | {total_with_hop2}/{total_tokens} ({hop2_coverage:.0%}) |\n"
+    md += f"| 吸筹者 hop2 高占比(均) | {avg_hop2_pct:.1%} |\n"
+    md += f"| entity 穿透率(均) | {avg_ent_rate:.1%} |\n\n"
+
+    md += "### hop2 高组 vs 低组\n\n"
+    md += f"| 指标 | 高组(≥30%, {len(high_grp)}) | 低组(<30%, {len(low_grp)}) |\n"
+    md += f"|------|---------|--------|\n"
+    md += f"| 7d 胜率 | {_win(high_grp, 'ret_7d')} | {_win(low_grp, 'ret_7d')} |\n"
+    md += f"| 14d 胜率 | {_win(high_grp, 'ret_14d')} | {_win(low_grp, 'ret_14d')} |\n"
+    md += f"| 7d 均收益 | {_avg(high_grp, 'ret_7d')} | {_avg(low_grp, 'ret_7d')} |\n"
+    md += f"| 14d 均收益 | {_avg(high_grp, 'ret_14d')} | {_avg(low_grp, 'ret_14d')} |\n\n"
+
+    md += "### 置信度分档分布\n\n"
+    md += "| 档位 | 数量 | 占比 |\n|------|------|------|\n"
+    md += f"| 98分(GMGN双确认) | {sum_t98} | {sum_t98/tier_total:.0%} |\n"
+    md += f"| 90分(GMGN单确认) | {sum_t90} | {sum_t90/tier_total:.0%} |\n"
+    md += f"| 80分(未验证)     | {sum_t80} | {sum_t80/tier_total:.0%} |\n"
+    md += f"| 30分(GMGN否决)   | {sum_t30} | {sum_t30/tier_total:.0%} |\n\n"
+
+    # Top 10 hop2 代币
+    top10 = sorted(stats, key=lambda s: s["hop2_pct"], reverse=True)[:10]
+    if top10:
+        md += "### Top 10 hop2 代币\n\n"
+        md += "| 代币 | 信号 | hop2占比 | entity数 | 7d | 14d |\n"
+        md += "|------|------|----------|----------|-----|------|\n"
+        for s in top10:
+            r7 = f"{s['ret_7d']:+.1f}%" if s['ret_7d'] is not None else "—"
+            r14 = f"{s['ret_14d']:+.1f}%" if s['ret_14d'] is not None else "—"
+            md += f"| {s['symbol']} | {s['signal']} | {s['hop2_pct']:.0%} | {s['uniq_ent']} | {r7} | {r14} |\n"
+
+    return md
+
+
 def main():
     import time
     t0 = time.time()
-    print(f"AI-SUM 长期分析报告 V3.1 | {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    print(f"AI-SUM 长期分析报告 V4.0 | {datetime.now().strftime('%Y-%m-%d %H:%M')}")
 
     src = connect(SRC_DB, readonly=True)
     sumdb = connect(SUM_DB)
@@ -1097,16 +1279,24 @@ def main():
 
     # 组装报告
     today = datetime.now().strftime("%Y-%m-%d")
-    header = f"""# 📊 AI-SUM 长期分析报告 V3.1 — {today}
+    header = f"""# 📊 AI-SUM 长期分析报告 V4.0 — {today}
 
 > 时间基准: 首次信号时间（meta_snapshots/unified_results）
 > 数据源: bubblemap + gecko(20字段) + meta {len(ts_data)}代币
-> 生成: history_report.py V3.1 | 耗时: {{elapsed:.1f}}s
+> 生成: history_report.py V4.0 | 耗时: {{elapsed:.1f}}s
 
 ---
 
 """
+    # 模块 7: hop2 隐蔽吸筹分析 (v5)
+    print("  [7/7] hop2 隐蔽吸筹分析...")
+    hop2_md = hop2_analysis(src, sumdb)
+    if hop2_md:
+        print(f"        hop2 分析完成")
+
     parts = [bt_md, mig_md, ts_md, liq_md, quality_md]
+    if hop2_md:
+        parts.append(hop2_md)
     if profile_md:
         parts.append(profile_md)
     body = "\n---\n\n".join(p for p in parts if p)

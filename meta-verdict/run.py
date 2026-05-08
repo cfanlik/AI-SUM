@@ -18,7 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import config
-from collector import get_connection, ensure_tables, collect_all_tokens, save_meta_result
+from collector import get_connection, ensure_tables, collect_all_tokens, save_meta_result, ensure_hop2_tracking_table, collect_hop2_tracking
 from arbitrator import run_arbitration, arbitrate
 from trend_analyzer import analyze_trend
 from report_generator import generate_report
@@ -39,6 +39,7 @@ def main():
     scan_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn = get_connection()
     ensure_tables(conn)
+    ensure_hop2_tracking_table(conn)
 
     # ── 引擎健康自检 ──
     health = _check_engine_health(conn)
@@ -98,6 +99,49 @@ def main():
 
     # 更新生命周期表
     _update_lifecycle(conn, all_results, scan_time)
+
+    # ── hop2 跟踪采集 ──
+    hop2_saved = collect_hop2_tracking(conn, scan_time)
+    logger.info(f"hop2_tracking 采集完成: {hop2_saved} 条")
+
+    # ── hop2 积分注入 (v5) ──
+    hop2_map = {}
+    try:
+        for row in conn.execute("SELECT token_address, hop2_acc_pct FROM hop2_tracking WHERE scan_time = ?", [scan_time]):
+            hop2_map[row["token_address"].lower()] = row["hop2_acc_pct"] or 0
+    except Exception:
+        pass
+    if hop2_map:
+        import config as _cfg
+        for r in all_arbitrated:
+            pct = hop2_map.get(r.token_address.lower(), 0)
+            if pct >= 0.30:
+                bonus = _cfg.HOP2_ACC_BONUS["high"]
+            elif pct >= 0.15:
+                bonus = _cfg.HOP2_ACC_BONUS["medium"]
+            else:
+                bonus = 0
+            if bonus > 0:
+                r.meta_score = round(r.meta_score + bonus, 2)
+                # 重新判定裁决
+                if r.meta_score >= _cfg.META_ACC_THRESHOLD:
+                    r.meta_verdict = "ACC"
+                logger.debug(f"  {r.token_symbol}: hop2 bonus +{bonus} → {r.meta_score}")
+        # 重新保存带 hop2 bonus 的结果
+        for r in all_arbitrated:
+            if hop2_map.get(r.token_address.lower(), 0) >= 0.15:
+                save_meta_result(conn, {
+                    "scan_time": scan_time, "chain": r.chain,
+                    "token_address": r.token_address, "token_symbol": r.token_symbol,
+                    "meta_score": r.meta_score, "meta_verdict": r.meta_verdict,
+                    "engine_hits": r.engine_hits, "master_signal": r.master_signal,
+                    "opus_verdict": r.opus_verdict, "unified_signal": r.unified_signal,
+                    "whale_level": r.whale_level, "cb_verdict": r.cb_verdict,
+                    "stage": r.stage, "master_score": r.master_score,
+                    "opus_score": r.opus_score, "unified_score": r.unified_score,
+                    "whale_score": r.whale_score, "cb_score": r.cb_score,
+                })
+        logger.info(f"hop2 积分注入: {sum(1 for p in hop2_map.values() if p >= 0.15)}/{len(hop2_map)} 代币获得加分")
 
     # 生成报告（含趋势+健康+矛盾）
     generate_report(acc_list, dist_list, len(all_data), scan_time, trend, health, conflicts)
