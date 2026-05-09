@@ -279,7 +279,7 @@ cd /opt/AI-SUM && python3 meta-verdict/history_report.py
 | **history_report V3.0** | **2026-05-05** | 9模块融合: +流动性健康度+信号质量评估+失败案例+漏网之鱼; gecko 20字段激活(2→10); 中位数+MDD+P/R/F1+引擎组合矩阵; meta补漏(ACC 100%覆盖); token_history +5列 |
 | **history_report V2.0** | **2026-05-03** | 回测时间基准修复+遗漏检测Top10Δ复合条件+斜率平序列归零+14d校验+单币画像增强+vs昨天Δ+token_history扩展 |
 | **history_report V1.0** | **2026-05-03** | 4模块融合: 信号回测+holder迁移+积分时序+信号×收益 |
-| **hop2 跟踪 V5.1** | **2026-05-09** | hop2_tracking 数据通过 select-coin Web API 暴露 + AiSumPage 前端面板 + 趋势对比(↑↓/NEW) |
+| **hop2 跟踪 V5.1** | **2026-05-09** | history_report.py hop2 Top10 增加排名趋势列(↑↓/🆕)+浓度色标(🟡🟣); select-coin API 保留; 独立Tab移除 |
 | **meta-verdict V2.0** | **2026-05-03** | EXPIRED纳入+出货抑制+分项积分持久化+矛盾检测(5规则)+全量保存+趋势分析 |
 | **meta-verdict V1.5** | **2026-05-03** | P1: 趋势分析+引擎健康自检+报告重构(7区块)+unified出货映射 |
 | **meta-verdict V1.0** | 2026-04-29 | 五引擎仲裁层上线; token_lifecycle; 122代币→26吸筹 |
