@@ -339,3 +339,38 @@ cd /opt/AI-SUM && python3 meta-verdict/history_report.py
 
 - 配置: /etc/logrotate.d/ai-sum
 - 策略: 每日轮转, 保留 60 天, gzip 压缩, copytruncate
+
+---
+
+## pump_detector — 拉升前兆引擎 (2026-05-10)
+
+### 功能
+从 BubbleMap + Gecko + Meta + TokenHistory 四表计算 6 维 pump_readiness 评分，分级输出告警。
+
+### 6 维评分
+| 维度 | 权重 | 数据源 |
+|------|------|--------|
+| D1 量缩程度 | 0-20 | gecko volume_24h vs 7d均量 |
+| D2 LP稳定性 | 0-20 | gecko reserve_usd |
+| D3 吸筹密度 | 0-20 | bubblemap acc_count/total |
+| D4 Meta持续 | 0-15 | consec_acc + meta_score |
+| D5 留存率 | 0-10 | retention_7d |
+| D6 均分质量 | 0-10 | avg_acc_score |
+
+### 告警分级
+| 级别 | 阈值 |
+|------|------|
+| IMMINENT | ≥75 |
+| READY_VOL_SHRINK | ≥50 且 vol_ratio<0.3 |
+| READY | ≥50 |
+| WATCH | ≥35 |
+
+### 输出
+- DB: `pump_alerts` 表（WATCH以上）
+- MD: `report/pump/pump_YYYYMMDD_HHMM.md`
+- UI: AI-SUM 🚀拉升前兆 Tab
+
+### 调用
+- Crontab: meta-verdict 完成后 2 分钟自动调用
+- 代码: `meta-verdict/run.py` 中 `pump_detector.run(scan_time)`
+- 独立: `python3 meta-verdict/pump_detector.py`

@@ -145,6 +145,15 @@ def main():
 
     # 生成报告（含趋势+健康+矛盾）
     generate_report(acc_list, dist_list, len(all_data), scan_time, trend, health, conflicts)
+
+    # ── 拉升前兆扫描 ──
+    try:
+        from pump_detector import run as pump_run
+        pump_results = pump_run(scan_time)
+        imm_count = sum(1 for r in pump_results if r["alert_level"] == "IMMINENT")
+        logger.info(f"pump_detector 完成: {len(pump_results)} 代币, IMMINENT={imm_count}")
+    except Exception as e:
+        logger.error(f"pump_detector 失败: {e}")
     conn.close()
 
 

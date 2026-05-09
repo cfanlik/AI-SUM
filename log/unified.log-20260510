@@ -1,0 +1,62 @@
+
+[unified-scan] 全库扫描启动
+  源库: /opt/select-coin/data/select.db
+  模式: 联网(Gecko Pool)
+  代币总数: 196
+  进度: 50/196
+  进度: 100/196
+  进度: 150/196
+
+======================================================================
+  unified-scan 统一雷达报 — 2026-05-09 00:23
+  扫描: 196 | 有信号: 8 | 耗时: 182.1s
+  💎 DIAMOND: 8
+======================================================================
+
+  💎 DIAMOND (8 个)
+  代币       链      ACC% DIST% STRUCT%  DEX真金    CEX      LP($)    V/L 信号
+  -----------------------------------------------------------------
+  CYS      bsc    36.4  26.7    36.4  96.8% +10.1% A1(DIAMOND), D2(出货者), S2(M/L=128.6x)
+  TAG      bsc    36.4   0.0    81.8  90.7%  +8.9% A1(DIAMOND), S1(极端集中), S2(M/L=199.8x)
+  GWEI     bsc    36.4   0.0    45.5  95.5%  +5.4% A1(DIAMOND), S1(极端集中)
+  UAI      bsc    36.4   0.0    36.4  93.3%  -0.9% A1(DIAMOND), S2(M/L=293.5x)
+  ROBO     bsc    36.4   0.0     0.0  97.1%  -1.9% A1(DIAMOND)
+  COLLECT  bsc    36.4   0.0    81.8  97.7%  +0.5% A1(DIAMOND), S1(极端集中), S2(M/L=71.8x)
+  BILL     bsc    59.1   0.0    18.2  93.6%  -1.5% A1(DIAMOND), A2(RED), S3(买>卖), S4(V/L=44.94)
+  SQD      bsc    36.4   0.0     0.0  94.5%  +2.7% A1(DIAMOND)
+
+  报告已保存: /opt/AI-SUM/report/unified/unified_20260509_0023.md
+
+  持久化完成: unified_results + daily_summary
+[unified] 已保存 8 条结果到 select-sum.db
+  新增预警: TAG(DIAMOND), ROBO(DIAMOND), BILL(DIAMOND)
+
+[unified-scan] 全库扫描启动
+  源库: /opt/select-coin/data/select.db
+  模式: 联网(Gecko Pool)
+  代币总数: 196
+  进度: 50/196
+  进度: 100/196
+  进度: 150/196
+
+======================================================================
+  unified-scan 统一雷达报 — 2026-05-09 12:23
+  扫描: 196 | 有信号: 7 | 耗时: 185.1s
+  💎 DIAMOND: 7
+======================================================================
+
+  💎 DIAMOND (7 个)
+  代币       链      ACC% DIST% STRUCT%  DEX真金    CEX      LP($)    V/L 信号
+  -----------------------------------------------------------------
+  CYS      bsc    36.4  26.7    36.4  96.8% +10.0% A1(DIAMOND), D2(出货者), S2(M/L=128.2x)
+  TAG      bsc    36.4   0.0    81.8  90.7%  +8.9% A1(DIAMOND), S1(极端集中), S2(M/L=195.0x)
+  GWEI     bsc    36.4   0.0    63.6  96.5%  +5.4% A1(DIAMOND), S1(极端集中), S3(买>卖)
+  UAI      bsc    36.4   0.0    36.4  93.3%  -0.9% A1(DIAMOND), S2(M/L=292.6x)
+  COLLECT  bsc    36.4   0.0    81.8  97.7%  +0.5% A1(DIAMOND), S1(极端集中), S2(M/L=84.0x), S4(V/L=11.64)
+  BILL     bsc    36.4   0.0    18.2  94.7%  -1.5% A1(DIAMOND), S3(买>卖), S4(V/L=29.94)
+  SQD      bsc    36.4   0.0     0.0  94.5%  +2.7% A1(DIAMOND)
+
+  报告已保存: /opt/AI-SUM/report/unified/unified_20260509_1223.md
+
+  持久化完成: unified_results + daily_summary
+[unified] 已保存 7 条结果到 select-sum.db
