@@ -1220,16 +1220,53 @@ def hop2_analysis(src, sumdb):
     md += f"| 80分(未验证)     | {sum_t80} | {sum_t80/tier_total:.0%} |\n"
     md += f"| 30分(GMGN否决)   | {sum_t30} | {sum_t30/tier_total:.0%} |\n\n"
 
-    # Top 10 hop2 代币
+    # Top 10 hop2 代币（含排名趋势对比）
     top10 = sorted(stats, key=lambda s: s["hop2_pct"], reverse=True)[:10]
     if top10:
+        # 读取上一期 hop2_tracking 排名（用于趋势对比）
+        prev_rank_map = {}
+        try:
+            times = sumdb.execute(
+                "SELECT DISTINCT scan_time FROM hop2_tracking ORDER BY scan_time DESC LIMIT 2"
+            ).fetchall()
+            if len(times) >= 2:
+                prev_time = times[1]["scan_time"]
+                prev_rows = sumdb.execute(
+                    "SELECT token_symbol, hop2_acc_pct FROM hop2_tracking "
+                    "WHERE scan_time = ? AND hop2_acc_pct > 0 ORDER BY hop2_acc_pct DESC",
+                    [prev_time]
+                ).fetchall()
+                for idx, r in enumerate(prev_rows):
+                    prev_rank_map[r["token_symbol"]] = idx + 1
+        except Exception:
+            pass
+
         md += "### Top 10 hop2 代币\n\n"
-        md += "| 代币 | 信号 | hop2占比 | entity数 | 7d | 14d |\n"
-        md += "|------|------|----------|----------|-----|------|\n"
-        for s in top10:
+        md += "| # | 趋势 | 代币 | 信号 | hop2占比 | entity数 | 7d | 14d |\n"
+        md += "|---|------|------|------|----------|----------|-----|------|\n"
+        for idx, s in enumerate(top10):
+            rank = idx + 1
             r7 = f"{s['ret_7d']:+.1f}%" if s['ret_7d'] is not None else "—"
             r14 = f"{s['ret_14d']:+.1f}%" if s['ret_14d'] is not None else "—"
-            md += f"| {s['symbol']} | {s['signal']} | {s['hop2_pct']:.0%} | {s['uniq_ent']} | {r7} | {r14} |\n"
+            # 计算趋势
+            sym = s['symbol']
+            if sym in prev_rank_map:
+                change = prev_rank_map[sym] - rank
+                if change > 0:
+                    trend = f"↑{change}"
+                elif change < 0:
+                    trend = f"↓{abs(change)}"
+                else:
+                    trend = "─"
+            else:
+                trend = "🆕"
+            # hop2≥50% 标记 🟡, ≥15% 标记 🟣
+            pct_mark = ""
+            if s['hop2_pct'] >= 0.5:
+                pct_mark = " 🟡"
+            elif s['hop2_pct'] >= 0.15:
+                pct_mark = " 🟣"
+            md += f"| {rank} | {trend} | {sym} | {s['signal']} | {s['hop2_pct']:.0%}{pct_mark} | {s['uniq_ent']} | {r7} | {r14} |\n"
 
     return md
 
