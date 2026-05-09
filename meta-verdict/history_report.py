@@ -1326,6 +1326,7 @@ def main():
 
 """
     # 模块 7: hop2 隐蔽吸筹分析 (v5)
+
     print("  [7/7] hop2 隐蔽吸筹分析...")
     hop2_md = hop2_analysis(src, sumdb)
     if hop2_md:
@@ -1336,6 +1337,13 @@ def main():
         parts.append(hop2_md)
     if profile_md:
         parts.append(profile_md)
+
+    # 模块 8: 合约信号总览 (v6)
+    print("  [8] 合约信号总览...")
+    futures_md = futures_analysis(src, sumdb)
+    if futures_md:
+        parts.append(futures_md)
+        print("        合约信号分析完成")
     body = "\n---\n\n".join(p for p in parts if p)
     elapsed = time.time() - t0
     md = header.format(elapsed=elapsed) + body
@@ -1355,3 +1363,83 @@ def main():
 if __name__ == "__main__":
     main()
 
+
+
+# ── 模块 8: 合约信号总览 (v6 新增) ──
+def futures_analysis(src, sumdb):
+    """从 futures_snapshots 读取最新合约数据, 与 meta 交叉分析"""
+    try:
+        ft_rows = src.execute("""
+            SELECT * FROM futures_snapshots
+            WHERE scan_time = (SELECT MAX(scan_time) FROM futures_snapshots)
+        """).fetchall()
+    except Exception:
+        return None
+
+    if not ft_rows:
+        return None
+
+    # meta ACC 代币
+    acc_tokens = {}
+    try:
+        for r in sumdb.execute("""
+            SELECT token_address, token_symbol, meta_score, meta_verdict
+            FROM meta_snapshots
+            WHERE scan_time = (SELECT MAX(scan_time) FROM meta_snapshots)
+              AND meta_verdict = 'ACC'
+        """):
+            acc_tokens[r[0].lower() if r[0] else ""] = {
+                "symbol": r[1], "meta_score": r[2], "verdict": r[3]
+            }
+    except Exception:
+        pass
+
+    lines = ["## 📊 模块 8: 合约信号总览\n"]
+    lines.append(f"> 合约数据代币: {len(ft_rows)} | ACC代币: {len(acc_tokens)}\n")
+
+    # 8a: ACC 代币合约交叉验证
+    if acc_tokens:
+        lines.append("### ACC 代币合约验证\n")
+        lines.append("| 代币 | meta | OI($) | OI变化 | FR | L/S | 验证 |")
+        lines.append("|------|------|-------|--------|-----|-----|------|")
+        for ft in ft_rows:
+            addr = (ft["token_address"] or "").lower()
+            if addr in acc_tokens:
+                acc = acc_tokens[addr]
+                oi_val = ft["oi_value_usd"] or 0
+                oi_chg = ft["oi_change_24h"] or 0
+                fr = ft["funding_rate"] or 0
+                ls = ft["long_short_ratio"] or 0
+                tag = "✅合约确认" if oi_chg > 0.05 else "⚠合约分歧" if oi_chg < -0.10 else "—平稳"
+                lines.append(f"| {acc['symbol']} | {acc['meta_score']:.1f} | ${oi_val:,.0f} | {oi_chg:.1%} | {fr:.4%} | {ls:.2f} | {tag} |")
+        lines.append("")
+
+    # 8b: OI 变化 Top10
+    sorted_oi = sorted(ft_rows, key=lambda x: abs(x["oi_change_24h"] or 0), reverse=True)[:10]
+    lines.append("### OI 24h 变化 Top10\n")
+    lines.append("| 代币 | OI($) | OI变化24h | FR | L/S |")
+    lines.append("|------|-------|-----------|-----|-----|")
+    for ft in sorted_oi:
+        oi_val = ft["oi_value_usd"] or 0
+        oi_chg = ft["oi_change_24h"] or 0
+        fr = ft["funding_rate"] or 0
+        ls = ft["long_short_ratio"] or 0
+        arrow = "🔺" if oi_chg > 0 else "🔻"
+        lines.append(f"| {ft['symbol']} | ${oi_val:,.0f} | {arrow} {oi_chg:.1%} | {fr:.4%} | {ls:.2f} |")
+    lines.append("")
+
+    # 8c: FR 极端值
+    extreme_fr = [ft for ft in ft_rows if ft["funding_rate"] and abs(ft["funding_rate"]) > 0.0005]
+    if extreme_fr:
+        extreme_fr.sort(key=lambda x: x["funding_rate"])
+        lines.append("### Funding Rate 极端值\n")
+        lines.append("| 代币 | FR | 类型 | L/S | OI($) |")
+        lines.append("|------|-----|------|-----|-------|")
+        for ft in extreme_fr[:10]:
+            fr = ft["funding_rate"]
+            typ = "🔴空头拥挤" if fr < -0.0003 else "⚠偏空" if fr < 0 else "⚠多头过热" if fr > 0.001 else "偏多"
+            ls = ft["long_short_ratio"] or 0
+            lines.append(f"| {ft['symbol']} | {fr:.4%} | {typ} | {ls:.2f} | ${(ft['oi_value_usd'] or 0):,.0f} |")
+        lines.append("")
+
+    return "\n".join(lines)

@@ -374,3 +374,19 @@ cd /opt/AI-SUM && python3 meta-verdict/history_report.py
 - Crontab: meta-verdict 完成后 2 分钟自动调用
 - 代码: `meta-verdict/run.py` 中 `pump_detector.run(scan_time)`
 - 独立: `python3 meta-verdict/pump_detector.py`
+
+## pump_detector v2 升级 (2026-05-10)
+
+### 变更
+- 6维→9维评分: 新增 D7(OI变化) D8(Funding) D9(多空比)
+- D1修正: DEX量缩+OI暴增→降分(过滤资金搬家假量缩)
+- 小OI降权: OI<$1M时D7减半
+- 阈值调整: IMMINENT≥90 / READY≥65 / WATCH≥45 (满分128)
+- 报告增加合约列(OI/FR/LS) + 链上/合约分歧检测
+
+### 数据源
+- futures_snapshots 表(select.db), 由 select-coin/futures/binance_futures.py 采集
+- Cron: :45 0,6,12,18 (6h/轮, 177代币, 3min完成)
+
+### history_report 模块8
+- 新增 futures_analysis(): ACC代币合约验证 + OI变化Top10 + FR极端值
