@@ -335,6 +335,16 @@ cd /opt/AI-SUM && python3 meta-verdict/history_report.py
 - 下次验证: 2026-05-10
 - 验证 4 个假设: H1(低留存后续) H2(引擎数) H3(积分分桶) H4(2分阈值)
 
+
+### C9 深度套牢协同持仓 (2026-05-11)
+
+- 信号: `C9` — 深度套牢协同持仓 (ACC, weight=6)
+- 条件: VWAP/现价 > 2.5x AND underwater% > 90% AND cost_cv < 0.20 AND holders >= 30
+- Verdict: C9 独立 → `COORDINATED_HOLD` (+2分) / C9+C2 → `STEALTH_ACC` (+3分)
+- 检测目标: 一致行动人在高位建仓后坚定持有，拉升动机极强
+- 首次命中: SQD (vwap/price=3.0x, underwater=97%, CV=0.182, holders=192)
+- 精准度: 全量198代币仅命中SQD 1个
+
 ### 日志轮转
 
 - 配置: /etc/logrotate.d/ai-sum
