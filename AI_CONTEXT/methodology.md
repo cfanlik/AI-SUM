@@ -195,6 +195,66 @@ OR reserve_usd < $10,000       → LP 枯竭
 
 ---
 
+
+---
+
+## 5.5. 成本一致性方法论 (C9 信号)
+
+> 新增: 2026-05-11 | 首次命中: SQD
+
+### 检测目标
+
+识别"控盘套牢式吸筹"——大量地址在同一价位区间高度集中建仓后深度套牢但坚定持有，表明一致行动人（庄家多钱包操作）控盘，拉升动机极强。
+
+### C9 触发条件
+
+| 参数 | 阈值 | 数据源 | 说明 |
+|------|------|--------|------|
+| VWAP / gecko_price | ≥ 2.5x | cost_profiler.vwap / gecko_price | 主力成本远高于现价 |
+| underwater_pct | ≥ 90% | deep_underwater + shallow_underwater | 绝大多数持仓者被套 |
+| cost_cv | < 0.20 | cost_profiler.cost_cv | 成本变异系数极小=建仓一致 |
+| cost_holders_count | ≥ 30 | cost_profiler.cost_holders_count | 充足样本 |
+
+### Verdict 路径
+
+```
+C9 独立 → COORDINATED_HOLD (+2 meta分)
+C9 + C2(cost_cv < 0.15) → STEALTH_ACC (+3 meta分)
+```
+
+### 与 C2 的区别
+
+| | C2 (成本聚集) | C9 (深度套牢协同) |
+|--|--------------|-------------------|
+| CV 阈值 | < 0.15 (严格) | < 0.20 (宽松) |
+| 额外条件 | 无 | VWAP/价 ≥ 2.5x + 水下 ≥ 90% |
+| 单独 verdict | 无(需 C1/C3 组合) | 有(COORDINATED_HOLD) |
+| 检测对象 | 一般成本聚集 | 深度套牢下的庄家控盘 |
+
+### 首次实测 (SQD, 2026-05-11)
+
+| 指标 | 数据 |
+|------|------|
+| VWAP | $0.1189 |
+| gecko_price | $0.0395 |
+| VWAP/价 | 3.0x |
+| underwater_pct | 97.0% |
+| cost_cv | 0.182 |
+| cost_holders_count | 192 |
+| 成本分布 | 170+ 地址 $0.118±0.003 |
+| 全量命中 | 198 代币中仅 SQD 1 个 |
+
+### 第一性原理验证
+
+SQD 吸筹特征:
+- 连续 37 轮 ACC 信号 (18.5 天)
+- Top5 控盘 86.7%
+- 7d 留存率 90.9%
+- pump_score=68 (READY)
+- 合约 OI=$1.19M, long_short_ratio=3.0
+
+**结论**: C9 成功填补 CB 引擎"深度套牢但坚定持仓"模式的检测空白。
+
 ## 6. 跨日对比方法论
 
 ### token_history 对比维度

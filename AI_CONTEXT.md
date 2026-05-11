@@ -1,6 +1,6 @@
 # AI-SUM 六引擎综合分析系统
 
-> 版本: V3.0 | 更新: 2026-05-05 | VPS: `/opt/AI-SUM/`
+> 版本: V3.1 | 更新: 2026-05-11 | VPS: `/opt/AI-SUM/`
 > GitHub: https://github.com/cfanlik/AI-SUM | DB: `select-sum.db`
 
 ---
@@ -104,7 +104,7 @@ gecko_market_data ──┼── src.db ──┤  opus-scan    → opus_snapsh
 
 - 读取 `src.bubblemap_holders`(gmgn_avg_price) + `src.gecko_market_data`(price_usd)
 - 四成本带: 深水区(>1.3x) / 浅水区(≈1x) / 盈利区(<1x) / 暴利区(<0.5x)
-- 8 信号(C1-C8): C1水下加仓 / C2一致行动人 / C4暴利出逃 / C8暴利净流出
+- 9 信号(C1-C9): C1水下加仓 / C2一致行动人 / C4暴利出逃 / C8暴利净流出 / C9深度套牢协同持仓
 - 状态跃迁: `watchlist RED/DIAMOND × C1 → SQUEEZE_ACC` / `DIAMOND × C4 → DEATH_SPIRAL`
 - SQUEEZE_ACC 三级: LOW(仅C1) / MED(C1+C2) / HIGH(C1+C2+历史对比)
 - 快照间距>48h → C1 权重降权
@@ -126,6 +126,7 @@ gecko_market_data ──┼── src.db ──┤  opus-scan    → opus_snapsh
 | CB | SQUEEZE_ACC_HIGH/STEALTH_ACC | +3 |
 | CB | SQUEEZE_ACC_MED | +2 |
 | CB | SQUEEZE_ACC_LOW / IRON_HOLD | +1 |
+| CB | COORDINATED_HOLD | +2 |
 | CB | DEATH_SPIRAL | -5 |
 | CB | LIQUIDITY_CRISIS | -3 |
 | CB | PROFIT_EXIT | -2 |
@@ -243,7 +244,7 @@ meta_snapshots ACC/DIST 代币全量写入，解决丢失问题。
 | `opus_snapshots` | persist_helper | acc_confidence, dist_confidence, verdict | 吸筹/出货置信度 |
 | `whale_snapshots` | persist_helper | confidence, level | 庄控检测 |
 | `unified_results` | unified-scan | verdict, acc_score, dist_score | 交叉信号 |
-| `cost_basis_snapshots` | cost-basis-scan | verdict, vwap, gecko_price, acc_pct | 成本分层 |
+| `cost_basis_snapshots` | cost-basis-scan | verdict, vwap, gecko_price, acc_pct, cost_cv | 成本分层(含C9) |
 | `meta_snapshots` | meta-verdict | meta_score, meta_verdict, stage, 5×分项积分 | 仲裁结果 |
 | `token_lifecycle` | meta-verdict | current_stage, prev_stage, transition | 生命周期 |
 | `token_history` | history_report | computed_date, signal_first_seen, price_*_ret, retention_*, score_slope, **volume_24h, reserve_usd, buy_tx_pct, turnover_ratio, mdd** | 长期跟踪(V3扩展) |
@@ -276,6 +277,7 @@ cd /opt/AI-SUM && python3 meta-verdict/history_report.py
 
 | 版本 | 日期 | 关键变更 |
 |------|------|----------|
+| **cost-basis V1.2 + meta V2.1** | **2026-05-11** | C9深度套牢协同持仓信号(weight=6); COORDINATED_HOLD verdict(+2分); 条件: VWAP/价>2.5x+水下>90%+CV<0.20+holders≥30; 全量198代币仅命中SQD 1个(精准无误判); SQD meta_score 6.0→9.0 |
 | **history_report V3.0** | **2026-05-05** | 9模块融合: +流动性健康度+信号质量评估+失败案例+漏网之鱼; gecko 20字段激活(2→10); 中位数+MDD+P/R/F1+引擎组合矩阵; meta补漏(ACC 100%覆盖); token_history +5列 |
 | **history_report V2.0** | **2026-05-03** | 回测时间基准修复+遗漏检测Top10Δ复合条件+斜率平序列归零+14d校验+单币画像增强+vs昨天Δ+token_history扩展 |
 | **history_report V1.0** | **2026-05-03** | 4模块融合: 信号回测+holder迁移+积分时序+信号×收益 |
