@@ -79,15 +79,3 @@ TOTAL_WEIGHT = C1_WEIGHT + C2_WEIGHT + C3_WEIGHT + C4_WEIGHT + C5_WEIGHT + C6_WE
 ACC_WEIGHT_TOTAL  = C1_WEIGHT + C2_WEIGHT + C3_WEIGHT  # 18
 DIST_WEIGHT_TOTAL = C4_WEIGHT + C5_WEIGHT + C8_WEIGHT   # 16
 STRUCT_WEIGHT_TOTAL = C6_WEIGHT + C7_WEIGHT              # 9
-
-# ── C9: 深度套牢协同持仓 (ACC, weight=6) ──
-# 当大量地址深度套牢(>2.5x)且成本高度集中(CV<0.20)，
-# 表明一致行动人在高位建仓后坚定持有，拉升动机极强
-C9_WEIGHT = 6
-C9_UNDERWATER_RATIO = float(os.getenv("CB_C9_UNDERWATER_RATIO", "2.5"))   # 中位成本 / 现价 > 2.5x
-C9_UNDERWATER_PCT = float(os.getenv("CB_C9_UNDERWATER_PCT", "90"))        # underwater% > 90%
-C9_CV_THRESHOLD = float(os.getenv("CB_C9_CV", "0.20"))                    # CV < 0.20 (比C2宽松)
-C9_MIN_HOLDERS = int(os.getenv("CB_C9_MIN_HOLDERS", "30"))               # 至少30个有成本数据
-
-# 更新 ACC 总权重
-ACC_WEIGHT_TOTAL  = C1_WEIGHT + C2_WEIGHT + C3_WEIGHT + C9_WEIGHT  # 24

@@ -53,7 +53,6 @@ CB_SCORE = {
     "LIQUIDITY_CRISIS":-3,
     "PROFIT_EXIT":     -2,
     "BAG_PASSING":     -1,
-    "COORDINATED_HOLD": 2,
 }
 
 # ── 仲裁阈值 ──

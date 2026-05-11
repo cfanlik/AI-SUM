@@ -190,20 +190,6 @@ def evaluate(
         vr.verdict_layer = "COST_COMBO"
         return vr
 
-    # ── C9 独立裁决: 深度套牢协同持仓 ──
-    c9 = _signal_hit(vr, "C9")
-    if c9 and c2:
-        vr.verdict = "STEALTH_ACC"
-        vr.verdict_detail = "深度套牢 + 成本聚集 → 一致行动人控盘"
-        vr.verdict_layer = "COST_COMBO"
-        return vr
-
-    if c9:
-        vr.verdict = "COORDINATED_HOLD"
-        vr.verdict_detail = "深度套牢协同持仓 → 拉升动机强"
-        vr.verdict_layer = "COST_COMBO"
-        return vr
-
     # ── 第三层: 通用方向裁决 ──
     if vr.acc_pct >= config.VERDICT_ACC_MIN:
         vr.verdict = "ACCUMULATING"
@@ -304,28 +290,6 @@ def _evaluate_signals(vr: VerdictResult, profile: CostProfile, gecko: Optional[G
         code="C8", name="暴利区48h净流出", weight=config.C8_WEIGHT,
         matched=c8_hit, dimension="DIST",
         detail=f"净流出={c8_pct:.1f}%(阈值>{config.C8_NETFLOW_PCT}%)",
-    ))
-
-
-    # ── C9: 深度套牢协同持仓 (ACC, weight=6) ──
-    # 大量地址深度套牢且成本高度集中 → 一致行动人控盘持仓
-    c9_hit = False
-    c9_detail = ""
-    if profile.cost_holders_count >= config.C9_MIN_HOLDERS:
-        median_cost = profile.vwap  # 使用 VWAP 作为中位成本近似
-        underwater_ratio = median_cost / profile.gecko_price if profile.gecko_price > 0 else 0
-        underwater_pct = vr.deep_underwater_pct + vr.shallow_underwater_pct
-        c9_hit = (underwater_ratio >= config.C9_UNDERWATER_RATIO
-                  and underwater_pct >= config.C9_UNDERWATER_PCT
-                  and profile.cost_cv < config.C9_CV_THRESHOLD)
-        c9_detail = (f"成本/现价={underwater_ratio:.1f}x 水下={underwater_pct:.0f}% "
-                     f"CV={profile.cost_cv:.3f} holders={profile.cost_holders_count}")
-    else:
-        c9_detail = f"holders={profile.cost_holders_count} < {config.C9_MIN_HOLDERS}"
-    vr.evidence.append(Evidence(
-        code="C9", name="深度套牢协同持仓", weight=config.C9_WEIGHT,
-        matched=c9_hit, dimension="ACC",
-        detail=c9_detail,
     ))
 
     # ── 计算 ACC/DIST/STRUCT 百分比 ──
