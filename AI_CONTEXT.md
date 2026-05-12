@@ -1,6 +1,6 @@
 # AI-SUM 六引擎综合分析系统
 
-> 版本: V3.1 | 更新: 2026-05-11 | VPS: `/opt/AI-SUM/`
+> 版本: V3.1 | 更新: 2026-05-12 | VPS: `/opt/AI-SUM/`
 > GitHub: https://github.com/cfanlik/AI-SUM | DB: `select-sum.db`
 
 ---
@@ -277,6 +277,7 @@ cd /opt/AI-SUM && python3 meta-verdict/history_report.py
 
 | 版本 | 日期 | 关键变更 |
 |------|------|----------|
+| **bugfix** | **2026-05-12** | 修复 `history_report.py` 合约分析模块未定义报错导致报告生成失败的问题 (将 `futures_analysis` 定义移到执行块之前)，补发 11 日和 12 日长期分析报告。 |
 | **cost-basis V1.2 + meta V2.1** | **2026-05-11** | C9深度套牢协同持仓信号(weight=6); COORDINATED_HOLD verdict(+2分); 条件: VWAP/价>2.5x+水下>90%+CV<0.20+holders≥30; 全量198代币仅命中SQD 1个(精准无误判); SQD meta_score 6.0→9.0 |
 | **history_report V3.0** | **2026-05-05** | 9模块融合: +流动性健康度+信号质量评估+失败案例+漏网之鱼; gecko 20字段激活(2→10); 中位数+MDD+P/R/F1+引擎组合矩阵; meta补漏(ACC 100%覆盖); token_history +5列 |
 | **history_report V2.0** | **2026-05-03** | 回测时间基准修复+遗漏检测Top10Δ复合条件+斜率平序列归零+14d校验+单币画像增强+vs昨天Δ+token_history扩展 |

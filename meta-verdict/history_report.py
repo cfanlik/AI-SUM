@@ -1360,11 +1360,6 @@ def main():
     sumdb.close()
 
 
-if __name__ == "__main__":
-    main()
-
-
-
 # ── 模块 8: 合约信号总览 (v6 新增) ──
 def futures_analysis(src, sumdb):
     """从 futures_snapshots 读取最新合约数据, 与 meta 交叉分析"""
@@ -1443,3 +1438,10 @@ def futures_analysis(src, sumdb):
         lines.append("")
 
     return "\n".join(lines)
+
+
+if __name__ == "__main__":
+    main()
+
+
+
