@@ -1053,6 +1053,212 @@ def coin_profile(bt_data, mig_data, ts_data, sumdb, liq_data=None):
 # 主入口
 # ══════════════════════════════════════════════════════════════
 
+
+
+# ══════════════════════════════════════════════════════════════
+# 模块: 大户行为变化追踪（首次减仓 + DORMANT + 成本信念度）
+# ══════════════════════════════════════════════════════════════
+
+def whale_behavior_alert(src, sumdb):
+    """地址级行为追踪：首次减仓预警 + DORMANT锁仓统计 + 成本信念度交叉"""
+    # ── 获取 ACC 代币列表 ──
+    acc_tokens = {}
+    try:
+        for r in sumdb.execute(
+            "SELECT token_symbol, token_address FROM watchlist "
+            "WHERE token_address IN ("
+            "  SELECT DISTINCT token_address FROM meta_snapshots "
+            "  WHERE meta_verdict='ACC' AND scan_time >= datetime('now','-7 days')"
+            ")"
+        ):
+            acc_tokens[r["token_address"]] = r["token_symbol"]
+    except Exception:
+        return ""
+
+    if not acc_tokens:
+        return ""
+
+    # ── 获取 cost_basis 数据 ──
+    cb_map = {}  # token_address -> {underwater_pct, vwap, gecko_price}
+    try:
+        for r in sumdb.execute(
+            "SELECT token_address, underwater_pct, vwap, gecko_price "
+            "FROM cost_basis_snapshots "
+            "WHERE scan_time = (SELECT MAX(scan_time) FROM cost_basis_snapshots)"
+        ):
+            cb_map[r["token_address"]] = {
+                "underwater_pct": r["underwater_pct"] or 0,
+                "vwap": r["vwap"] or 0,
+                "gecko_price": r["gecko_price"] or 0,
+            }
+    except Exception:
+        pass
+
+    amber_alerts = []   # 首次减仓
+    dormant_stats = []  # DORMANT 统计
+    STABLE_THRESHOLD = 0.01  # hold_amount 变化 < 1% 视为稳定
+    MIN_STABLE_SNAPS = 3     # 至少连续 3 个稳定快照才算 DORMANT
+
+    for addr, sym in acc_tokens.items():
+        # ── 取最近 6 个快照 ──
+        snaps = src.execute(
+            "SELECT DISTINCT snapshot_time FROM bubblemap_holders "
+            "WHERE token_address = ? ORDER BY snapshot_time DESC LIMIT 6",
+            (addr,)
+        ).fetchall()
+        if len(snaps) < 2:
+            continue
+
+        latest_snap = snaps[0][0]
+        prev_snap = snaps[1][0]
+
+        # ── 取当前和上一快照的吸筹地址 ──
+        cur_rows = src.execute(
+            "SELECT wallet_address, hold_amount, acc_score, buy_cnt, sell_cnt, "
+            "       dex_ratio, hold_percentage "
+            "FROM bubblemap_holders "
+            "WHERE token_address = ? AND snapshot_time = ? AND is_accumulating = 1",
+            (addr, latest_snap)
+        ).fetchall()
+        prev_rows = src.execute(
+            "SELECT wallet_address, hold_amount "
+            "FROM bubblemap_holders "
+            "WHERE token_address = ? AND snapshot_time = ? AND is_accumulating = 1",
+            (addr, prev_snap)
+        ).fetchall()
+
+        if not cur_rows:
+            continue
+
+        prev_map = {r["wallet_address"]: r["hold_amount"] for r in prev_rows}
+        acc_count = len(cur_rows)
+        dormant_count = 0
+        total_stable_snaps = 0
+
+        for row in cur_rows:
+            waddr = row["wallet_address"]
+            cur_hold = row["hold_amount"] or 0
+
+            # ── 回溯连续稳定快照数 ──
+            stable_count = 0
+            prev_hold_check = cur_hold
+            for i in range(1, min(len(snaps), 6)):
+                snap_i = snaps[i][0]
+                hist = src.execute(
+                    "SELECT hold_amount FROM bubblemap_holders "
+                    "WHERE token_address = ? AND snapshot_time = ? "
+                    "AND wallet_address = ? AND is_accumulating = 1",
+                    (addr, snap_i, waddr)
+                ).fetchone()
+                if not hist or not hist["hold_amount"]:
+                    break
+                hist_hold = hist["hold_amount"]
+                if hist_hold > 0 and abs(prev_hold_check - hist_hold) / hist_hold < STABLE_THRESHOLD:
+                    stable_count += 1
+                    prev_hold_check = hist_hold
+                else:
+                    break
+
+            if stable_count >= MIN_STABLE_SNAPS:
+                dormant_count += 1
+                total_stable_snaps += stable_count
+
+            # ── 首次减仓检测 ──
+            if waddr in prev_map and prev_map[waddr] > 0:
+                prev_hold = prev_map[waddr]
+                change_pct = (cur_hold - prev_hold) / prev_hold
+                if change_pct < -0.01 and stable_count >= MIN_STABLE_SNAPS:
+                    # DORMANT 地址首次减仓 → AMBER
+                    amber_alerts.append({
+                        "symbol": sym,
+                        "wallet": waddr,
+                        "prev_hold": prev_hold,
+                        "cur_hold": cur_hold,
+                        "change_pct": change_pct * 100,
+                        "stable_snaps": stable_count,
+                        "acc_score": row["acc_score"] or 0,
+                        "level": "🔴RED" if change_pct < -0.30 else "🟠AMBER",
+                    })
+
+        # ── DORMANT 统计 ──
+        cb = cb_map.get(addr, {})
+        underwater = cb.get("underwater_pct", 0)
+        vwap = cb.get("vwap", 0)
+        price = cb.get("gecko_price", 0)
+
+        # 信念评级
+        dormant_rate = dormant_count / max(acc_count, 1)
+        avg_stable = total_stable_snaps / max(dormant_count, 1)
+        if dormant_rate >= 0.8 and underwater >= 80:
+            conviction = "💎套牢不割"
+        elif dormant_rate >= 0.7:
+            conviction = "🔒强锁仓"
+        elif dormant_rate >= 0.5:
+            conviction = "✅中等锁仓"
+        else:
+            conviction = "⚠️流动"
+
+        dormant_stats.append({
+            "symbol": sym,
+            "acc_count": acc_count,
+            "dormant_count": dormant_count,
+            "dormant_rate": dormant_rate * 100,
+            "avg_stable": avg_stable,
+            "underwater": underwater,
+            "vwap": vwap,
+            "price": price,
+            "conviction": conviction,
+        })
+
+    # ── 组装 Markdown ──
+    lines = ["## 🐋 大户行为变化追踪", ""]
+
+    # 子模块 A: 首次减仓预警
+    if amber_alerts:
+        amber_alerts.sort(key=lambda x: x["change_pct"])
+        lines += [
+            "### 🚨 首次减仓预警（AMBER）",
+            "",
+            "> DORMANT 地址（连续≥3快照持仓不变）首次出现减仓",
+            "",
+            "| 代币 | 地址 | 前次持仓 | 当前持仓 | 变化% | 稳定快照 | 分数 | 级别 |",
+            "|------|------|---------|---------|-------|---------|------|------|",
+        ]
+        for a in amber_alerts[:15]:
+            lines.append(
+                f"| {a['symbol']} | `{a['wallet'][:8]}..{a['wallet'][-4:]}` "
+                f"| {a['prev_hold']:,.0f} | {a['cur_hold']:,.0f} "
+                f"| {a['change_pct']:+.1f}% | {a['stable_snaps']} "
+                f"| {a['acc_score']:.0f} | {a['level']} |"
+            )
+        lines.append("")
+    else:
+        lines += ["### ✅ 无首次减仓预警", "",
+                   "> 所有 DORMANT 吸筹地址持仓稳定，无异常减仓", ""]
+
+    # 子模块 B: DORMANT 锁仓统计
+    dormant_stats.sort(key=lambda x: x["dormant_rate"], reverse=True)
+    high_conviction = [d for d in dormant_stats if d["dormant_rate"] >= 50]
+    if high_conviction:
+        lines += [
+            "### 🔒 锁仓休眠分析（DORMANT）",
+            "",
+            "| 代币 | 吸筹数 | DORMANT | 率% | 平均稳定 | 水下% | VWAP/价格 | 信念 |",
+            "|------|--------|---------|-----|---------|-------|----------|------|",
+        ]
+        for d in high_conviction[:20]:
+            vwap_ratio = f"{d['vwap']/d['price']:.1f}x" if d["price"] > 0 and d["vwap"] > 0 else "—"
+            lines.append(
+                f"| {d['symbol']} | {d['acc_count']} | {d['dormant_count']} "
+                f"| {d['dormant_rate']:.0f}% | {d['avg_stable']:.1f} "
+                f"| {d['underwater']:.0f}% | {vwap_ratio} | {d['conviction']} |"
+            )
+        lines.append("")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
 def hop2_analysis(src, sumdb):
     """Hop2 隐蔽吸筹置信度分析（独立统计维度）"""
     tokens = sumdb.execute("""
@@ -1292,6 +1498,12 @@ def main():
     mig_md, mig_data = migration_analysis(src, sumdb)
     print(f"        {len(mig_data)} 个代币有迁移数据")
 
+    # 模块 2.5: 大户行为追踪（首次减仓 + DORMANT）
+    print("  [2.5/7] 大户行为追踪...")
+    whale_md = whale_behavior_alert(src, sumdb)
+    if whale_md:
+        print("          大户行为分析完成")
+
     # 模块 3: 积分时序
     print("  [3/7] 积分时序...")
     ts_md, ts_data = score_timeseries(sumdb)
@@ -1332,7 +1544,10 @@ def main():
     if hop2_md:
         print(f"        hop2 分析完成")
 
-    parts = [bt_md, mig_md, ts_md, liq_md, quality_md]
+    parts = [bt_md, mig_md]
+    if whale_md:
+        parts.append(whale_md)
+    parts.extend([ts_md, liq_md, quality_md])
     if hop2_md:
         parts.append(hop2_md)
     if profile_md:

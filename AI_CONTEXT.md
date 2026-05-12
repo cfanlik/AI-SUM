@@ -1,6 +1,6 @@
 # AI-SUM 六引擎综合分析系统
 
-> 版本: V3.1 | 更新: 2026-05-12 | VPS: `/opt/AI-SUM/`
+> 版本: V3.2 | 更新: 2026-05-12 | VPS: `/opt/AI-SUM/`
 > GitHub: https://github.com/cfanlik/AI-SUM | DB: `select-sum.db`
 
 ---
@@ -192,14 +192,15 @@ gecko_market_data ──┼── src.db ──┤  opus-scan    → opus_snapsh
 - `meta_snapshots`: 全部有信号代币（含 NEUTRAL），含 5 列分项积分
 - `token_lifecycle`: 生命周期状态 + 跃迁记录
 
-### history_report.py — 长期分析报告 V3.0
+### history_report.py — 长期分析报告 V4.1
 
-9 模块融合报告，输出 `report/history/history_YYYYMMDD.md`：
+10 模块融合报告，输出 `report/history/history_YYYYMMDD.md`：
 
 | 模块 | 功能 | 数据源字段 |
 |------|------|-----------|
 | 信号回测 | 首次信号时间 × 1d/3d/7d/14d/至今收益 + MDD + Precision | price_usd |
 | Holder 迁移 | 7d+14d 留存率、遗漏检测(Top10Δ复合条件)、底部吸筹 | bubblemap_holders |
+| **大户行为追踪** | **首次减仓AMBER预警 + DORMANT锁仓统计 + 成本信念度(套牢不割型)** | **bubblemap_holders × cost_basis_snapshots** |
 | 积分时序 | 斜率/σ/连续ACC/引擎稳定性，σ<0.05平序列强制归零 | meta_snapshots |
 | 信号×收益 | 按综合分/引擎数分桶胜率，样本<5标注⚠ | meta_snapshots |
 | **流动性健康度** | 24h量/7d均量/量变化/LP深度/换手率/买卖比/量价背离/枯竭告警 | **volume_24h, reserve_usd, buy_tx_pct, buyers/sellers** |
@@ -277,6 +278,7 @@ cd /opt/AI-SUM && python3 meta-verdict/history_report.py
 
 | 版本 | 日期 | 关键变更 |
 |------|------|----------|
+| **history_report V4.1** | **2026-05-12** | 新增模块2.5「大户行为追踪」: 地址级首次减仓AMBER预警(DORMANT→减仓检测) + 锁仓休眠率统计 + cost_basis交叉信念度评级(💎套牢不割/🔒强锁仓); 200代币批量化 |
 | **bugfix** | **2026-05-12** | 修复 `history_report.py` 合约分析模块未定义报错导致报告生成失败的问题 (将 `futures_analysis` 定义移到执行块之前)，补发 11 日和 12 日长期分析报告。 |
 | **cost-basis V1.2 + meta V2.1** | **2026-05-11** | C9深度套牢协同持仓信号(weight=6); COORDINATED_HOLD verdict(+2分); 条件: VWAP/价>2.5x+水下>90%+CV<0.20+holders≥30; 全量198代币仅命中SQD 1个(精准无误判); SQD meta_score 6.0→9.0 |
 | **history_report V3.0** | **2026-05-05** | 9模块融合: +流动性健康度+信号质量评估+失败案例+漏网之鱼; gecko 20字段激活(2→10); 中位数+MDD+P/R/F1+引擎组合矩阵; meta补漏(ACC 100%覆盖); token_history +5列 |
@@ -303,7 +305,7 @@ cd /opt/AI-SUM && python3 meta-verdict/history_report.py
 | 🎯 吸筹 | 41 |
 | 💀 出货 | 2 |
 | token_history 覆盖 | ACC 41/41 (100%, V3修复) |
-| history_report 模块 | 9 (V3: +4) |
+| history_report 模块 | 10 (V4.1: +1大户行为) |
 | gecko 字段使用 | 10/20 (V3: 从2→10) |
 | 信号 Precision | 47% (53/112) |
 | 信号 F1 | 46% (P=55%, R=40%) |

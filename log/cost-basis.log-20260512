@@ -1,0 +1,79 @@
+2026-05-11 00:40:01,562 [INFO] cost-basis-scan: 加载 198 个代币
+2026-05-11 00:40:01,686 [INFO] cost-basis-scan: 进度: 20/198
+2026-05-11 00:40:02,130 [INFO] gravity_tracker: watchlist 跃迁: bsc/0x208bf3e7da9639f1eaefa2de78c23396b0682025 历史=DIAMOND + C4 暴利出逃 → DEATH_SPIRAL
+2026-05-11 00:40:02,133 [INFO] cost-basis-scan:   TAG: DEATH_SPIRAL (ACC=0% DIST=69% CV=2.287 暴利=93.2% 信号=C4,C8)
+2026-05-11 00:40:02,246 [INFO] cost-basis-scan: 进度: 40/198
+2026-05-11 00:40:02,282 [INFO] cost-basis-scan:   UB: IRON_HOLD (ACC=61% DIST=0% CV=0.090 暴利=100.0% 信号=C2,C3)
+2026-05-11 00:40:02,325 [INFO] cost-basis-scan: 进度: 60/198
+2026-05-11 00:40:02,337 [INFO] gravity_tracker: watchlist 跃迁: bsc/0x53ec33cd4fa46b9eced9ca3f6db626c5ffcd55cc 历史=RED + C1 水下加仓 → SQUEEZE_ACC
+2026-05-11 00:40:02,339 [INFO] cost-basis-scan:   AIA: SQUEEZE_ACC_MED (ACC=39% DIST=0% CV=0.603 暴利=0.0% 信号=C1)
+2026-05-11 00:40:02,350 [INFO] gravity_tracker: watchlist 跃迁: bsc/0x595deaad1eb5476ff1e649fdb7efc36f1e4679cc 历史=RED + C1 水下加仓 → SQUEEZE_ACC
+2026-05-11 00:40:02,352 [INFO] cost-basis-scan:   BSB: SQUEEZE_ACC_MED (ACC=39% DIST=0% CV=0.272 暴利=3.4% 信号=C1)
+2026-05-11 00:40:02,399 [INFO] cost-basis-scan:   ZAMA: STEALTH_ACC (ACC=72% DIST=0% CV=0.141 暴利=0.0% 信号=C1,C2)
+2026-05-11 00:40:02,408 [INFO] cost-basis-scan: 进度: 80/198
+2026-05-11 00:40:02,769 [INFO] cost-basis-scan: 进度: 100/198
+2026-05-11 00:40:03,007 [INFO] cost-basis-scan: 进度: 120/198
+2026-05-11 00:40:03,087 [INFO] cost-basis-scan: 进度: 140/198
+2026-05-11 00:40:03,172 [INFO] cost-basis-scan: 进度: 160/198
+2026-05-11 00:40:03,723 [INFO] cost-basis-scan: 进度: 180/198
+2026-05-11 00:40:03,783 [INFO] cost-basis-scan: 扫描完成: 128 有效结果
+
+======================================================================
+💰 cost-basis-scan | 2026-05-11 00:40:01
+   扫描 198 代币 | G1跳过 68 | G2跳过 2
+   有效 128 | 吸筹:2 出货:0 跃迁:3 中性:123
+======================================================================
+
+⚡ 状态跃迁预警 (3 个)
+代币       链     判定                           现价       VWAP     暴利区%         历史 信号          
+------------------------------------------------------------------------------------------
+TAG      bsc   DEATH_SPIRAL         $0.001383  $0.000173     93.2% DIAMOND/E(DIAMOND) C4,C8       
+AIA      bsc   SQUEEZE_ACC_MED      $0.057214  $0.112401      0.0% RED/A(RED) C1          
+BSB      bsc   SQUEEZE_ACC_MED      $0.543588  $0.554276      3.4% RED/A(RED) C1          
+
+🎯 吸筹信号 (2 个)
+代币       链     判定                 ACC%         现价       VWAP     CV       重心漂移 信号          
+-----------------------------------------------------------------------------------------------
+ZAMA     bsc   STEALTH_ACC       72.2% $0.029433  $0.025574  0.141     STABLE C1,C2       
+UB       bsc   IRON_HOLD         61.1% $0.126675  $0.038159  0.090  LOCK_PUMP C2,C3       
+
+📄 报告: /opt/AI-SUM/report/cost-basis/cb_20260511_0040.md
+2026-05-11 12:40:02,358 [INFO] cost-basis-scan: 加载 198 个代币
+2026-05-11 12:40:02,535 [INFO] cost-basis-scan: 进度: 20/198
+2026-05-11 12:40:02,844 [INFO] gravity_tracker: watchlist 跃迁: bsc/0x302dfaf2cdbe51a18d97186a7384e87cf599877d 历史=RED + C1 水下加仓 → SQUEEZE_ACC
+2026-05-11 12:40:02,846 [INFO] cost-basis-scan:   LYN: SQUEEZE_ACC_MED (ACC=29% DIST=0% CV=0.274 暴利=0.0% 信号=C1)
+2026-05-11 12:40:02,885 [INFO] cost-basis-scan: 进度: 40/198
+2026-05-11 12:40:02,974 [INFO] cost-basis-scan:   UB: IRON_HOLD (ACC=46% DIST=0% CV=0.090 暴利=100.0% 信号=C2,C3)
+2026-05-11 12:40:03,047 [INFO] cost-basis-scan: 进度: 60/198
+2026-05-11 12:40:03,068 [INFO] gravity_tracker: watchlist 跃迁: bsc/0x53ec33cd4fa46b9eced9ca3f6db626c5ffcd55cc 历史=RED + C1 水下加仓 → SQUEEZE_ACC
+2026-05-11 12:40:03,070 [INFO] cost-basis-scan:   AIA: SQUEEZE_ACC_MED (ACC=29% DIST=0% CV=0.611 暴利=0.0% 信号=C1)
+2026-05-11 12:40:03,193 [INFO] cost-basis-scan: 进度: 80/198
+2026-05-11 12:40:03,467 [INFO] cost-basis-scan: 进度: 100/198
+2026-05-11 12:40:03,632 [INFO] cost-basis-scan: 进度: 120/198
+2026-05-11 12:40:03,764 [INFO] gravity_tracker: watchlist 跃迁: bsc/0xb0b92de23baa85fb06208277e925ced53edab482 历史=RED + C1 水下加仓 → SQUEEZE_ACC
+2026-05-11 12:40:03,766 [INFO] cost-basis-scan:   TRIA: SQUEEZE_ACC_MED (ACC=29% DIST=0% CV=0.360 暴利=78.8% 信号=C1)
+2026-05-11 12:40:03,770 [INFO] cost-basis-scan: 进度: 140/198
+2026-05-11 12:40:03,898 [INFO] cost-basis-scan: 进度: 160/198
+2026-05-11 12:40:04,509 [INFO] cost-basis-scan:   SQD: COORDINATED_HOLD (ACC=25% DIST=0% CV=0.182 暴利=0.0% 信号=C7,C9)
+2026-05-11 12:40:05,055 [INFO] cost-basis-scan: 进度: 180/198
+2026-05-11 12:40:05,187 [INFO] cost-basis-scan: 扫描完成: 128 有效结果
+
+======================================================================
+💰 cost-basis-scan | 2026-05-11 12:40:01
+   扫描 198 代币 | G1跳过 68 | G2跳过 2
+   有效 128 | 吸筹:1 出货:0 跃迁:3 中性:123
+======================================================================
+
+⚡ 状态跃迁预警 (3 个)
+代币       链     判定                           现价       VWAP     暴利区%         历史 信号          
+------------------------------------------------------------------------------------------
+LYN      bsc   SQUEEZE_ACC_MED      $0.051769  $0.070464      0.0% RED/A(RED) C1          
+AIA      bsc   SQUEEZE_ACC_MED      $0.056947  $0.115289      0.0% RED/A(RED) C1          
+TRIA     bsc   SQUEEZE_ACC_MED      $0.038628  $0.021565     78.8% RED/A(RED) C1          
+
+🎯 吸筹信号 (1 个)
+代币       链     判定                 ACC%         现价       VWAP     CV       重心漂移 信号          
+-----------------------------------------------------------------------------------------------
+UB       bsc   IRON_HOLD         45.8% $0.129989  $0.038159  0.090     STABLE C2,C3       
+
+📄 报告: /opt/AI-SUM/report/cost-basis/cb_20260511_1240.md
