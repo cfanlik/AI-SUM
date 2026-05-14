@@ -62,11 +62,11 @@ gecko_market_data ──┼── src.db ──┤  opus-scan    → opus_snapsh
 30 0,12 * * * cd /opt/AI-SUM && python3 bigcoin/run.py        >> log/whale.log 2>&1
 40 0,12 * * * cd /opt/AI-SUM && python3 cost-basis-scan/run.py >> log/cost-basis.log 2>&1
 50 0,12 * * * cd /opt/AI-SUM && python3 meta-verdict/run.py   >> log/meta.log 2>&1
-55 0,12 * * * cd /opt/AI-SUM && python3 meta-verdict/history_report.py >> log/history.log 2>&1
+55 0,6,12,18 * * * cd /opt/AI-SUM && python3 meta-verdict/history_report.py >> log/history.log 2>&1
 ```
 
 **执行顺序**: master(00) → opus(10) → unified(20) → whale(30) → CB(40) → meta(50)
-**频率**: 每天 2 轮（00:xx / 12:xx UTC），含 history_report
+****频率**: 引擎每天 2 轮（00:xx / 12:xx UTC），history_report 每6小时（00/06/12/18）
 **依赖链**: opus/unified/CB 依赖 master 的 watchlist → 间隔 10 分钟足够（master 通常 3-5 分钟完成）
 
 ---
@@ -194,7 +194,7 @@ gecko_market_data ──┼── src.db ──┤  opus-scan    → opus_snapsh
 
 ### history_report.py — 长期分析报告 V4.1
 
-10 模块融合报告，输出 `report/history/history_YYYYMMDD.md`：
+10 模块融合报告，输出 `report/history/history_MMDD_HHMM.md` (每6小时)：
 
 | 模块 | 功能 | 数据源字段 |
 |------|------|-----------|

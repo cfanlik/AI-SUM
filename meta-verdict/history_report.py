@@ -4,7 +4,7 @@ AI-SUM 长期分析报告 V3.0
 9 模块融合: 信号回测 + holder迁移 + 积分时序 + 信号质量
            + 流动性健康 + 价格风险 + 失败案例 + 漏网之鱼 + 单币画像
 只读 select.db，可写 select-sum.db
-输出: /opt/AI-SUM/report/history/history_YYYYMMDD.md
+输出: /opt/AI-SUM/report/history/history_MMDD_HHMM.md (每6小时1份)
 """
 import sqlite3
 import statistics
@@ -1527,8 +1527,8 @@ def main():
     print(f"  [DB] token_history 写入 {saved} 行")
 
     # 组装报告
-    today = datetime.now().strftime("%Y-%m-%d")
-    header = f"""# 📊 AI-SUM 长期分析报告 V4.0 — {today}
+    now_str = datetime.now().strftime("%m-%d %H:%M")
+    header = f"""# 📊 AI-SUM 长期分析报告 V4.0 — {now_str}
 
 > 时间基准: 首次信号时间（meta_snapshots/unified_results）
 > 数据源: bubblemap + gecko(20字段) + meta {len(ts_data)}代币
@@ -1567,7 +1567,7 @@ def main():
     # 写入
     out_dir = Path(REPORT_DIR)
     out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / f"history_{datetime.now().strftime('%Y%m%d')}.md"
+    path = out_dir / f"history_{datetime.now().strftime('%m%d_%H%M')}.md"
     path.write_text(md, encoding="utf-8")
     print(f"\n📄 报告: {path} ({len(md)} bytes, {elapsed:.1f}s)")
 
