@@ -1,0 +1,123 @@
+2026-05-14 00:40:03,202 [INFO] cost-basis-scan: 加载 200 个代币
+2026-05-14 00:40:03,401 [INFO] cost-basis-scan: 进度: 20/200
+2026-05-14 00:40:03,738 [INFO] gravity_tracker: watchlist 跃迁: bsc/0x1d28d989f9e3ccb8b15d0cec601734514f958e4d 历史=RED + C4 暴利出逃 → DEATH_SPIRAL
+2026-05-14 00:40:03,740 [INFO] cost-basis-scan:   BASED: DEATH_SPIRAL (ACC=0% DIST=69% CV=0.502 暴利=9.2% 信号=C4,C7,C8)
+2026-05-14 00:40:03,950 [INFO] cost-basis-scan: 进度: 40/200
+2026-05-14 00:40:04,033 [INFO] cost-basis-scan:   UB: IRON_HOLD (ACC=46% DIST=0% CV=0.137 暴利=100.0% 信号=C2,C3)
+2026-05-14 00:40:04,045 [INFO] gravity_tracker: watchlist 跃迁: bsc/0x44f161ae29361e332dea039dfa2f404e0bc5b5cc 历史=DIAMOND + C4 暴利出逃 → DEATH_SPIRAL
+2026-05-14 00:40:04,048 [INFO] cost-basis-scan:   H: DEATH_SPIRAL (ACC=0% DIST=44% CV=0.372 暴利=14.3% 信号=C4)
+2026-05-14 00:40:04,075 [INFO] cost-basis-scan:   ROBO: PROFIT_EXIT (ACC=0% DIST=69% CV=0.334 暴利=1.2% 信号=C4,C8)
+2026-05-14 00:40:04,142 [INFO] cost-basis-scan: 进度: 60/200
+2026-05-14 00:40:04,181 [INFO] gravity_tracker: watchlist 跃迁: bsc/0x53ec33cd4fa46b9eced9ca3f6db626c5ffcd55cc 历史=RED + C1 水下加仓 → SQUEEZE_ACC
+2026-05-14 00:40:04,183 [INFO] cost-basis-scan:   AIA: SQUEEZE_ACC_MED (ACC=29% DIST=0% CV=0.685 暴利=0.6% 信号=C1)
+2026-05-14 00:40:04,218 [INFO] gravity_tracker: watchlist 跃迁: bsc/0x595deaad1eb5476ff1e649fdb7efc36f1e4679cc 历史=RED + C1 水下加仓 → SQUEEZE_ACC
+2026-05-14 00:40:04,220 [INFO] cost-basis-scan:   BSB: SQUEEZE_ACC_MED (ACC=29% DIST=25% CV=0.381 暴利=2.1% 信号=C1,C8)
+2026-05-14 00:40:04,398 [INFO] cost-basis-scan: 进度: 80/200
+2026-05-14 00:40:04,661 [INFO] gravity_tracker: watchlist 跃迁: bsc/0x80563fc2dd549bf36f82d3bf3b970bb5b08dbddb 历史=RED + C4 暴利出逃 → DEATH_SPIRAL
+2026-05-14 00:40:04,663 [INFO] cost-basis-scan:   RVV: DEATH_SPIRAL (ACC=29% DIST=69% CV=1.575 暴利=0.5% 信号=C1,C4,C8)
+2026-05-14 00:40:04,663 [INFO] cost-basis-scan: 进度: 100/200
+2026-05-14 00:40:04,762 [INFO] gravity_tracker: watchlist 跃迁: bsc/0x91152b4ef635403efbae860edd0f8c321d7c035d 历史=RED + C4 暴利出逃 → DEATH_SPIRAL
+2026-05-14 00:40:04,764 [INFO] cost-basis-scan:   IRYS: DEATH_SPIRAL (ACC=0% DIST=44% CV=2.448 暴利=12.8% 信号=C4)
+2026-05-14 00:40:04,821 [INFO] gravity_tracker: watchlist 跃迁: bsc/0x95c9b514566fbd224dc2037f5914eb8ab91c9201 历史=RED + C4 暴利出逃 → DEATH_SPIRAL
+2026-05-14 00:40:04,824 [INFO] cost-basis-scan:   PTB: DEATH_SPIRAL (ACC=0% DIST=69% CV=2.069 暴利=1.0% 信号=C4,C8)
+2026-05-14 00:40:04,852 [INFO] cost-basis-scan: 进度: 120/200
+2026-05-14 00:40:05,029 [INFO] cost-basis-scan: 进度: 140/200
+2026-05-14 00:40:05,388 [INFO] cost-basis-scan: 进度: 160/200
+2026-05-14 00:40:05,393 [INFO] gravity_tracker: watchlist 跃迁: bsc/0xd20fb09a49a8e75fef536a2dbc68222900287bac 历史=RED + C1 水下加仓 → SQUEEZE_ACC
+2026-05-14 00:40:05,396 [INFO] cost-basis-scan:   PRL: SQUEEZE_ACC_HIGH (ACC=54% DIST=0% CV=0.077 暴利=0.0% 信号=C1,C2)
+2026-05-14 00:40:05,879 [INFO] gravity_tracker: watchlist 跃迁: bsc/0xd89b7dd376e671c124352267516bef1c2cc231a3 历史=RED + C1 水下加仓 → SQUEEZE_ACC
+2026-05-14 00:40:05,881 [INFO] cost-basis-scan:   ZKP: SQUEEZE_ACC_MED (ACC=29% DIST=0% CV=0.313 暴利=0.0% 信号=C1)
+2026-05-14 00:40:05,947 [INFO] gravity_tracker: watchlist 跃迁: bsc/0xdf24f8c21cb404b3031a450d8e049d6e39fc1fa5 历史=DIAMOND + C4 暴利出逃 → DEATH_SPIRAL
+2026-05-14 00:40:05,949 [INFO] cost-basis-scan:   BILL: DEATH_SPIRAL (ACC=0% DIST=44% CV=0.476 暴利=82.2% 信号=C4)
+2026-05-14 00:40:05,987 [INFO] gravity_tracker: watchlist 跃迁: bsc/0xea37a8de1de2d9d10772eeb569e28bfa5cb17707 历史=RED + C4 暴利出逃 → DEATH_SPIRAL
+2026-05-14 00:40:05,989 [INFO] cost-basis-scan:   JCT: DEATH_SPIRAL (ACC=0% DIST=44% CV=3.846 暴利=17.3% 信号=C4)
+2026-05-14 00:40:06,579 [INFO] cost-basis-scan: 进度: 180/200
+2026-05-14 00:40:06,731 [INFO] cost-basis-scan: 进度: 200/200
+2026-05-14 00:40:06,744 [INFO] cost-basis-scan: 扫描完成: 133 有效结果
+
+======================================================================
+💰 cost-basis-scan | 2026-05-14 00:40:01
+   扫描 200 代币 | G1跳过 65 | G2跳过 2
+   有效 133 | 吸筹:1 出货:1 跃迁:11 中性:120
+======================================================================
+
+⚡ 状态跃迁预警 (11 个)
+代币       链     判定                           现价       VWAP     暴利区%         历史 信号          
+------------------------------------------------------------------------------------------
+BASED    bsc   DEATH_SPIRAL         $0.111109  $0.094844      9.2% RED/A(RED) C4,C7,C8    
+H        bsc   DEATH_SPIRAL         $0.244386  $0.140205     14.3% DIAMOND/E(DIAMOND) C4          
+AIA      bsc   SQUEEZE_ACC_MED      $0.052813  $0.121811      0.6% RED/A(RED) C1          
+BSB      bsc   SQUEEZE_ACC_MED      $0.485185  $0.603856      2.1% RED/A(RED) C1,C8       
+RVV      bsc   DEATH_SPIRAL         $0.000236  $0.001324      0.5% RED/A(RED) C1,C4,C8    
+IRYS     bsc   DEATH_SPIRAL         $0.055828  $0.047984     12.8% RED/A(RED) C4          
+PTB      bsc   DEATH_SPIRAL         $0.000967  $0.002087      1.0% RED/A(RED) C4,C8       
+PRL      bsc   SQUEEZE_ACC_HIGH     $0.254828  $0.255323      0.0% RED/A(RED) C1,C2       
+ZKP      bsc   SQUEEZE_ACC_MED      $0.079230  $0.132967      0.0% RED/A(RED) C1          
+BILL     bsc   DEATH_SPIRAL         $0.139144  $0.052308     82.2% DIAMOND/E(DIAMOND) C4          
+JCT      bsc   DEATH_SPIRAL         $0.004031  $0.002782     17.3% RED/A(RED) C4          
+
+🎯 吸筹信号 (1 个)
+代币       链     判定                 ACC%         现价       VWAP     CV       重心漂移 信号          
+-----------------------------------------------------------------------------------------------
+UB       bsc   IRON_HOLD         45.8% $0.196122  $0.037689  0.137  LOCK_PUMP C2,C3       
+
+💀 出货信号 (1 个)
+代币       链     判定                    DIST%         现价       VWAP     暴利区%        LP($) 信号          
+----------------------------------------------------------------------------------------------------
+ROBO     bsc   PROFIT_EXIT           68.8% $0.022291  $0.024917      1.2% $  1,094,257 C4,C8       
+
+📄 报告: /opt/AI-SUM/report/cost-basis/cb_20260514_0040.md
+2026-05-14 12:40:01,910 [INFO] cost-basis-scan: 加载 200 个代币
+2026-05-14 12:40:02,017 [INFO] gravity_tracker: watchlist 跃迁: bsc/0x0c69199c1562233640e0db5ce2c399a88eb507c7 历史=DIAMOND + C4 暴利出逃 → DEATH_SPIRAL
+2026-05-14 12:40:02,019 [INFO] cost-basis-scan:   CYS: DEATH_SPIRAL (ACC=0% DIST=44% CV=0.160 暴利=3.3% 信号=C4)
+2026-05-14 12:40:02,123 [INFO] cost-basis-scan: 进度: 20/200
+2026-05-14 12:40:03,743 [INFO] cost-basis-scan: 进度: 40/200
+2026-05-14 12:40:03,843 [INFO] cost-basis-scan:   UB: IRON_HOLD (ACC=46% DIST=0% CV=0.127 暴利=100.0% 信号=C2,C3)
+2026-05-14 12:40:03,935 [INFO] cost-basis-scan: 进度: 60/200
+2026-05-14 12:40:04,002 [INFO] gravity_tracker: watchlist 跃迁: bsc/0x595deaad1eb5476ff1e649fdb7efc36f1e4679cc 历史=RED + C1 水下加仓 → SQUEEZE_ACC
+2026-05-14 12:40:04,004 [INFO] cost-basis-scan:   BSB: SQUEEZE_ACC_MED (ACC=29% DIST=25% CV=0.387 暴利=0.3% 信号=C1,C8)
+2026-05-14 12:40:04,131 [INFO] cost-basis-scan: 进度: 80/200
+2026-05-14 12:40:04,438 [INFO] cost-basis-scan: 进度: 100/200
+2026-05-14 12:40:04,522 [INFO] gravity_tracker: watchlist 跃迁: bsc/0x91152b4ef635403efbae860edd0f8c321d7c035d 历史=RED + C1 水下加仓 → SQUEEZE_ACC
+2026-05-14 12:40:04,526 [INFO] cost-basis-scan:   IRYS: SQUEEZE_ACC_MED (ACC=29% DIST=0% CV=3.259 暴利=12.8% 信号=C1)
+2026-05-14 12:40:04,561 [INFO] gravity_tracker: watchlist 跃迁: bsc/0x95c9b514566fbd224dc2037f5914eb8ab91c9201 历史=RED + C1 水下加仓 → SQUEEZE_ACC
+2026-05-14 12:40:04,567 [INFO] cost-basis-scan:   PTB: SQUEEZE_ACC_MED (ACC=29% DIST=25% CV=2.067 暴利=0.4% 信号=C1,C8)
+2026-05-14 12:40:04,578 [INFO] cost-basis-scan: 进度: 120/200
+2026-05-14 12:40:04,684 [INFO] cost-basis-scan: 进度: 140/200
+2026-05-14 12:40:05,398 [INFO] cost-basis-scan: 进度: 160/200
+2026-05-14 12:40:05,401 [INFO] gravity_tracker: watchlist 跃迁: bsc/0xd20fb09a49a8e75fef536a2dbc68222900287bac 历史=RED + C1 水下加仓 → SQUEEZE_ACC
+2026-05-14 12:40:05,404 [INFO] cost-basis-scan:   PRL: SQUEEZE_ACC_HIGH (ACC=54% DIST=0% CV=0.078 暴利=0.0% 信号=C1,C2)
+2026-05-14 12:40:05,578 [INFO] gravity_tracker: watchlist 跃迁: bsc/0xd89b7dd376e671c124352267516bef1c2cc231a3 历史=RED + C1 水下加仓 → SQUEEZE_ACC
+2026-05-14 12:40:05,582 [INFO] cost-basis-scan:   ZKP: SQUEEZE_ACC_MED (ACC=29% DIST=0% CV=0.333 暴利=0.0% 信号=C1)
+2026-05-14 12:40:05,621 [INFO] gravity_tracker: watchlist 跃迁: bsc/0xdf24f8c21cb404b3031a450d8e049d6e39fc1fa5 历史=DIAMOND + C4 暴利出逃 → DEATH_SPIRAL
+2026-05-14 12:40:05,623 [INFO] cost-basis-scan:   BILL: DEATH_SPIRAL (ACC=0% DIST=44% CV=0.476 暴利=82.2% 信号=C4)
+2026-05-14 12:40:05,748 [INFO] cost-basis-scan: 进度: 180/200
+2026-05-14 12:40:05,805 [INFO] gravity_tracker: watchlist 跃迁: bsc/0xf9ca3fe094212ffa705742d3626a8ab96aababf8 历史=RED + C1 水下加仓 → SQUEEZE_ACC
+2026-05-14 12:40:05,807 [INFO] cost-basis-scan:   DAM: SQUEEZE_ACC_MED (ACC=29% DIST=0% CV=0.749 暴利=0.0% 信号=C1)
+2026-05-14 12:40:05,947 [INFO] cost-basis-scan: 进度: 200/200
+2026-05-14 12:40:05,980 [INFO] cost-basis-scan: 扫描完成: 133 有效结果
+
+======================================================================
+💰 cost-basis-scan | 2026-05-14 12:40:01
+   扫描 200 代币 | G1跳过 65 | G2跳过 2
+   有效 133 | 吸筹:1 出货:0 跃迁:8 中性:124
+======================================================================
+
+⚡ 状态跃迁预警 (8 个)
+代币       链     判定                           现价       VWAP     暴利区%         历史 信号          
+------------------------------------------------------------------------------------------
+CYS      bsc   DEATH_SPIRAL         $0.460570  $0.329238      3.3% DIAMOND/E(DIAMOND) C4          
+BSB      bsc   SQUEEZE_ACC_MED      $0.442566  $0.607268      0.3% RED/A(RED) C1,C8       
+IRYS     bsc   SQUEEZE_ACC_MED      $0.052494  $0.051004     12.8% RED/A(RED) C1          
+PTB      bsc   SQUEEZE_ACC_MED      $0.000840  $0.002099      0.4% RED/A(RED) C1,C8       
+PRL      bsc   SQUEEZE_ACC_HIGH     $0.251754  $0.254484      0.0% RED/A(RED) C1,C2       
+ZKP      bsc   SQUEEZE_ACC_MED      $0.075986  $0.136085      0.0% RED/A(RED) C1          
+BILL     bsc   DEATH_SPIRAL         $0.139144  $0.052308     82.2% DIAMOND/E(DIAMOND) C4          
+DAM      bsc   SQUEEZE_ACC_MED      $0.013486  $0.011834      0.0% RED/A(RED) C1          
+
+🎯 吸筹信号 (1 个)
+代币       链     判定                 ACC%         现价       VWAP     CV       重心漂移 信号          
+-----------------------------------------------------------------------------------------------
+UB       bsc   IRON_HOLD         45.8% $0.202063  $0.038859  0.127     STABLE C2,C3       
+
+📄 报告: /opt/AI-SUM/report/cost-basis/cb_20260514_1240.md

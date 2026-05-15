@@ -357,28 +357,37 @@ cd /opt/AI-SUM && python3 meta-verdict/history_report.py
 
 ---
 
-## pump_detector — 拉升前兆引擎 (2026-05-10)
+## pump_detector v2 — 拉升前兆引擎 (2026-05-10, 报告格式更新 2026-05-15)
 
 ### 功能
-从 BubbleMap + Gecko + Meta + TokenHistory 四表计算 6 维 pump_readiness 评分，分级输出告警。
+从 BubbleMap + Gecko + Meta + TokenHistory + Futures 五表计算 9 维 pump_readiness 评分，分级输出告警。
 
-### 6 维评分
-| 维度 | 权重 | 数据源 |
-|------|------|--------|
-| D1 量缩程度 | 0-20 | gecko volume_24h vs 7d均量 |
-| D2 LP稳定性 | 0-20 | gecko reserve_usd |
-| D3 吸筹密度 | 0-20 | bubblemap acc_count/total |
-| D4 Meta持续 | 0-15 | consec_acc + meta_score |
-| D5 留存率 | 0-10 | retention_7d |
-| D6 均分质量 | 0-10 | avg_acc_score |
+### 9 维评分 (满分128)
 
-### 告警分级
-| 级别 | 阈值 |
-|------|------|
-| IMMINENT | ≥75 |
-| READY_VOL_SHRINK | ≥50 且 vol_ratio<0.3 |
-| READY | ≥50 |
-| WATCH | ≥35 |
+| 维度 | 满分 | 数据源 | 说明 |
+|------|------|--------|------|
+| D1 量缩程度 | 20 | gecko volume_24h vs 7d均量 | DEX量缩+OI暴增→降分(过滤资金搬家假量缩) |
+| D2 LP稳定性 | 20 | gecko reserve_usd | LP≥$500K得20分 |
+| D3 吸筹密度 | 20 | bubblemap acc_count/total | ACC占比≥40%得20分 |
+| D4 Meta持续 | 15 | consec_acc + meta_score | 连续ACC≥25轮得15分 |
+| D5 留存率 | 10 | retention_7d | ≥95%得10分 |
+| D6 均分质量 | 10 | avg_acc_score | ≥80得10分 |
+| D7 OI变化 | 15 | futures oi_change_24h | OI增+价平=暗中建仓, OI<$1M减半 |
+| D8 资金费率(FR) | 10 | futures funding_rate | 负FR=空头拥挤→轧空前兆, FR<-0.03%得10分 |
+| D9 多空比(LS) | 8 | futures long_short_ratio | L/S<0.6=散户重度做空→强反指看涨 |
+
+### 告警分级 (v2 阈值)
+| 级别 | 阈值 | 说明 |
+|------|------|------|
+| 🔴 IMMINENT | ≥90 | 即将拉升 |
+| 🟡 READY_VOL_SHRINK | ≥65 且 vol_ratio<0.3 | 量缩就绪 |
+| 🟡 READY | ≥65 | 就绪 |
+| 🟢 WATCH | ≥45 | 观察 |
+
+### 报告格式
+- IMMINENT 和 READY 使用统一 13 列表格: 代币/pump/D1-D6/D7 OI/D8 FR/D9 LS/吸筹%/vol缩比/OI($)/OI变化/FR/L/S/LP
+- 报告头部包含📖列说明(Tips)区块，解释各列含义
+- 链上/合约分歧检测：高评分但OI下降的代币单独标注
 
 ### 输出
 - DB: `pump_alerts` 表（WATCH以上）
@@ -386,18 +395,9 @@ cd /opt/AI-SUM && python3 meta-verdict/history_report.py
 - UI: AI-SUM 🚀拉升前兆 Tab
 
 ### 调用
-- Crontab: meta-verdict 完成后 2 分钟自动调用
+- Crontab: meta-verdict 完成后自动调用
 - 代码: `meta-verdict/run.py` 中 `pump_detector.run(scan_time)`
 - 独立: `python3 meta-verdict/pump_detector.py`
-
-## pump_detector v2 升级 (2026-05-10)
-
-### 变更
-- 6维→9维评分: 新增 D7(OI变化) D8(Funding) D9(多空比)
-- D1修正: DEX量缩+OI暴增→降分(过滤资金搬家假量缩)
-- 小OI降权: OI<$1M时D7减半
-- 阈值调整: IMMINENT≥90 / READY≥65 / WATCH≥45 (满分128)
-- 报告增加合约列(OI/FR/LS) + 链上/合约分歧检测
 
 ### 数据源
 - futures_snapshots 表(select.db), 由 select-coin/futures/binance_futures.py 采集

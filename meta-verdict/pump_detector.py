@@ -265,6 +265,25 @@ def _generate_report(results, scan_time):
             ic = {"IMMINENT":"🔴","READY_VOL_SHRINK":"🟡","READY":"🟡","WATCH":"🟢","NEUTRAL":"—"}.get(lv,"")
             md.append(f"| {ic} {lv} | {levels[lv]} |")
     md.append("")
+    # Tips
+    md.append("## 📖 列说明")
+    md.append("")
+    md.append("| 列 | 含义 |")
+    md.append("|-----|------|")
+    md.append("| pump | 9维综合评分(满分128) — ≥90 IMMINENT / ≥65 READY / ≥45 WATCH |")
+    md.append("| D1-D6 | 链上层6维总分(满分95): D1量缩(20)+D2 LP(20)+D3吸筹密度(20)+D4 Meta持续(15)+D5留存(10)+D6均分(10) |")
+    md.append("| D7 OI | 合约OI变化评分(0-15): OI增+价平=暗中建仓, OI<$1M减半 |")
+    md.append("| D8 FR | 资金费率评分(0-10): 负FR=空头拥挤→轧空前兆, FR<-0.03%得10分 |")
+    md.append("| D9 LS | 多空比评分(0-8): L/S<0.6=散户重度做空→强反指看涨 |")
+    md.append("| 吸筹% | BubbleMap ACC地址/Top300持有者 占比 |")
+    md.append("| vol缩比 | 24h成交量/7d均量 — <0.3=严重量缩(蓄力) |")
+    md.append("| OI($) | 币安永续合约未平仓合约价值(USD) |")
+    md.append("| OI变化 | 24h OI变化百分比 — 正值=资金流入 |")
+    md.append("| FR | Funding Rate 资金费率 — 负值=空头付费给多头(空头拥挤) |")
+    md.append("| L/S | Long/Short Ratio 散户多空比 — <1散户偏空(反指看涨), >2散户偏多(反指看空) |")
+    md.append("| LP | DEX流动性池储备(USD) |")
+    md.append("")
+
     # IMMINENT
     imm = [r for r in results if r["alert_level"]=="IMMINENT"]
     if imm:
@@ -283,15 +302,15 @@ def _generate_report(results, scan_time):
     rdy = [r for r in results if r["alert_level"].startswith("READY")]
     if rdy:
         md.append(f"## 🟡 READY ({len(rdy)})")
-        md.append("| 代币 | pump | D1-6 | D7-9 | 吸筹% | vol缩比 | OI变化 | FR | L/S | LP |")
-        md.append("|------|------|------|------|-------|---------|--------|-----|-----|-----|")
+        md.append("| 代币 | pump | D1-D6 | D7 OI | D8 FR | D9 LS | 吸筹% | vol缩比 | OI($) | OI变化 | FR | L/S | LP |")
+        md.append("|------|------|-------|-------|-------|-------|-------|---------|-------|--------|-----|-----|-----|")
         for r in rdy[:25]:
             d16 = r.get("d1",0)+r.get("d2",0)+r.get("d3",0)+r.get("d4",0)+r.get("d5",0)+r.get("d6",0)
-            d79 = r.get("d7",0)+r.get("d8",0)+r.get("d9",0)
+            oi_str = f"${r['oi_value_usd']:,.0f}" if r['oi_value_usd'] else "—"
             oi_chg = f"{r['oi_change_24h']:.1%}" if r.get('oi_change_24h') else "—"
             fr_str = f"{r['funding_rate']:.4%}" if r.get('funding_rate') else "—"
             ls_str = f"{r['long_short_ratio']:.2f}" if r.get('long_short_ratio') else "—"
-            md.append(f"| {r['token_symbol']} | {r['pump_score']} | {d16} | {d79} | {r['acc_pct']}% | {r['vol_ratio']:.3f} | {oi_chg} | {fr_str} | {ls_str} | ${r['reserve_usd']:,.0f} |")
+            md.append(f"| **{r['token_symbol']}** | **{r['pump_score']}** | {d16}/95 | {r.get('d7',0)} | {r.get('d8',0)} | {r.get('d9',0)} | {r['acc_pct']}% | {r['vol_ratio']:.3f} | {oi_str} | {oi_chg} | {fr_str} | {ls_str} | ${r['reserve_usd']:,.0f} |")
         md.append("")
     # 链上/合约分歧
     conflict = [r for r in results if r["alert_level"] in ("IMMINENT","READY_VOL_SHRINK","READY")

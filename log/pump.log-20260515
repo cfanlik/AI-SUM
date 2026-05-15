@@ -1,0 +1,56 @@
+2026-05-14 00:52:01,598 [INFO] pump_detector: [pump_detector v2] 开始扫描 scan_time=2026-05-14 00:52:01
+2026-05-14 00:52:11,525 [INFO] pump_detector:   BubbleMap: 200
+2026-05-14 00:52:11,576 [INFO] pump_detector:   Gecko: 214
+2026-05-14 00:52:11,652 [INFO] pump_detector:   Meta: 167
+2026-05-14 00:52:11,665 [INFO] pump_detector:   History: 134
+2026-05-14 00:52:11,673 [INFO] pump_detector:   Futures: 179
+2026-05-14 00:52:11,694 [INFO] pump_detector:   DB写入: 144 条 (WATCH以上)
+2026-05-14 00:52:11,694 [INFO] pump_detector:   报告: /opt/AI-SUM/report/pump/pump_20260514_0052.md
+2026-05-14 00:52:11,695 [INFO] pump_detector:   IMMINENT: 1
+2026-05-14 00:52:11,695 [INFO] pump_detector:   READY_VOL_SHRINK: 10
+2026-05-14 00:52:11,695 [INFO] pump_detector:   READY: 25
+2026-05-14 00:52:11,695 [INFO] pump_detector:   WATCH: 108
+2026-05-14 00:52:11,695 [INFO] pump_detector:   NEUTRAL: 56
+2026-05-14 00:52:11,695 [INFO] pump_detector: [pump_detector v2] 完成: 200 代币 (有合约数据: 179)
+2026-05-14 06:52:02,026 [INFO] pump_detector: [pump_detector v2] 开始扫描 scan_time=2026-05-14 06:52:02
+2026-05-14 06:52:23,171 [INFO] pump_detector:   BubbleMap: 200
+2026-05-14 06:52:23,208 [INFO] pump_detector:   Gecko: 214
+2026-05-14 06:52:23,263 [INFO] pump_detector:   Meta: 167
+2026-05-14 06:52:23,278 [INFO] pump_detector:   History: 135
+2026-05-14 06:52:23,284 [INFO] pump_detector:   Futures: 179
+2026-05-14 06:52:23,304 [INFO] pump_detector:   DB写入: 137 条 (WATCH以上)
+2026-05-14 06:52:23,305 [INFO] pump_detector:   报告: /opt/AI-SUM/report/pump/pump_20260514_0652.md
+2026-05-14 06:52:23,305 [INFO] pump_detector:   IMMINENT: 1
+2026-05-14 06:52:23,305 [INFO] pump_detector:   READY_VOL_SHRINK: 9
+2026-05-14 06:52:23,305 [INFO] pump_detector:   READY: 29
+2026-05-14 06:52:23,305 [INFO] pump_detector:   WATCH: 98
+2026-05-14 06:52:23,305 [INFO] pump_detector:   NEUTRAL: 63
+2026-05-14 06:52:23,306 [INFO] pump_detector: [pump_detector v2] 完成: 200 代币 (有合约数据: 179)
+2026-05-14 12:52:01,752 [INFO] pump_detector: [pump_detector v2] 开始扫描 scan_time=2026-05-14 12:52:01
+2026-05-14 12:52:16,010 [INFO] pump_detector:   BubbleMap: 200
+2026-05-14 12:52:16,058 [INFO] pump_detector:   Gecko: 214
+2026-05-14 12:52:16,070 [INFO] pump_detector:   Meta: 168
+2026-05-14 12:52:16,081 [INFO] pump_detector:   History: 135
+2026-05-14 12:52:16,086 [INFO] pump_detector:   Futures: 179
+2026-05-14 12:52:16,103 [INFO] pump_detector:   DB写入: 138 条 (WATCH以上)
+2026-05-14 12:52:16,104 [INFO] pump_detector:   报告: /opt/AI-SUM/report/pump/pump_20260514_1252.md
+2026-05-14 12:52:16,104 [INFO] pump_detector:   IMMINENT: 1
+2026-05-14 12:52:16,104 [INFO] pump_detector:   READY_VOL_SHRINK: 10
+2026-05-14 12:52:16,104 [INFO] pump_detector:   READY: 28
+2026-05-14 12:52:16,104 [INFO] pump_detector:   WATCH: 99
+2026-05-14 12:52:16,104 [INFO] pump_detector:   NEUTRAL: 62
+2026-05-14 12:52:16,104 [INFO] pump_detector: [pump_detector v2] 完成: 200 代币 (有合约数据: 179)
+2026-05-14 18:52:01,214 [INFO] pump_detector: [pump_detector v2] 开始扫描 scan_time=2026-05-14 18:52:01
+2026-05-14 18:52:21,211 [INFO] pump_detector:   BubbleMap: 200
+2026-05-14 18:52:21,235 [INFO] pump_detector:   Gecko: 214
+2026-05-14 18:52:21,241 [INFO] pump_detector:   Meta: 168
+2026-05-14 18:52:21,245 [INFO] pump_detector:   History: 136
+2026-05-14 18:52:21,249 [INFO] pump_detector:   Futures: 179
+2026-05-14 18:52:21,266 [INFO] pump_detector:   DB写入: 138 条 (WATCH以上)
+2026-05-14 18:52:21,267 [INFO] pump_detector:   报告: /opt/AI-SUM/report/pump/pump_20260514_1852.md
+2026-05-14 18:52:21,267 [INFO] pump_detector:   IMMINENT: 1
+2026-05-14 18:52:21,267 [INFO] pump_detector:   READY_VOL_SHRINK: 9
+2026-05-14 18:52:21,267 [INFO] pump_detector:   READY: 26
+2026-05-14 18:52:21,267 [INFO] pump_detector:   WATCH: 102
+2026-05-14 18:52:21,267 [INFO] pump_detector:   NEUTRAL: 62
+2026-05-14 18:52:21,267 [INFO] pump_detector: [pump_detector v2] 完成: 200 代币 (有合约数据: 179)
