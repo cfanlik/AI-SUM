@@ -179,14 +179,14 @@ def backtest_watchlist(src, sumdb):
     def _avg(lst): return f"{sum(lst)/len(lst):+.1f}%" if lst else "—"
     def _med(lst): return f"{statistics.median(lst):+.1f}%" if lst else "—"
 
-    lines += ["### 汇总", "",
-              "| 信号 | 样本 | 1d胜率 | 3d胜率 | 7d胜率 | 至今胜率 | 至今均收 | 至今中位 | MDD中位 |",
-              "|------|------|--------|--------|--------|---------|---------|---------|---------|"]
     # 全量 precision 统计
     all_acc_rnow = [r["ret_now"] for r in results if r["ret_now"] is not None]
     precision = f"{sum(1 for x in all_acc_rnow if x > 0) / len(all_acc_rnow) * 100:.0f}%" if all_acc_rnow else "—"
-    lines.append(f"> 信号 Precision（全信号口径: 盈利/总DIAMOND+RED+YELLOW）: **{precision}** ({sum(1 for x in all_acc_rnow if x > 0)}/{len(all_acc_rnow)})")
-    lines.append("")
+    lines += ["### 汇总", "",
+              f"> 信号 Precision（全信号口径: 盈利/总DIAMOND+RED+YELLOW）: **{precision}** ({sum(1 for x in all_acc_rnow if x > 0)}/{len(all_acc_rnow)})",
+              "",
+              "| 信号 | 样本 | 1d胜率 | 3d胜率 | 7d胜率 | 至今胜率 | 至今均收 | 至今中位 | MDD中位 |",
+              "|------|------|--------|--------|--------|---------|---------|---------|---------|"]
     for sig in ["DIAMOND", "RED", "YELLOW"]:
         grp = [r for r in results if r["signal"] == sig]
         if not grp:
