@@ -617,13 +617,19 @@ def liquidity_health(src, sumdb):
         elif price_chg < -3 and vol_change > 30:
             vpd = "价跌量增"
 
-        # 评级
+        # 评级 (V5.1 精细化: 拆分具体量价背离类型)
         if vol < 1000 or (avg7_vol > 0 and vol < avg7_vol * 0.3 and vol < 100000):
             grade = "❌枯竭"
         elif reserve < 10000:
             grade = "⚠低LP"
         elif vpd:
-            grade = "⚠背离"
+            vpd_grade_map = {
+                "潜伏吸筹": "🔍潜伏",
+                "突破放量": "🚀突破",
+                "价涨量缩": "⚠量缩",
+                "价跌量增": "⚠量增"
+            }
+            grade = vpd_grade_map.get(vpd, "⚠背离")
         else:
             grade = "✅正常"
 
@@ -1088,8 +1094,8 @@ def coin_profile(bt_data, mig_data, ts_data, sumdb, liq_data=None):
         lines.append(f"> 已排除遗漏检测标记代币: {', '.join(sorted(excluded))}")
         lines.append("")
     lines += [
-        "| 代币 | 分数 | 引擎 | 阶段 | 至今收益 | MDD | 24h留存 | 7d留存 | 24h量 | 浮盈率 | ACC轮 | 背离 | 评级 |",
-        "|------|------|------|------|---------|-----|--------|--------|-------|--------|-------|------|------|",
+        "| 代币 | 分数 | 引擎 | 阶段 | 至今收益 | MDD | 24h留存 | 7d留存 | 24h量 | 浮盈率 | ACC轮 | 庄出逃 | 评级 |",
+        "|------|------|------|------|---------|-----|--------|--------|-------|--------|-------|--------|------|",
     ]
 
     stage_map = {"CONTROLLED": "CTRL", "ACCUMULATING": "ACC", "DISTRIBUTING": "DIST",
