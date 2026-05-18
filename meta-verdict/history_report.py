@@ -251,13 +251,13 @@ def migration_analysis(src, sumdb):
         new_rows = src.execute(
             "SELECT wallet_address, rank, hold_percentage, is_accumulating "
             "FROM bubblemap_holders WHERE token_address=? AND snapshot_time=? "
-            "AND rank<=50 AND is_cex=0 AND is_contract=0",
+            "AND rank<=100 AND is_cex=0 AND is_contract=0",
             (addr, latest)
         ).fetchall()
         old_rows = src.execute(
             "SELECT wallet_address, rank, hold_percentage, is_accumulating "
             "FROM bubblemap_holders WHERE token_address=? AND snapshot_time=? "
-            "AND rank<=50 AND is_cex=0 AND is_contract=0",
+            "AND rank<=100 AND is_cex=0 AND is_contract=0",
             (addr, old_snap)
         ).fetchall()
         if not new_rows or not old_rows:
@@ -382,7 +382,7 @@ def migration_analysis(src, sumdb):
     # 异常流动
     danger = [r for r in results if r["retention_7d"] < 60 and r["symbol"]]
     if danger:
-        lines += ["", "### ⚠ 异常流动（Top50 留存 < 60%）", "",
+        lines += ["", "### ⚠ 异常流动（Top100 留存 < 60%）", "",
                   "| 代币 | 7d留存% | 14d留存% | 退出数 | Top10Δ | 含义 |",
                   "|------|---------|---------|--------|--------|------|"]
         for r in danger[:10]:
@@ -1327,8 +1327,8 @@ def whale_behavior_alert(src, sumdb):
         lines += [
             "### 🔒 锁仓休眠分析（DORMANT）",
             "",
-            "| 代币 | 吸筹数 | DORMANT | 率% | 平均稳定 | 水下% | VWAP/价格 | 信念 |",
-            "|------|--------|---------|-----|---------|-------|----------|------|",
+            "| 代币 | 吸筹数 | DORMANT | 休眠率% | 平均稳定 | 水下% | VWAP/价格 | 信念 |",
+            "|------|--------|---------|---------|---------|-------|----------|------|",
         ]
         for d in high_conviction[:20]:
             vwap_ratio = f"{d['vwap']/d['price']:.1f}x" if d["price"] > 0 and d["vwap"] > 0 else "—"

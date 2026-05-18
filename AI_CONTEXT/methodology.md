@@ -42,8 +42,8 @@ retention_7d = len(old_7d_set ∩ new_set) / len(old_7d_set) × 100
 retention_24h = len(old_24h_set ∩ new_set) / len(old_24h_set) × 100
 retention_72h = len(old_72h_set ∩ new_set) / len(old_72h_set) × 100
 ```
-- old_X_set: X时间前 bubblemap Top50 holder 地址集合 (剔除合约/CEX地址)
-- new_set: 最新 bubblemap Top50 holder 地址集合 (剔除合约/CEX地址)
+- old_X_set: X时间前 bubblemap Top100 holder 地址集合 (剔除合约/CEX地址)
+- new_set: 最新 bubblemap Top100 holder 地址集合 (剔除合约/CEX地址)
 - **Top10 浓度漂移**: top10_delta_24h = latest_top10_pct - old_24h_top10_pct
 
 ### 评级体系
@@ -70,7 +70,7 @@ THEN → 标记 "应为 DIST"
 - 留存率 17%、Top10Δ -5.7% → 遗漏检测标记 "应为 DIST"
 - 实际至今收益 **+220.2%** → 信号完全有效
 
-**根因**: 庄家拉盘 + 散户追涨换手。Top50 地址大换血但**价格暴涨**。
+**根因**: 庄家拉盘 + 散户追涨换手。Top100 地址大换血但**价格暴涨**。
 
 **方法论结论**: 留存率反映的是**地址换手**而非**筹码流向**。需同时看:
 1. Top10 占比绝对值（≥50% = 庄控仍在）
