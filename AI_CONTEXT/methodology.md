@@ -38,10 +38,13 @@
 ### 留存率计算
 
 ```
-retention_7d = len(old_set ∩ new_set) / len(old_set) × 100
+retention_7d = len(old_7d_set ∩ new_set) / len(old_7d_set) × 100
+retention_24h = len(old_24h_set ∩ new_set) / len(old_24h_set) × 100
+retention_72h = len(old_72h_set ∩ new_set) / len(old_72h_set) × 100
 ```
-- old_set: 7天前 bubblemap Top50 holder 地址集合
-- new_set: 最新 bubblemap Top50 holder 地址集合
+- old_X_set: X时间前 bubblemap Top50 holder 地址集合 (剔除合约/CEX地址)
+- new_set: 最新 bubblemap Top50 holder 地址集合 (剔除合约/CEX地址)
+- **Top10 浓度漂移**: top10_delta_24h = latest_top10_pct - old_24h_top10_pct
 
 ### 评级体系
 
@@ -128,12 +131,36 @@ IF |delta_score| >= 1.5 BETWEEN 相邻两轮:
 vol_change = (volume_24h - avg_7d_volume) / avg_7d_volume × 100
 ```
 
-### 量价背离定义
+### 量价与背离定义 (V5 扩展)
 
-| 类型 | 条件 | 含义 |
-|------|------|------|
-| 价涨量缩 | price_24h_change > 5% AND vol_change < -30% | 拉盘无力 |
-| 价跌量增 | price_24h_change < -5% AND vol_change > 30% | 恐慌抛售 |
+| 类型 | 条件 | 含义 | 说明 |
+|------|------|------|------|
+| 潜伏吸筹 | abs(price_chg) <= 3% AND vol_change >= +50% | 主力暗中吃单 | 价平量增，主力潜伏收集筹码 (新增) |
+| 突破放量 | price_chg >= 5% AND vol_change >= +50% | 强势拉升 | 价涨量增，突破关键阻力位 (新增) |
+| 价涨量缩 | price_chg > 3% AND vol_change < -30% | 拉盘无力 | 散户不跟风，缺乏拉升动能 |
+| 价跌量增 | price_chg < -3% AND vol_change > 30% | 恐慌抛售 | 筹码踩踏，庄家洗盘或出货 |
+
+## 4.5. 庄家浮盈与出货背离方法论 (V5 新增)
+
+### 庄家浮盈率 (pnl_ratio)
+
+```
+pnl_ratio = (gecko_price - vwap) / vwap * 100
+```
+- **vwap**: 从 `cost_basis_snapshots` 获得的庄家加权平均持仓成本价
+- **gecko_price**: 最新市场价格
+- **分析价值**:
+  - `pnl_ratio > 100% 且 retention_24h > 95%`: 强格局强锁仓。庄家高浮盈却拒绝出货，长线意图明显。
+  - `pnl_ratio < -30% 且 retention_24h > 90%`: 套牢不割。主力深度水下但依然锁仓，极具安全边际。
+
+### 诱多出货背离 (whale_divergence)
+
+```
+whale_divergence = price_chg_24h > 5.0% AND top10_delta_24h < -1.0%
+```
+- **定义**: 价格在拉升，但 Top10 庄家持仓占比出现显著减少 (出货幅度 >1.0%)
+- **含义**: 诱多出货。利用价格拉升吸引散户追涨接盘，大户则趁机暗中派发筹码，属于高危逃顶信号。
+- **展现**: 长期分析报告及 ACC 看板中以 🚨 标记。
 
 ### 流动性枯竭告警
 

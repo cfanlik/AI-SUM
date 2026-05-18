@@ -220,6 +220,8 @@ def backtest_watchlist(src, sumdb):
 def migration_analysis(src, sumdb):
     """bubblemap 7d/14d holder 变动"""
     now = datetime.now()
+    d1 = (now - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+    d3 = (now - timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
     d7 = (now - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
     d14 = (now - timedelta(days=14)).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -294,6 +296,19 @@ def migration_analysis(src, sumdb):
             (addr, d14)
         ).fetchone()[0]
 
+        # V5: 24h/72h 快照
+        old1 = src.execute(
+            "SELECT MAX(snapshot_time) FROM bubblemap_holders WHERE token_address=? AND snapshot_time<=?",
+            (addr, d1)
+        ).fetchone()[0]
+        old3 = src.execute(
+            "SELECT MAX(snapshot_time) FROM bubblemap_holders WHERE token_address=? AND snapshot_time<=?",
+            (addr, d3)
+        ).fetchone()[0]
+
+        r1 = _calc_retention(src, addr, latest, old1)
+        r3 = _calc_retention(src, addr, latest, old3)
+
         r7 = _calc_retention(src, addr, latest, old7)
         if not r7:
             continue
@@ -313,6 +328,10 @@ def migration_analysis(src, sumdb):
 
         row = {
             "symbol": sym, "addr": addr,
+            "retention_24h": r1["retention"] if r1 else None,
+            "retention_72h": r3["retention"] if r3 else None,
+            "top10_delta_24h": r1["top10_delta"] if r1 else None,
+            "top10_delta_72h": r3["top10_delta"] if r3 else None,
             "retention_7d": r7["retention"],
             "entered_7d": r7["entered"], "exited_7d": r7["exited"],
             "top10_now": r7["top10_now"], "top10_delta_7d": r7["top10_delta"],
@@ -342,19 +361,21 @@ def migration_analysis(src, sumdb):
 
     if acc_results:
         lines += ["### 吸筹代币 holder 变动", "",
-                  "| 代币 | 7d留存% | 14d留存% | 新进 | 退出 | Top10% | Δ7d | Δ14d | 吸筹Δ | 评级 |",
-                  "|------|---------|---------|------|------|--------|-----|------|-------|------|"]
+                  "| 代币 | 24h留存 | 72h留存 | 7d留存% | 14d留存% | Top10% | Δ24h | Δ7d | 吸筹Δ | 评级 |",
+                  "|------|--------|--------|---------|---------|--------|------|-----|-------|------|"]
         for r in acc_results[:25]:
+            r24 = f'{r["retention_24h"]:.0f}%' if r.get("retention_24h") is not None else "—"
+            r72 = f'{r["retention_72h"]:.0f}%' if r.get("retention_72h") is not None else "—"
+            d24 = f'{r["top10_delta_24h"]:+.1f}%' if r.get("top10_delta_24h") is not None else "—"
             if r["retention_7d"] >= 90: grade = "🔒极稳"
             elif r["retention_7d"] >= 75: grade = "✅稳定"
             elif r["retention_7d"] >= 60: grade = "⚠波动"
             else: grade = "❌流失"
             r14_str = f"{r['retention_14d']:.0f}%" if r["retention_14d"] is not None else "—"
-            t10_14 = f"{r['top10_delta_14d']:+.1f}%" if r["top10_delta_14d"] is not None else "—"
             lines.append(
-                f"| {r['symbol']} | {r['retention_7d']:.0f}% | {r14_str} "
-                f"| {r['entered_7d']} | {r['exited_7d']} "
-                f"| {r['top10_now']:.1f}% | {r['top10_delta_7d']:+.1f}% | {t10_14} "
+                f"| {r['symbol']} | {r24} | {r72} "
+                f"| {r['retention_7d']:.0f}% | {r14_str} "
+                f"| {r['top10_now']:.1f}% | {d24} | {r['top10_delta_7d']:+.1f}% "
                 f"| {r['acc_delta_7d']:+d} | {grade} |"
             )
 
@@ -585,9 +606,13 @@ def liquidity_health(src, sumdb):
         turnover = (vol / mcap * 100) if mcap > 0 else None
         bs_ratio = buyers / max(sellers, 1)
 
-        # 量价背离检测
+        # 量价背离检测 (V5: 扩展为4种)
         vpd = ""
-        if price_chg > 3 and vol_change < -30:
+        if abs(price_chg) <= 3 and vol_change >= 50:
+            vpd = "潜伏吸筹"
+        elif price_chg >= 5 and vol_change >= 50:
+            vpd = "突破放量"
+        elif price_chg > 3 and vol_change < -30:
             vpd = "价涨量缩"
         elif price_chg < -3 and vol_change > 30:
             vpd = "价跌量增"
@@ -639,7 +664,8 @@ def liquidity_health(src, sumdb):
                   "| 代币 | 24h价格 | 量变化 | 类型 | 含义 |",
                   "|------|---------|--------|------|------|"]
         for r in vpd_list:
-            meaning = "拉盘无力" if r["vpd"] == "价涨量缩" else "恐慌抛售"
+            vpd_map = {"潜伏吸筹": "主力暗中吃单", "突破放量": "强势拉升", "价涨量缩": "拉盘无力", "价跌量增": "恐慌抛售"}
+            meaning = vpd_map.get(r["vpd"], r["vpd"])
             lines.append(f"| {r['symbol']} | {r['price_chg']:+.1f}% | {r['vol_change']:+.0f}% | {r['vpd']} | {meaning} |")
 
     # 流动性枯竭
@@ -880,6 +906,28 @@ def ensure_token_history_table(sumdb):
     sumdb.commit()
 
 
+def calc_pnl_ratio(sumdb, addr):
+    """V5: 从 cost_basis_snapshots 计算庄家浮盈率"""
+    try:
+        row = sumdb.execute(
+            "SELECT vwap, gecko_price FROM cost_basis_snapshots "
+            "WHERE token_address=? ORDER BY scan_time DESC LIMIT 1", (addr,)
+        ).fetchone()
+        if not row or not row["vwap"] or row["vwap"] <= 0:
+            return None
+        return (row["gecko_price"] - row["vwap"]) / row["vwap"] * 100
+    except Exception:
+        return None
+
+
+def evaluate_whale_divergence(price_chg_24h, top10_delta_24h):
+    """V5: 判定诱多出货背离 (价格涨+大户撤)"""
+    if price_chg_24h is not None and top10_delta_24h is not None:
+        if price_chg_24h > 5.0 and top10_delta_24h < -1.0:
+            return 1
+    return 0
+
+
 def save_token_history(sumdb, bt_data, mig_data, ts_data, liq_data=None):
     """将计算结果写入 token_history（V3: 增加流动性+MDD+meta补漏）"""
     today = datetime.now().strftime("%Y-%m-%d")
@@ -888,6 +936,16 @@ def save_token_history(sumdb, bt_data, mig_data, ts_data, liq_data=None):
     for col, typedef in [("volume_24h", "REAL DEFAULT 0"), ("reserve_usd", "REAL DEFAULT 0"),
                           ("buy_tx_pct", "REAL DEFAULT 0"), ("turnover_ratio", "REAL DEFAULT 0"),
                           ("mdd", "REAL")]:
+        try:
+            sumdb.execute(f"ALTER TABLE token_history ADD COLUMN {col} {typedef}")
+        except Exception:
+            pass
+
+    # V5: 多时间尺度 + 浮盈率 + 出货背离
+    for col, typedef in [("retention_24h", "REAL"), ("retention_72h", "REAL"),
+                          ("top10_delta_24h", "REAL"), ("top10_delta_72h", "REAL"),
+                          ("pnl_ratio", "REAL"), ("bs_ratio_24h", "REAL"),
+                          ("whale_divergence", "INTEGER DEFAULT 0")]:
         try:
             sumdb.execute(f"ALTER TABLE token_history ADD COLUMN {col} {typedef}")
         except Exception:
@@ -912,8 +970,10 @@ def save_token_history(sumdb, bt_data, mig_data, ts_data, liq_data=None):
                  retention_7d, retention_14d, whale_entered, whale_exited,
                  top10_pct, top10_delta, acc_count, acc_delta,
                  score_slope, score_sigma, consec_acc,
-                 volume_24h, reserve_usd, buy_tx_pct, turnover_ratio, mdd)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 volume_24h, reserve_usd, buy_tx_pct, turnover_ratio, mdd,
+                 retention_24h, retention_72h, top10_delta_24h, top10_delta_72h,
+                 pnl_ratio, bs_ratio_24h, whale_divergence)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 today, addr, sym, bt.get("date") if bt else None,
                 bt.get("signal", "NONE") if bt else "NONE",
@@ -929,6 +989,11 @@ def save_token_history(sumdb, bt_data, mig_data, ts_data, liq_data=None):
                 liq.get("vol_24h", 0), liq.get("reserve", 0),
                 liq.get("buy_pct", 0), liq.get("turnover", 0),
                 bt.get("mdd") if bt else None,
+                mig.get("retention_24h"), mig.get("retention_72h"),
+                mig.get("top10_delta_24h"), mig.get("top10_delta_72h"),
+                calc_pnl_ratio(sumdb, addr),
+                liq.get("bs_ratio", 1.0),
+                evaluate_whale_divergence(liq.get("price_chg"), mig.get("top10_delta_24h")),
             ))
             count += 1
             written_addrs.add(addr)
@@ -993,6 +1058,14 @@ def coin_profile(bt_data, mig_data, ts_data, sumdb, liq_data=None):
         if retention < 50 and top10_delta < 0:
             excluded.add(sym)
 
+    # V5: sym → addr 映射 (用于 pnl_ratio 查询)
+    sym_addr = {}
+    try:
+        for _r in sumdb.execute("SELECT token_symbol, token_address FROM watchlist"):
+            sym_addr[_r["token_symbol"]] = _r["token_address"]
+    except Exception:
+        pass
+
     acc_tokens = [(sym, info) for sym, info in meta_map.items()
                   if info.get("meta_verdict") == "ACC" and sym not in excluded]
     acc_tokens.sort(key=lambda x: x[1].get("meta_score", 0), reverse=True)
@@ -1015,8 +1088,8 @@ def coin_profile(bt_data, mig_data, ts_data, sumdb, liq_data=None):
         lines.append(f"> 已排除遗漏检测标记代币: {', '.join(sorted(excluded))}")
         lines.append("")
     lines += [
-        "| 代币 | 分数 | 引擎 | 阶段 | 至今收益 | MDD | 7d留存 | 24h量 | LP | 斜率 | ACC轮 | 评级 |",
-        "|------|------|------|------|---------|-----|--------|-------|-----|------|-------|------|",
+        "| 代币 | 分数 | 引擎 | 阶段 | 至今收益 | MDD | 24h留存 | 7d留存 | 24h量 | 浮盈率 | ACC轮 | 背离 | 评级 |",
+        "|------|------|------|------|---------|-----|--------|--------|-------|--------|-------|------|------|",
     ]
 
     stage_map = {"CONTROLLED": "CTRL", "ACCUMULATING": "ACC", "DISTRIBUTING": "DIST",
@@ -1040,9 +1113,14 @@ def coin_profile(bt_data, mig_data, ts_data, sumdb, liq_data=None):
         consec = ts.get("consec_acc", 0) if ts else 0
         grade = liq.get("grade", "—")
 
+        ret_24h = f"{mig.get('retention_24h', 0):.0f}%" if mig.get("retention_24h") is not None else "—"
+        pnl = calc_pnl_ratio(sumdb, sym_addr.get(sym, ""))
+        pnl_str = f"{pnl:+.0f}%" if pnl is not None else "—"
+        wd = evaluate_whale_divergence(liq.get("price_chg"), mig.get("top10_delta_24h"))
+        wd_str = "🚨" if wd else "—"
         lines.append(
             f"| {sym} | {score} | {engines} | {stage} | {ret_now} | {mdd} "
-            f"| {retention} | {vol} | {lp} | {slope} | {consec} | {grade} |"
+            f"| {ret_24h} | {retention} | {vol} | {pnl_str} | {consec} | {wd_str} | {grade} |"
         )
 
     lines.append("")
@@ -1480,7 +1558,7 @@ def hop2_analysis(src, sumdb):
 def main():
     import time
     t0 = time.time()
-    print(f"AI-SUM 长期分析报告 V4.0 | {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    print(f"AI-SUM 长期分析报告 V5.0 | {datetime.now().strftime('%Y-%m-%d %H:%M')}")
 
     src = connect(SRC_DB, readonly=True)
     sumdb = connect(SUM_DB)
@@ -1528,11 +1606,11 @@ def main():
 
     # 组装报告
     now_str = datetime.now().strftime("%m-%d %H:%M")
-    header = f"""# 📊 AI-SUM 长期分析报告 V4.0 — {now_str}
+    header = f"""# 📊 AI-SUM 长期分析报告 V5.0 — {now_str}
 
 > 时间基准: 首次信号时间（meta_snapshots/unified_results）
 > 数据源: bubblemap + gecko(20字段) + meta {len(ts_data)}代币
-> 生成: history_report.py V4.0 | 耗时: {{elapsed:.1f}}s
+> 生成: history_report.py V5.0 | 耗时: {{elapsed:.1f}}s
 
 ---
 

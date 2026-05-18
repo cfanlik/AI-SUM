@@ -1,6 +1,6 @@
 # AI-SUM 六引擎综合分析系统
 
-> 版本: V3.2 | 更新: 2026-05-12 | VPS: `/opt/AI-SUM/`
+> 版本: V5.0 | 更新: 2026-05-18 | VPS: `/opt/AI-SUM/`
 > GitHub: https://github.com/cfanlik/AI-SUM | DB: `select-sum.db`
 
 ---
@@ -192,20 +192,29 @@ gecko_market_data ──┼── src.db ──┤  opus-scan    → opus_snapsh
 - `meta_snapshots`: 全部有信号代币（含 NEUTRAL），含 5 列分项积分
 - `token_lifecycle`: 生命周期状态 + 跃迁记录
 
-### history_report.py — 长期分析报告 V4.1
+### history_report.py — 长期分析报告 V5.0
 
 10 模块融合报告，输出 `report/history/history_MMDD_HHMM.md` (每6小时)：
 
 | 模块 | 功能 | 数据源字段 |
 |------|------|-----------|
 | 信号回测 | 首次信号时间 × 1d/3d/7d/14d/至今收益 + MDD + Precision | price_usd |
-| Holder 迁移 | 7d+14d 留存率、遗漏检测(Top10Δ复合条件)、底部吸筹 | bubblemap_holders |
+| Holder 迁移 | 7d+14d 留存率、遗漏检测(Top10Δ复合条件)、底部吸筹。**V5 新增: 24h/72h 多尺度留存率与 Top10 浓度漂移** | bubblemap_holders |
 | **大户行为追踪** | **首次减仓AMBER预警 + DORMANT锁仓统计 + 成本信念度(套牢不割型)** | **bubblemap_holders × cost_basis_snapshots** |
 | 积分时序 | 斜率/σ/连续ACC/引擎稳定性，σ<0.05平序列强制归零 | meta_snapshots |
 | 信号×收益 | 按综合分/引擎数分桶胜率，样本<5标注⚠ | meta_snapshots |
 | **流动性健康度** | 24h量/7d均量/量变化/LP深度/换手率/买卖比/量价背离/枯竭告警 | **volume_24h, reserve_usd, buy_tx_pct, buyers/sellers** |
 | **信号质量评估** | 引擎组合矩阵/单引擎Precision/P-R-F1/失败案例/漏网之鱼 | meta_snapshots 5列分项积分 |
 | 单币画像 | Top 10 ACC 完整档案，含流动性+MDD+vs昨天Δ | 全字段 |
+
+#### V5 关键增强 (2026-05-18)
+
+| 增强项 | 说明 |
+|--------|------|
+| **多时间尺度留存** | **引入 24h (1d) 和 72h (3d) 时序留存与 top10 浓度漂移，对短期主力动向更灵敏** |
+| **庄家浮盈率** | **基于 (gecko_price - vwap)/vwap 计算庄家浮盈率 (pnl_ratio)，高浮盈强锁仓为极强信心标志** |
+| **出货背离检测** | **price_chg > 5% 且 top10_delta_24h < -1% 时，触发“出货背离” (whale_divergence) 预警** |
+| **量价背离扩展** | **vpd 扩展为 4 种类型：价平量增(潜伏吸筹)、价涨量增(突破放量)、价涨量缩(拉盘无力)、价跌量增(恐慌抛售)** |
 
 #### V3 关键增强
 
@@ -248,7 +257,7 @@ meta_snapshots ACC/DIST 代币全量写入，解决丢失问题。
 | `cost_basis_snapshots` | cost-basis-scan | verdict, vwap, gecko_price, acc_pct, cost_cv | 成本分层(含C9) |
 | `meta_snapshots` | meta-verdict | meta_score, meta_verdict, stage, 5×分项积分 | 仲裁结果 |
 | `token_lifecycle` | meta-verdict | current_stage, prev_stage, transition | 生命周期 |
-| `token_history` | history_report | computed_date, signal_first_seen, price_*_ret, retention_*, score_slope, **volume_24h, reserve_usd, buy_tx_pct, turnover_ratio, mdd** | 长期跟踪(V3扩展) |
+| `token_history` | history_report | computed_date, signal_first_seen, price_*_ret, retention_*, score_slope, **volume_24h, reserve_usd, buy_tx_pct, turnover_ratio, mdd**, **retention_24h, retention_72h, top10_delta_24h, top10_delta_72h, pnl_ratio, bs_ratio_24h, whale_divergence** | 长期跟踪(V5扩展) |
 | `hop2_tracking` | meta-verdict | scan_time, token_symbol, hop2_acc_pct, hop2_acc_count, hop2_high_count, tier_98/90/30/80_count, entity_count, price_usd | hop2 庄控跟踪(v5) |
 
 ---
@@ -278,6 +287,7 @@ cd /opt/AI-SUM && python3 meta-verdict/history_report.py
 
 | 版本 | 日期 | 关键变更 |
 |------|------|----------|
+| **history_report V5.0** | **2026-05-18** | **多时间尺度吸筹与量能指标追踪**：24h/72h 留存率与漂移、庄家浮盈率、出货背离 (whale_divergence)、vpd 扩展为 4 种类型、`token_history` 增加 7 个字段落库、综合看板扩展 24h留存/浮盈率/背离 |
 | **history_report V4.1** | **2026-05-12** | 新增模块2.5「大户行为追踪」: 地址级首次减仓AMBER预警(DORMANT→减仓检测) + 锁仓休眠率统计 + cost_basis交叉信念度评级(💎套牢不割/🔒强锁仓); 200代币批量化 |
 | **bugfix** | **2026-05-12** | 修复 `history_report.py` 合约分析模块未定义报错导致报告生成失败的问题 (将 `futures_analysis` 定义移到执行块之前)，补发 11 日和 12 日长期分析报告。 |
 | **cost-basis V1.2 + meta V2.1** | **2026-05-11** | C9深度套牢协同持仓信号(weight=6); COORDINATED_HOLD verdict(+2分); 条件: VWAP/价>2.5x+水下>90%+CV<0.20+holders≥30; 全量198代币仅命中SQD 1个(精准无误判); SQD meta_score 6.0→9.0 |
