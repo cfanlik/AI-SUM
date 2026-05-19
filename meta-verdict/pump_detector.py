@@ -44,8 +44,10 @@ def _load_bubblemap():
     c = _conn(SELECT_DB)
     rows = c.execute("""WITH latest AS (SELECT token_address, MAX(snapshot_time) as mx FROM bubblemap_holders GROUP BY token_address)
         SELECT bh.token_address, COUNT(*) as total_holders,
+        SUM(CASE WHEN bh.is_cex=0 AND bh.is_dex=0 AND bh.is_contract=0 THEN 1 ELSE 0 END) as real_user_count,
         SUM(CASE WHEN bh.is_accumulating=1 THEN 1 ELSE 0 END) as acc_count,
-        AVG(CASE WHEN bh.is_accumulating=1 THEN bh.acc_score ELSE NULL END) as avg_acc_score
+        AVG(CASE WHEN bh.is_accumulating=1 THEN bh.acc_score ELSE NULL END) as avg_acc_score,
+        AVG(CASE WHEN bh.is_cex=0 AND bh.is_dex=0 AND bh.is_contract=0 THEN bh.acc_score ELSE NULL END) as avg_macro_score
         FROM bubblemap_holders bh JOIN latest l ON bh.token_address=l.token_address AND bh.snapshot_time=l.mx
         GROUP BY bh.token_address""").fetchall()
     r = {x["token_address"]: dict(x) for x in rows}; c.close(); return r
@@ -112,14 +114,27 @@ def calc_pump_readiness(bm, gecko, meta, th, futures):
     res = gecko.get("reserve_usd",0) or 0
     dims["d2"] = 20 if res>=500000 else 15 if res>=100000 else 10 if res>=50000 else 5 if res>=10000 else 0
 
-    # D3: 吸筹密度 (0-20)
-    acc = bm.get("acc_count",0) or 0; tot = bm.get("total_holders",300) or 300; pct = acc/tot
-    dims["d3"] = 20 if pct>=0.40 else 18 if pct>=0.25 else 15 if pct>=0.15 else 10 if pct>=0.08 else 6 if pct>=0.04 else 0
+    # ── 新增：真实浓度计算 ──
+    acc = bm.get("acc_count", 0) or 0
+    real_cnt = max(bm.get("real_user_count", 0) or 0, 1)  # 防除零(2个纯合约代币)
+    concentration = acc / real_cnt * 100
+
+    # D3: 吸筹浓度 (0-20)
+    dims["d3"] = (20 if concentration >= 40.0 else
+                  18 if concentration >= 25.0 else
+                  15 if concentration >= 15.0 else
+                  10 if concentration >= 8.0 else
+                  6  if concentration >= 3.0 else 0)
 
     # D4: meta持续 (0-15)
     consec = (th.get("consec_acc",0) or 0) if th else 0
     ms = (meta.get("meta_score",0) or 0) if meta else 0
-    dims["d4"] = 15 if consec>=25 else 12 if consec>=15 else 9 if consec>=10 else 6 if consec>=5 else 4 if ms>=3 else (4 if pct>=0.20 else 0)
+    dims["d4"] = (15 if consec>=25 else
+                  12 if consec>=15 else
+                  9  if consec>=10 else
+                  6  if consec>=5 else
+                  4  if ms>=3 else
+                  (4 if concentration >= 20.0 else 0))
 
     # D5: 留存 (0-10)
     ret = (th.get("retention_7d",0) or 0) if th else 0
@@ -128,6 +143,12 @@ def calc_pump_readiness(bm, gecko, meta, th, futures):
     # D6: 均分 (0-10)
     avs = bm.get("avg_acc_score",0) or 0
     dims["d6"] = 10 if avs>=80 else 8 if avs>=75 else 6 if avs>=70 else 4 if avs>=60 else 0
+    # 大盘分门控
+    macro_s = bm.get("avg_macro_score", 0) or 0
+    if macro_s > 0 and macro_s < 44.0:
+        dims["d6"] = max(dims["d6"] - 3, 0)
+    elif macro_s >= 53.0:
+        dims["d6"] = min(dims["d6"] + 2, 10)
 
     # ── 合约层 D7-D9 ──
     if futures:
@@ -202,7 +223,7 @@ def run(scan_time=None):
             "scan_time":scan_time,"chain":"bsc","token_address":addr,
             "token_symbol":sym,"pump_score":score,"alert_level":lv,**dims,
             "acc_count":b.get("acc_count",0) or 0,
-            "acc_pct":round((b.get("acc_count",0) or 0)/(b.get("total_holders",300) or 300)*100,1),
+            "acc_pct":round((b.get("acc_count",0) or 0)/max(b.get("real_user_count",0) or 0, 1)*100,1),
             "avg_acc_score":round(b.get("avg_acc_score",0) or 0,1),
             "meta_score":round((m.get("meta_score",0) or 0),2) if m else 0,
             "consec_acc":(h.get("consec_acc",0) or 0) if h else 0,
@@ -259,6 +280,8 @@ def _generate_report(results, scan_time):
     levels = {}
     for r in results: levels[r["alert_level"]]=levels.get(r["alert_level"],0)+1
     md = [f"# 🚀 拉升前兆扫描报告 v2",f"> 时间: {scan_time} | 代币: {len(results)} | 版本: 9维(链上+合约)",""]
+    md.append("> ⚠ 当前处于全市场低量环境 (量能较峰值-51.6%), D1量缩评分需结合D3/D4/D5交叉验证")
+    md.append("")
     md.append("## 信号分布\n| 级别 | 数量 |\n|------|------|")
     for lv in ("IMMINENT","READY_VOL_SHRINK","READY","WATCH","NEUTRAL"):
         if lv in levels:
@@ -275,11 +298,11 @@ def _generate_report(results, scan_time):
     md.append("| D7 OI | 合约OI变化评分(0-15): OI增+价平=暗中建仓, OI<$1M减半 |")
     md.append("| D8 FR | 资金费率评分(0-10): 负FR=空头拥挤→轧空前兆, FR<-0.03%得10分 |")
     md.append("| D9 LS | 多空比评分(0-8): L/S<0.6=散户重度做空→强反指看涨 |")
-    md.append("| 吸筹% | BubbleMap ACC地址/Top300持有者 占比 |")
+    md.append("| 吸筹% | 真实用户吸筹浓度 (ACC/真实用户, 排除CEX/DEX/合约) |")
     md.append("| vol缩比 | 24h成交量/7d均量 — <0.3=严重量缩(蓄力) |")
     md.append("| OI($) | 币安永续合约未平仓合约价值(USD) |")
     md.append("| OI变化 | 24h OI变化百分比 — 正值=资金流入 |")
-    md.append("| FR | Funding Rate 资金费率 — 负值=空头付费给多头(空头拥挤) |")
+    md.append("| FR | Funding Rate 资金费率 — 负值=空头拥挤 |")
     md.append("| L/S | Long/Short Ratio 散户多空比 — <1散户偏空(反指看涨), >2散户偏多(反指看空) |")
     md.append("| LP | DEX流动性池储备(USD) |")
     md.append("")

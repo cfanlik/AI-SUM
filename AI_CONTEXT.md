@@ -257,7 +257,7 @@ meta_snapshots ACC/DIST 代币全量写入，解决丢失问题。
 | `cost_basis_snapshots` | cost-basis-scan | verdict, vwap, gecko_price, acc_pct, cost_cv | 成本分层(含C9) |
 | `meta_snapshots` | meta-verdict | meta_score, meta_verdict, stage, 5×分项积分 | 仲裁结果 |
 | `token_lifecycle` | meta-verdict | current_stage, prev_stage, transition | 生命周期 |
-| `token_history` | history_report | computed_date, signal_first_seen, price_*_ret, retention_*, score_slope, **volume_24h, reserve_usd, buy_tx_pct, turnover_ratio, mdd**, **retention_24h, retention_72h, top10_delta_24h, top10_delta_72h, pnl_ratio, bs_ratio_24h, whale_divergence** | 长期跟踪(V5扩展) |
+| `token_history` | history_report | computed_date, signal_first_seen, price_*_ret, retention_*, score_slope, **volume_24h, reserve_usd, buy_tx_pct, turnover_ratio, mdd**, **retention_24h, retention_72h, top10_delta_24h, top10_delta_72h, pnl_ratio, bs_ratio_24h, whale_divergence**, **concentration, macro_score, micro_score** | 长期跟踪(V6双轨与浓度升级) |
 | `hop2_tracking` | meta-verdict | scan_time, token_symbol, hop2_acc_pct, hop2_acc_count, hop2_high_count, tier_98/90/30/80_count, entity_count, price_usd | hop2 庄控跟踪(v5) |
 
 ---
@@ -287,6 +287,7 @@ cd /opt/AI-SUM && python3 meta-verdict/history_report.py
 
 | 版本 | 日期 | 关键变更 |
 |------|------|----------|
+| **双轨与浓度升级** | **2026-05-19** | **真实用户吸筹浓度与大盘/精英双轨评分**：重新定义吸筹占比为排除交易所及多重合约后的“真实吸筹浓度”并精细化6档打分（D3）；D6均分演进为“精英均分+大盘门控”双轨设计；`history_report` 看板升级为浓度和大盘/精英双轨指标展示，`token_history` 增加 `concentration`, `macro_score`, `micro_score` 落库。 |
 | **history_report V5.0** | **2026-05-18** | **多时间尺度吸筹与量能指标追踪**：24h/72h 留存率与漂移、庄家浮盈率、出货背离 (whale_divergence)、vpd 扩展为 4 种类型、`token_history` 增加 7 个字段落库、综合看板扩展 24h留存/浮盈率/庄出逃/评级精细化 |
 | **history_report V4.1** | **2026-05-12** | 新增模块2.5「大户行为追踪」: 地址级首次减仓AMBER预警(DORMANT→减仓检测) + 锁仓休眠率统计 + cost_basis交叉信念度评级(💎套牢不割/🔒强锁仓); 200代币批量化 |
 | **bugfix** | **2026-05-12** | 修复 `history_report.py` 合约分析模块未定义报错导致报告生成失败的问题 (将 `futures_analysis` 定义移到执行块之前)，补发 11 日和 12 日长期分析报告。 |
@@ -367,7 +368,7 @@ cd /opt/AI-SUM && python3 meta-verdict/history_report.py
 
 ---
 
-## pump_detector v2 — 拉升前兆引擎 (2026-05-10, 报告格式更新 2026-05-15)
+## pump_detector v2 — 拉升前兆引擎 (2026-05-10, 双轨与浓度升级 2026-05-19)
 
 ### 功能
 从 BubbleMap + Gecko + Meta + TokenHistory + Futures 五表计算 9 维 pump_readiness 评分，分级输出告警。
@@ -378,10 +379,17 @@ cd /opt/AI-SUM && python3 meta-verdict/history_report.py
 |------|------|--------|------|
 | D1 量缩程度 | 20 | gecko volume_24h vs 7d均量 | DEX量缩+OI暴增→降分(过滤资金搬家假量缩) |
 | D2 LP稳定性 | 20 | gecko reserve_usd | LP≥$500K得20分 |
-| D3 吸筹密度 | 20 | bubblemap acc_count/total | ACC占比≥40%得20分 |
-| D4 Meta持续 | 15 | consec_acc + meta_score | 连续ACC≥25轮得15分 |
+| D3 真实吸筹浓度 | 20 | bubblemap (acc/real_users) | 排除交易所/多重合约噪点后的真实用户吸筹浓度。浓度≥40.0%得20分（35天时序p90水位） |
+| D4 Meta持续 | 15 | consec_acc + meta_score | 连续ACC≥25轮且浓度足够得15分 |
 | D5 留存率 | 10 | retention_7d | ≥95%得10分 |
-| D6 均分质量 | 10 | avg_acc_score | ≥80得10分 |
+| D6 精英均分+大盘门控 | 10 | avg_acc_score + avg_macro_score | 精英主力均分≥80得10分。引入大盘分门控：大盘分<44扣3分；大盘分≥53溢价奖2分（D6上限10分，防溢出） |
+
+### 🚀 2026-05-19 双轨制与真实吸筹浓度升级说明
+- **真实用户吸筹浓度**：重构 D3 分母为非交易所、非DEX、非合约的真实独立地址持仓数。精细区间阈值为：`[3%, 8%, 15%, 25%, 40%]`，彻底规避假吸筹噪音引起的评分压制。
+- **大盘/精英双轨制**：
+  - **精英均分 (avg_acc_score)**：仅统计已被打上 ACC 吸筹标记的核心主力钱包之均分，用于衡量最主力吸筹力量的质量。
+  - **大盘分 (avg_macro_score)**：统计所有非 CEX/DEX/合约的独立地址之均分，客观描绘项目的整体大盘持仓基本面质量。
+  - **D6门控融合**：D6 分数在继承精英主力均分打分的同时，采用大盘分百分位（低估<44, 强势≥53）对底部分数实施升降级修正，极大强化了评分面对全盘大户共识度时的响应敏锐度。
 | D7 OI变化 | 15 | futures oi_change_24h | OI增+价平=暗中建仓, OI<$1M减半 |
 | D8 资金费率(FR) | 10 | futures funding_rate | 负FR=空头拥挤→轧空前兆, FR<-0.03%得10分 |
 | D9 多空比(LS) | 8 | futures long_short_ratio | L/S<0.6=散户重度做空→强反指看涨 |

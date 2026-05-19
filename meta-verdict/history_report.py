@@ -934,7 +934,36 @@ def evaluate_whale_divergence(price_chg_24h, top10_delta_24h):
     return 0
 
 
-def save_token_history(sumdb, bt_data, mig_data, ts_data, liq_data=None):
+def load_double_track_metrics(src):
+    """从 select.db 批量读取最新快照的浓度、大盘分、精英分"""
+    rows = src.execute("""
+        WITH latest AS (
+            SELECT token_address, MAX(snapshot_time) as mx
+            FROM bubblemap_holders GROUP BY token_address
+        )
+        SELECT bh.token_address,
+            SUM(CASE WHEN bh.is_cex=0 AND bh.is_dex=0 AND bh.is_contract=0 THEN 1 ELSE 0 END) as real_user_count,
+            SUM(CASE WHEN bh.is_accumulating=1 THEN 1 ELSE 0 END) as acc_count,
+            AVG(CASE WHEN bh.is_accumulating=1 THEN bh.acc_score ELSE NULL END) as micro_score,
+            AVG(CASE WHEN bh.is_cex=0 AND bh.is_dex=0 AND bh.is_contract=0
+                      THEN bh.acc_score ELSE NULL END) as macro_score
+        FROM bubblemap_holders bh
+        JOIN latest l ON bh.token_address=l.token_address AND bh.snapshot_time=l.mx
+        GROUP BY bh.token_address
+    """).fetchall()
+    result = {}
+    for r in rows:
+        real = r["real_user_count"] or 0
+        acc = r["acc_count"] or 0
+        result[r["token_address"].lower()] = {
+            "concentration": round(acc / max(real, 1) * 100, 1),
+            "macro_score": round(r["macro_score"] or 0, 1),
+            "micro_score": round(r["micro_score"] or 0, 1),
+        }
+    return result
+
+
+def save_token_history(sumdb, bt_data, mig_data, ts_data, liq_data=None, dt_map=None):
     """将计算结果写入 token_history（V3: 增加流动性+MDD+meta补漏）"""
     today = datetime.now().strftime("%Y-%m-%d")
 
@@ -957,6 +986,13 @@ def save_token_history(sumdb, bt_data, mig_data, ts_data, liq_data=None):
         except Exception:
             pass
 
+    # V6: 双轨制评分+浓度 (DDL防御)
+    for col, typedef in [("concentration", "REAL"), ("macro_score", "REAL"), ("micro_score", "REAL")]:
+        try:
+            sumdb.execute(f"ALTER TABLE token_history ADD COLUMN {col} {typedef}")
+        except Exception:
+            pass
+
     # 索引化
     mig_map = {r["addr"]: r for r in mig_data if r.get("addr")}
     ts_map = {r["symbol"]: r for r in ts_data}
@@ -966,7 +1002,7 @@ def save_token_history(sumdb, bt_data, mig_data, ts_data, liq_data=None):
     written_addrs = set()
     written_syms = set()
 
-    def _insert(addr, sym, bt, mig, ts, liq):
+    def _insert(addr, sym, bt, mig, ts, liq, dt=None):
         nonlocal count
         try:
             sumdb.execute("""
@@ -978,8 +1014,8 @@ def save_token_history(sumdb, bt_data, mig_data, ts_data, liq_data=None):
                  score_slope, score_sigma, consec_acc,
                  volume_24h, reserve_usd, buy_tx_pct, turnover_ratio, mdd,
                  retention_24h, retention_72h, top10_delta_24h, top10_delta_72h,
-                 pnl_ratio, bs_ratio_24h, whale_divergence)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 pnl_ratio, bs_ratio_24h, whale_divergence, concentration, macro_score, micro_score)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 today, addr, sym, bt.get("date") if bt else None,
                 bt.get("signal", "NONE") if bt else "NONE",
@@ -1000,6 +1036,9 @@ def save_token_history(sumdb, bt_data, mig_data, ts_data, liq_data=None):
                 calc_pnl_ratio(sumdb, addr),
                 liq.get("bs_ratio", 1.0),
                 evaluate_whale_divergence(liq.get("price_chg"), mig.get("top10_delta_24h")),
+                dt.get("concentration") if dt else None,
+                dt.get("macro_score") if dt else None,
+                dt.get("micro_score") if dt else None,
             ))
             count += 1
             written_addrs.add(addr)
@@ -1011,7 +1050,8 @@ def save_token_history(sumdb, bt_data, mig_data, ts_data, liq_data=None):
     for bt in bt_data:
         addr = bt.get("addr", "")
         sym = bt["symbol"]
-        _insert(addr, sym, bt, mig_map.get(addr, {}), ts_map.get(sym, {}), liq_map.get(sym, {}))
+        dt = dt_map.get(addr.lower()) if (dt_map and addr) else None
+        _insert(addr, sym, bt, mig_map.get(addr, {}), ts_map.get(sym, {}), liq_map.get(sym, {}), dt)
 
     # 2. 写入有迁移数据但无回测数据的代币
     for mig in mig_data:
@@ -1019,7 +1059,8 @@ def save_token_history(sumdb, bt_data, mig_data, ts_data, liq_data=None):
         if addr in written_addrs or not mig.get("symbol"):
             continue
         sym = mig["symbol"]
-        _insert(addr, sym, None, mig, ts_map.get(sym, {}), liq_map.get(sym, {}))
+        dt = dt_map.get(addr.lower()) if (dt_map and addr) else None
+        _insert(addr, sym, None, mig, ts_map.get(sym, {}), liq_map.get(sym, {}), dt)
 
     # V3: 3. meta_snapshots ACC/DIST 全量补漏
     try:
@@ -1032,7 +1073,8 @@ def save_token_history(sumdb, bt_data, mig_data, ts_data, liq_data=None):
             sym, addr = r["token_symbol"], r["token_address"]
             if sym in written_syms or addr in written_addrs:
                 continue
-            _insert(addr, sym, None, {}, ts_map.get(sym, {}), liq_map.get(sym, {}))
+            dt = dt_map.get(addr.lower()) if (dt_map and addr) else None
+            _insert(addr, sym, None, {}, ts_map.get(sym, {}), liq_map.get(sym, {}), dt)
     except Exception:
         pass
 
@@ -1043,7 +1085,7 @@ def save_token_history(sumdb, bt_data, mig_data, ts_data, liq_data=None):
 # ══════════════════════════════════════════════════════════════
 # P-ENRICH: 单币画像（Top ACC 代币完整档案）
 # ══════════════════════════════════════════════════════════════
-def coin_profile(bt_data, mig_data, ts_data, sumdb, liq_data=None):
+def coin_profile(bt_data, mig_data, ts_data, sumdb, liq_data=None, dt_map=None):
     """V4.0: Top ACC 表格看板（精简版，排除遗漏检测标记的代币）"""
     meta_map = {}
     try:
@@ -1094,8 +1136,8 @@ def coin_profile(bt_data, mig_data, ts_data, sumdb, liq_data=None):
         lines.append(f"> 已排除遗漏检测标记代币: {', '.join(sorted(excluded))}")
         lines.append("")
     lines += [
-        "| 代币 | 分数 | 引擎 | 阶段 | 至今收益 | MDD | 24h留存 | 7d留存 | 24h量 | 浮盈率 | ACC轮 | 庄出逃 | 评级 |",
-        "|------|------|------|------|---------|-----|--------|--------|-------|--------|-------|--------|------|",
+        "| 代币 | 分数 | 浓度 | 大盘/精英 | 阶段 | 至今收益 | MDD | 24h留存 | 7d留存 | 24h量 | 浮盈率 | 庄出逃 | 评级 |",
+        "|------|------|------|-----------|------|---------|-----|--------|--------|-------|--------|--------|------|",
     ]
 
     stage_map = {"CONTROLLED": "CTRL", "ACCUMULATING": "ACC", "DISTRIBUTING": "DIST",
@@ -1108,25 +1150,42 @@ def coin_profile(bt_data, mig_data, ts_data, sumdb, liq_data=None):
         liq = liq_map.get(sym, {})
 
         score = f"{meta.get('meta_score', 0):.1f}"
-        engines = meta.get("engine_hits", 0)
+        
+        # 兜底获取 token 实际地址以查询 dt_map
+        token_addr = sym_addr.get(sym, "")
+        if not token_addr:
+            for bt_item in bt_data:
+                if bt_item["symbol"] == sym:
+                    token_addr = bt_item.get("addr", "")
+                    break
+        if not token_addr:
+            for mig_item in mig_data:
+                if mig_item["symbol"] == sym:
+                    token_addr = mig_item.get("addr", "")
+                    break
+        
+        addr_lower = token_addr.lower() if token_addr else ""
+        dt = dt_map.get(addr_lower) if (dt_map and addr_lower) else None
+        conc_str = f"{dt['concentration']:.1f}%" if (dt and dt.get('concentration') is not None) else "—"
+        track_str = f"{dt['macro_score']:.1f}/{dt['micro_score']:.1f}" if (dt and dt.get('macro_score') is not None) else "—"
+
         stage = stage_map.get(meta.get("stage", ""), "—")
         ret_now = f"{bt['ret_now']:+.1f}%" if bt.get("ret_now") is not None else "—"
         mdd = f"{bt['mdd']:+.1f}%" if bt.get("mdd") is not None else "—"
         retention = f"{mig.get('retention_7d', 0):.0f}%" if mig.get("retention_7d") is not None else "—"
         vol = _fk(liq.get("vol_24h"))
         lp = _fk(liq.get("reserve"))
-        slope = f"{ts.get('slope', 0):+.2f}" if ts else "—"
-        consec = ts.get("consec_acc", 0) if ts else 0
         grade = liq.get("grade", "—")
 
         ret_24h = f"{mig.get('retention_24h', 0):.0f}%" if mig.get("retention_24h") is not None else "—"
-        pnl = calc_pnl_ratio(sumdb, sym_addr.get(sym, ""))
+        pnl = calc_pnl_ratio(sumdb, token_addr)
         pnl_str = f"{pnl:+.0f}%" if pnl is not None else "—"
         wd = evaluate_whale_divergence(liq.get("price_chg"), mig.get("top10_delta_24h"))
         wd_str = "🚨" if wd else "—"
+        
         lines.append(
-            f"| {sym} | {score} | {engines} | {stage} | {ret_now} | {mdd} "
-            f"| {ret_24h} | {retention} | {vol} | {pnl_str} | {consec} | {wd_str} | {grade} |"
+            f"| {sym} | {score} | {conc_str} | {track_str} | {stage} | {ret_now} | {mdd} "
+            f"| {ret_24h} | {retention} | {vol} | {pnl_str} | {wd_str} | {grade} |"
         )
 
     lines.append("")
@@ -1602,12 +1661,21 @@ def main():
     print("  [5/7] 信号质量评估...")
     quality_md = signal_quality(bt_data, sumdb)
 
+    # 双轨制与浓度指标动态加载
+    print("  [加载双轨指标] 获取最新浓度与大盘/精英分...")
+    try:
+        dt_map = load_double_track_metrics(src)
+        print(f"        成功加载 {len(dt_map)} 个代币的双轨制指标")
+    except Exception as e:
+        print(f"        双轨指标加载失败: {e}")
+        dt_map = {}
+
     # 模块 6: Top ACC 综合看板
     print("  [6/7] ACC综合看板...")
-    profile_md = coin_profile(bt_data, mig_data, ts_data, sumdb, liq_data)
+    profile_md = coin_profile(bt_data, mig_data, ts_data, sumdb, liq_data, dt_map=dt_map)
 
     # P-DB: 写入 token_history
-    saved = save_token_history(sumdb, bt_data, mig_data, ts_data, liq_data)
+    saved = save_token_history(sumdb, bt_data, mig_data, ts_data, liq_data, dt_map=dt_map)
     print(f"  [DB] token_history 写入 {saved} 行")
 
     # 组装报告
