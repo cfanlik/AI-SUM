@@ -3,6 +3,11 @@ AI-SUM V5 — 数据加载层
 - 统一封装所有 SQL 查询，上层模块不直接写 SQL
 - 通过 ATTACH DATABASE 只读挂载 select.db 源库
 - 继承 v4 SQL 性能规范：CTE 先聚合、(chain, token_address) 双键 JOIN、禁止 LOWER() JOIN
+
+【物理只读治理声明】
+- 源库 src_db (select.db) 声明为 100% 只读参照。
+- src_db 里的 token_scores 表已在 V5 架构中声明为只读历史备份，不允许进行任何物理写入或同步。
+- 所有的评分流、信号状态、运行日志及 Watchlist 变更，必须 100% 闭环归口写入独立分析库 select-sum.db。
 """
 import sqlite3
 import json

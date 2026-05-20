@@ -85,7 +85,26 @@ def run_full_scan(
     if verbose:
         print(f"G2={g2_cnt} G3={g3_cnt}")
 
-        # Step 4: 更新 Watchlist
+    # Step 3.6: 触发 CEX-DEX 协同共振分析 (C10 信号)
+    if verbose:
+        print("  Step 3.6/5: CEX-DEX 协同共振检测...", end=" ")
+    import sys
+    sys.path.append("/opt/AI-SUM/meta-verdict")
+    from cex_dex_coordination import check_coordination
+    c10_cnt = 0
+    for r in all_results:
+        coord = check_coordination(conn, r.chain, r.token_address)
+        if coord:
+            r.composite_level = "EXTREME"
+            r.triggered_patterns.append("C10(CEX-DEX-ACC)")
+            r.has_signal = True
+            c10_cnt += 1
+            if verbose:
+                print(f"\n    [C10] {r.token_symbol} 触发 CEX-DEX 协同共振！(OI 24h: +{coord['oi_change_24h']*100:.1f}%)")
+    if verbose:
+        print(f"完成，触发 C10: {c10_cnt} 个")
+
+    # Step 4: 更新 Watchlist
     if verbose:
         print("  Step 4/5: 更新 Watchlist...", end=" ")
     wl_stats = update_watchlist(conn, all_results)
