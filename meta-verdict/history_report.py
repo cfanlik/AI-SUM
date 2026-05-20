@@ -421,7 +421,7 @@ def migration_analysis(src, sumdb):
 
 
 # ══════════════════════════════════════════════════════════════
-# 模块 3: 积分时序分析
+# 积分时序分析
 # ══════════════════════════════════════════════════════════════
 def score_timeseries(sumdb):
     """meta_snapshots 积分斜率/波动/持续性"""
@@ -483,7 +483,7 @@ def score_timeseries(sumdb):
             "symbol": sym, "score": scores[-1], "slope": slope,
             "direction": direction, "sigma": sigma,
             "consec_acc": consec, "engine_stable": engine_stable,
-            "rounds": len(scores), "last5": last5,
+            "rounds": len(snapshots), "last5": last5,
             "peak": max(scores), "trough": min(scores),
             "verdict": snapshots[-1]["meta_verdict"],
         })
@@ -538,7 +538,7 @@ def score_timeseries(sumdb):
 
 
 # ══════════════════════════════════════════════════════════════
-# 模块 4: (V4.0: 已合并到 signal_quality)
+# 价格/信号相关性分析
 # ══════════════════════════════════════════════════════════════
 def signal_price_corr(backtest_results, sumdb):
     """V4.0: 已合并到 signal_quality, 保留空壳兼容"""
@@ -546,7 +546,7 @@ def signal_price_corr(backtest_results, sumdb):
 
 
 # ══════════════════════════════════════════════════════════════
-# 模块 6: 流动性健康度（V3 新增）
+# 流动性健康度（V3 新增）
 # ══════════════════════════════════════════════════════════════
 def liquidity_health(src, sumdb):
     """激活 gecko_market_data 闲置字段: volume/reserve/buy_tx_pct"""
@@ -689,7 +689,7 @@ def liquidity_health(src, sumdb):
 
 
 # ══════════════════════════════════════════════════════════════
-# 模块 7: 信号质量评估（V3: 替代旧模块4）
+# 信号质量评估（V3: 替代旧模块4）
 # ══════════════════════════════════════════════════════════════
 def signal_quality(backtest_results, sumdb):
     """引擎组合矩阵 + precision/recall + 失败案例 + 漏网之鱼"""
@@ -872,7 +872,7 @@ def signal_quality(backtest_results, sumdb):
 
 
 # ══════════════════════════════════════════════════════════════
-# P-DB: token_history 持久化
+# token_history 持久化
 # ══════════════════════════════════════════════════════════════
 def ensure_token_history_table(sumdb):
     """创建 token_history 表"""
@@ -1083,7 +1083,7 @@ def save_token_history(sumdb, bt_data, mig_data, ts_data, liq_data=None, dt_map=
 
 
 # ══════════════════════════════════════════════════════════════
-# P-ENRICH: 单币画像（Top ACC 代币完整档案）
+# 单币画像（Top ACC 代币完整档案）
 # ══════════════════════════════════════════════════════════════
 def coin_profile(bt_data, mig_data, ts_data, sumdb, liq_data=None, dt_map=None):
     """V4.0: Top ACC 表格看板（精简版，排除遗漏检测标记的代币）"""
@@ -1193,13 +1193,7 @@ def coin_profile(bt_data, mig_data, ts_data, sumdb, liq_data=None, dt_map=None):
 
 
 # ══════════════════════════════════════════════════════════════
-# 主入口
-# ══════════════════════════════════════════════════════════════
-
-
-
-# ══════════════════════════════════════════════════════════════
-# 模块: 大户行为变化追踪（首次减仓 + DORMANT + 成本信念度）
+# 大户行为变化追踪（首次减仓 + DORMANT + 成本信念度）
 # ══════════════════════════════════════════════════════════════
 
 def whale_behavior_alert(src, sumdb):
@@ -1403,7 +1397,7 @@ def whale_behavior_alert(src, sumdb):
 
 
 def hop2_analysis(src, sumdb):
-    """Hop2 隐蔽吸筹置信度分析（独立统计维度）"""
+    """Hop2 隐蔽吸筹置信度 analysis（独立统计维度）"""
     tokens = sumdb.execute("""
         SELECT token_address, token_symbol, signal_level
         FROM watchlist WHERE signal_level IN ('DIAMOND','RED','YELLOW')
@@ -1569,10 +1563,9 @@ def hop2_analysis(src, sumdb):
     md += f"| 80分(未验证)     | {sum_t80} | {sum_t80/tier_total:.0%} |\n"
     md += f"| 30分(GMGN否决)   | {sum_t30} | {sum_t30/tier_total:.0%} |\n\n"
 
-    # Top 10 hop2 代币（含排名趋势对比）
+    # Top 10 hop2 代币
     top10 = sorted(stats, key=lambda s: s["hop2_pct"], reverse=True)[:10]
     if top10:
-        # 读取上一期 hop2_tracking 排名（用于趋势对比）
         prev_rank_map = {}
         try:
             times = sumdb.execute(
@@ -1597,7 +1590,6 @@ def hop2_analysis(src, sumdb):
             rank = idx + 1
             r7 = f"{s['ret_7d']:+.1f}%" if s['ret_7d'] is not None else "—"
             r14 = f"{s['ret_14d']:+.1f}%" if s['ret_14d'] is not None else "—"
-            # 计算趋势
             sym = s['symbol']
             if sym in prev_rank_map:
                 change = prev_rank_map[sym] - rank
@@ -1609,7 +1601,6 @@ def hop2_analysis(src, sumdb):
                     trend = "─"
             else:
                 trend = "🆕"
-            # hop2≥50% 标记 🟡, ≥15% 标记 🟣
             pct_mark = ""
             if s['hop2_pct'] >= 0.5:
                 pct_mark = " 🟡"
@@ -1641,7 +1632,7 @@ def main():
     mig_md, mig_data = migration_analysis(src, sumdb)
     print(f"        {len(mig_data)} 个代币有迁移数据")
 
-    # 模块 2.5: 大户行为追踪（首次减仓 + DORMANT）
+    # 模块 2.5: 大户行为追踪
     print("  [2.5/7] 大户行为追踪...")
     whale_md = whale_behavior_alert(src, sumdb)
     if whale_md:
@@ -1657,7 +1648,7 @@ def main():
     liq_md, liq_data = liquidity_health(src, sumdb)
     print(f"        {len(liq_data)} 个ACC代币有流动性数据")
 
-    # 模块 5: 信号质量（含原模块4分桶+引擎矩阵+P/R/F1+失败+漏网）
+    # 模块 5: 信号质量
     print("  [5/7] 信号质量评估...")
     quality_md = signal_quality(bt_data, sumdb)
 
@@ -1729,7 +1720,7 @@ def main():
 
 # ── 模块 8: 合约信号总览 (v6 新增) ──
 def futures_analysis(src, sumdb):
-    """从 futures_snapshots 读取最新合约数据, 与 meta 交叉分析"""
+    """从 futures_snapshots 读取最新合约 data, 与 meta 交叉分析"""
     try:
         ft_rows = src.execute("""
             SELECT * FROM futures_snapshots
@@ -1809,6 +1800,3 @@ def futures_analysis(src, sumdb):
 
 if __name__ == "__main__":
     main()
-
-
-

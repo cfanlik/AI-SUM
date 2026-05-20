@@ -66,7 +66,7 @@ gecko_market_data ──┼── src.db ──┤  opus-scan    → opus_snapsh
 ```
 
 **执行顺序**: master(00) → opus(10) → unified(20) → whale(30) → CB(40) → meta(50)
-****频率**: 引擎每天 2 轮（00:xx / 12:xx UTC），history_report 每6小时（00/06/12/18）
+**频率**: 引擎每天 2 轮（00:xx / 12:xx UTC），history_report 每6小时（00/06/12/18）
 **依赖链**: opus/unified/CB 依赖 master 的 watchlist → 间隔 10 分钟足够（master 通常 3-5 分钟完成）
 
 ---
@@ -226,7 +226,7 @@ gecko_market_data ──┼── src.db ──┤  opus-scan    → opus_snapsh
 | meta补漏 | save_token_history 增加 meta_snapshots ACC/DIST 全量遍历，解决 KAVA 类丢失 |
 | 量价背离 | 价涨量缩=拉盘无力 / 价跌量增=恐慌抛售 |
 | 流动性枯竭 | volume < 7d_avg * 30% 或 reserve < $10K 触发告警 |
-| 引擎组合矩阵 | 统计 M+O/M+W/M+O+W 等组合的独立胜率 |
+| 引擎组合矩阵 | 统计 M+O/M+W/M+O+W 等组合 of 独立胜率 |
 | P/R/F1 | Precision=ACC中盈利比 / Recall=盈利中被ACC命中比 / F1 |
 | 失败案例 | ACC but ret < -15% 的代币清单+引擎组合+MDD |
 | 漏网之鱼 | 非ACC but ret > +30% 的漏网代币清单 |
@@ -277,7 +277,7 @@ cd /opt/AI-SUM && python3 meta-verdict/run.py
 cd /opt/AI-SUM && python3 meta-verdict/run.py --symbol GWEI
 cd /opt/AI-SUM && python3 cost-basis-scan/run.py --symbol SKYAI
 
-# 长期分析报告
+# 长期 analysis 报告
 cd /opt/AI-SUM && python3 meta-verdict/history_report.py
 ```
 
@@ -287,6 +287,7 @@ cd /opt/AI-SUM && python3 meta-verdict/history_report.py
 
 | 版本 | 日期 | 关键变更 |
 |------|------|----------|
+| **故障修复与安全门控** | **2026-05-20** | **回测落库修复与交易量安全门控**：修复 `save_token_history` 参数绑定遗漏 Bug，恢复日常回测数据落库；在 `pump_detector` 的 D1 评分中引入 **Volume Guard（绝对交易量安全门控）**（24h量<$1,000时强制给0分），杜绝死币零交易量缩误判。 |
 | **双轨与浓度升级** | **2026-05-19** | **真实用户吸筹浓度与大盘/精英双轨评分**：重新定义吸筹占比为排除交易所及多重合约后的“真实吸筹浓度”并精细化6档打分（D3）；D6均分演进为“精英均分+大盘门控”双轨设计；`history_report` 看板升级为浓度和大盘/精英双轨指标展示，`token_history` 增加 `concentration`, `macro_score`, `micro_score` 落库。 |
 | **history_report V5.0** | **2026-05-18** | **多时间尺度吸筹与量能指标追踪**：24h/72h 留存率与漂移、庄家浮盈率、出货背离 (whale_divergence)、vpd 扩展为 4 种类型、`token_history` 增加 7 个字段落库、综合看板扩展 24h留存/浮盈率/庄出逃/评级精细化 |
 | **history_report V4.1** | **2026-05-12** | 新增模块2.5「大户行为追踪」: 地址级首次减仓AMBER预警(DORMANT→减仓检测) + 锁仓休眠率统计 + cost_basis交叉信念度评级(💎套牢不割/🔒强锁仓); 200代币批量化 |

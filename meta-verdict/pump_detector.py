@@ -1,354 +1,443 @@
 #!/usr/bin/env python3
 """
-pump_detector v2 — 拉升前兆 9 维评分引擎
-链上层 D1-D6 (BubbleMap+Gecko+Meta+History)
-合约层 D7-D9 (Binance Futures)
-输出: pump_alerts 表 + report/pump/pump_YYYYMMDD_HHMM.md
+pump_detector.py v2 (2026-05-10, 双轨与浓度升级 2026-05-19)
+从 BubbleMap + Gecko + Meta + TokenHistory + Futures 五表计算 9 维 pump_readiness 评分，分级输出告警。
 """
-from __future__ import annotations
-import sqlite3, os, logging
-from datetime import datetime, timedelta
+import sqlite3
+import statistics
+from datetime import datetime
 from pathlib import Path
 
-logger = logging.getLogger("pump_detector")
+SRC_DB = "/opt/select-coin/data/select.db"
+SUM_DB = "/opt/AI-SUM/select-sum.db"
+REPORT_DIR = "/opt/AI-SUM/report/pump"
 
-SELECT_DB = os.environ.get("SRC_DB_PATH", "/opt/select-coin/data/select.db")
-SUM_DB    = os.environ.get("SUM_DB_PATH", "/opt/AI-SUM/select-sum.db")
-REPORT_DIR = Path("/opt/AI-SUM/report/pump")
 
-IMMINENT_THRESHOLD = 90
-READY_THRESHOLD    = 65
-WATCH_THRESHOLD    = 45
+def connect(path, readonly=False):
+    uri = f"file:{path}?mode=ro" if readonly else path
+    c = sqlite3.connect(uri, uri=readonly)
+    c.row_factory = sqlite3.Row
+    return c
 
-def _conn(db):
-    c = sqlite3.connect(db); c.row_factory = sqlite3.Row; return c
 
-def ensure_pump_alerts_table(conn):
-    conn.execute("""CREATE TABLE IF NOT EXISTS pump_alerts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, scan_time TEXT NOT NULL,
-        chain TEXT DEFAULT 'bsc', token_address TEXT NOT NULL, token_symbol TEXT,
-        pump_score INTEGER, alert_level TEXT,
-        d1_vol_shrink INTEGER, d2_lp_stable INTEGER, d3_acc_density INTEGER,
-        d4_meta_persist INTEGER, d5_retention INTEGER, d6_score_quality INTEGER,
-        d7_oi_change INTEGER, d8_funding INTEGER, d9_long_short INTEGER,
-        acc_count INTEGER, acc_pct REAL, avg_acc_score REAL, meta_score REAL,
-        consec_acc INTEGER, retention_7d REAL, vol_24h REAL, avg_vol_7d REAL,
-        vol_ratio REAL, reserve_usd REAL, price_usd REAL, price_change_24h REAL,
-        oi_value_usd REAL, oi_change_24h REAL, funding_rate REAL, long_short_ratio REAL)""")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_pump_time ON pump_alerts(scan_time)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_pump_level ON pump_alerts(alert_level)")
-    conn.commit()
+def get_acc_concentration_score(concentration):
+    """
+    D3 评分：真实用户吸筹浓度分 (满分 20 分)
+    35 天时序 p90 水位为 40.0%，打满分 20 分。
+    阈值区间细化，彻底规避低信噪假吸筹噪音导致的评分压制。
+    """
+    if concentration is None:
+        return 0
+    if concentration >= 40.0:
+        return 20
+    elif concentration >= 25.0:
+        return 16
+    elif concentration >= 15.0:
+        return 12
+    elif concentration >= 8.0:
+        return 8
+    elif concentration >= 3.0:
+        return 4
+    return 0
 
-# ── 数据加载 ──
-def _load_bubblemap():
-    c = _conn(SELECT_DB)
-    rows = c.execute("""WITH latest AS (SELECT token_address, MAX(snapshot_time) as mx FROM bubblemap_holders GROUP BY token_address)
-        SELECT bh.token_address, COUNT(*) as total_holders,
-        SUM(CASE WHEN bh.is_cex=0 AND bh.is_dex=0 AND bh.is_contract=0 THEN 1 ELSE 0 END) as real_user_count,
-        SUM(CASE WHEN bh.is_accumulating=1 THEN 1 ELSE 0 END) as acc_count,
-        AVG(CASE WHEN bh.is_accumulating=1 THEN bh.acc_score ELSE NULL END) as avg_acc_score,
-        AVG(CASE WHEN bh.is_cex=0 AND bh.is_dex=0 AND bh.is_contract=0 THEN bh.acc_score ELSE NULL END) as avg_macro_score
-        FROM bubblemap_holders bh JOIN latest l ON bh.token_address=l.token_address AND bh.snapshot_time=l.mx
-        GROUP BY bh.token_address""").fetchall()
-    r = {x["token_address"]: dict(x) for x in rows}; c.close(); return r
 
-def _load_gecko():
-    c = _conn(SELECT_DB)
-    latest = c.execute("""WITH latest AS (SELECT token_address, MAX(scan_time) as mx FROM gecko_market_data GROUP BY token_address)
-        SELECT g.* FROM gecko_market_data g JOIN latest l ON g.token_address=l.token_address AND g.scan_time=l.mx""").fetchall()
-    r = {x["token_address"]: dict(x) for x in latest}
-    cutoff = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
-    for x in c.execute("SELECT token_address, AVG(volume_24h) as avg_vol_7d FROM gecko_market_data WHERE scan_time>=? AND volume_24h>0 GROUP BY token_address", (cutoff,)):
-        if x["token_address"] in r: r[x["token_address"]]["avg_vol_7d"] = x["avg_vol_7d"]
-    c.close(); return r
+def get_macro_micro_score(avg_acc_score, avg_macro_score):
+    """
+    D6 评分：精英均分+大盘门控双轨制 (满分 10 分)
+    - 精英均分 (avg_acc_score): 仅对已被标记为 ACC 吸筹钱包计算均分，衡量主力质量 (占打分主轴)。
+    - 大盘分 (avg_macro_score): 所有非CEX/DEX/合约地址的均分，客观描绘项目基本面。
+    - 门控修正：大盘分 < 44 分（代表低估或吸筹不充分）扣 3 分；≥ 53 分（强势共识）奖励 2 分（上限 10 分）。
+    """
+    if avg_acc_score is None or avg_acc_score <= 0:
+        return 0
 
-def _load_meta():
-    c = _conn(SUM_DB)
-    rows = c.execute("SELECT * FROM meta_snapshots WHERE scan_time=(SELECT MAX(scan_time) FROM meta_snapshots)").fetchall()
-    r = {(x["token_address"] or "").lower(): dict(x) for x in rows}; c.close(); return r
-
-def _load_history():
-    c = _conn(SUM_DB)
-    rows = c.execute("SELECT * FROM token_history WHERE computed_date=(SELECT MAX(computed_date) FROM token_history)").fetchall()
-    r = {(x["token_address"] or "").lower(): dict(x) for x in rows}; c.close(); return r
-
-def _load_names():
-    c = _conn(SELECT_DB)
-    rows = c.execute("SELECT LOWER(token_address) as addr, symbol, name FROM token_names").fetchall()
-    r = {x["addr"]: x["symbol"] or x["name"] or "" for x in rows}; c.close(); return r
-
-def _load_futures():
-    """加载最新一轮合约数据"""
-    c = _conn(SELECT_DB)
-    try:
-        rows = c.execute("""SELECT * FROM futures_snapshots
-            WHERE scan_time=(SELECT MAX(scan_time) FROM futures_snapshots)""").fetchall()
-        r = {(x["token_address"] or "").lower(): dict(x) for x in rows}
-        logger.info(f"  Futures: {len(r)}")
-        c.close()
-        return r
-    except Exception as e:
-        logger.warning(f"  Futures 加载失败(表可能不存在): {e}")
-        c.close()
-        return {}
-
-# ── 9 维评分 ──
-def calc_pump_readiness(bm, gecko, meta, th, futures):
-    dims = {}
-    vol_24h = gecko.get("volume_24h",0) or 0
-    avg_vol = gecko.get("avg_vol_7d",0) or 0
-    vol_ratio = (vol_24h/avg_vol) if avg_vol>0 else (0 if vol_24h==0 else 1)
-
-    # D1: 量缩 (0-20)
-    dims["d1"] = 20 if vol_ratio<0.05 else 18 if vol_ratio<0.1 else 15 if vol_ratio<0.3 else 10 if vol_ratio<0.6 else 4 if vol_ratio<0.8 else 0
-    # D1 修正: DEX量缩 + OI暴增 → 资金搬家非真量缩
-    if futures:
-        oi_chg = futures.get("oi_change_24h") or 0
-        if vol_ratio < 0.3 and oi_chg > 0.20:
-            old_d1 = dims["d1"]
-            dims["d1"] = max(dims["d1"] - 8, 0)
-            if old_d1 != dims["d1"]:
-                logger.debug(f"  D1修正: {old_d1}→{dims['d1']} (DEX量缩但OI增{oi_chg:.1%})")
-
-    # D2: LP (0-20)
-    res = gecko.get("reserve_usd",0) or 0
-    dims["d2"] = 20 if res>=500000 else 15 if res>=100000 else 10 if res>=50000 else 5 if res>=10000 else 0
-
-    # ── 新增：真实浓度计算 ──
-    acc = bm.get("acc_count", 0) or 0
-    real_cnt = max(bm.get("real_user_count", 0) or 0, 1)  # 防除零(2个纯合约代币)
-    concentration = acc / real_cnt * 100
-
-    # D3: 吸筹浓度 (0-20)
-    dims["d3"] = (20 if concentration >= 40.0 else
-                  18 if concentration >= 25.0 else
-                  15 if concentration >= 15.0 else
-                  10 if concentration >= 8.0 else
-                  6  if concentration >= 3.0 else 0)
-
-    # D4: meta持续 (0-15)
-    consec = (th.get("consec_acc",0) or 0) if th else 0
-    ms = (meta.get("meta_score",0) or 0) if meta else 0
-    dims["d4"] = (15 if consec>=25 else
-                  12 if consec>=15 else
-                  9  if consec>=10 else
-                  6  if consec>=5 else
-                  4  if ms>=3 else
-                  (4 if concentration >= 20.0 else 0))
-
-    # D5: 留存 (0-10)
-    ret = (th.get("retention_7d",0) or 0) if th else 0
-    dims["d5"] = 10 if ret>=95 else 8 if ret>=90 else 6 if ret>=80 else 4 if ret>=70 else 0
-
-    # D6: 均分 (0-10)
-    avs = bm.get("avg_acc_score",0) or 0
-    dims["d6"] = 10 if avs>=80 else 8 if avs>=75 else 6 if avs>=70 else 4 if avs>=60 else 0
-    # 大盘分门控
-    macro_s = bm.get("avg_macro_score", 0) or 0
-    if macro_s > 0 and macro_s < 44.0:
-        dims["d6"] = max(dims["d6"] - 3, 0)
-    elif macro_s >= 53.0:
-        dims["d6"] = min(dims["d6"] + 2, 10)
-
-    # ── 合约层 D7-D9 ──
-    if futures:
-        oi_val = futures.get("oi_value_usd") or 0
-        oi_chg = futures.get("oi_change_24h") or 0
-        price_chg = gecko.get("price_change_24h",0) or 0
-        fr = futures.get("funding_rate") or 0
-        fr_avg = futures.get("funding_rate_8h_avg") or 0
-        ls = futures.get("long_short_ratio") or 1
-
-        # D7: OI变化 (0-15) — OI增+价平=暗中建仓
-        if oi_chg > 0.30 and abs(price_chg) < 5:     dims["d7"] = 15
-        elif oi_chg > 0.20 and abs(price_chg) < 10:  dims["d7"] = 12
-        elif oi_chg > 0.10:                           dims["d7"] = 8
-        elif oi_chg > 0:                              dims["d7"] = 4
-        elif oi_chg < -0.20:                          dims["d7"] = 0  # OI骤降=平仓出逃
-        else:                                          dims["d7"] = 2
-        # 小OI降权: OI<$1M → D7减半
-        if oi_val < 1_000_000:
-            dims["d7"] = dims["d7"] // 2
-            logger.debug(f"  D7小OI降权: OI_val=${oi_val:,.0f}")
-
-        # D8: Funding Rate (0-10) — 负值=空头拥挤
-        fr_eff = fr_avg if fr_avg else fr
-        if fr_eff < -0.0003:   dims["d8"] = 10  # 极度空头拥挤→轧空
-        elif fr_eff < -0.0001: dims["d8"] = 7
-        elif fr_eff < 0:       dims["d8"] = 4
-        elif fr_eff > 0.001:   dims["d8"] = 0   # 多头过热→回调风险
-        else:                   dims["d8"] = 2
-
-        # D9: 多空比 (0-8) — 散户反指
-        if ls < 0.6:   dims["d9"] = 8   # 散户重度做空→强反指
-        elif ls < 0.8: dims["d9"] = 6
-        elif ls < 1.0: dims["d9"] = 3
-        elif ls > 2.5: dims["d9"] = 0   # 散户重度做多→反指看空
-        elif ls > 2.0: dims["d9"] = 1
-        else:           dims["d9"] = 2
+    # 1. 主轴精英打分
+    if avg_acc_score >= 80:
+        score = 8
+    elif avg_acc_score >= 70:
+        score = 6
+    elif avg_acc_score >= 60:
+        score = 4
+    elif avg_acc_score >= 40:
+        score = 2
     else:
-        # 无合约数据→中间值(不惩罚不加分)
-        dims["d7"] = 4
-        dims["d8"] = 2
-        dims["d9"] = 1
+        score = 0
 
-    return sum(dims.values()), dims
+    # 2. 大盘分门控修正
+    if avg_macro_score is not None:
+        if avg_macro_score < 44:
+            score -= 3
+        elif avg_macro_score >= 53:
+            score += 2
 
-def classify(score, vol_ratio):
-    if score>=IMMINENT_THRESHOLD: return "IMMINENT"
-    if score>=READY_THRESHOLD: return "READY_VOL_SHRINK" if vol_ratio<0.3 else "READY"
-    if score>=WATCH_THRESHOLD: return "WATCH"
-    return "NEUTRAL"
+    # 3. 约束分数区间在 [0, 10]
+    return max(0, min(10, score))
+
+
+def calc_pump_readiness(src, sumdb, token_address, token_symbol, scan_time):
+    """计算单币 9 维拉升指数"""
+    addr = token_address.lower() if token_address else ""
+
+    # D1 & D2: gecko 交易活跃度与 LP
+    latest_gecko = src.execute("""
+        SELECT volume_24h, reserve_usd, price_change_24h
+        FROM gecko_market_data WHERE token_address = ?
+        ORDER BY scan_time DESC LIMIT 1
+    """, [token_address]).fetchone()
+
+    d1_score = 0
+    d2_score = 0
+    vol_ratio = 1.0
+    reserve = 0
+    vol_24h = 0
+    price_chg = 0
+
+    if latest_gecko:
+        vol_24h = latest_gecko["volume_24h"] or 0
+        reserve = latest_gecko["reserve_usd"] or 0
+        price_chg = latest_gecko["price_change_24h"] or 0
+
+        # D2 LP (20分)
+        if reserve >= 500000: d2_score = 20
+        elif reserve >= 100000: d2_score = 15
+        elif reserve >= 50000: d2_score = 10
+        elif reserve >= 10000: d2_score = 5
+
+        # 7d 均量
+        avg7 = src.execute("""
+            SELECT AVG(volume_24h) FROM (
+                SELECT volume_24h FROM gecko_market_data
+                WHERE token_address = ? AND volume_24h > 0
+                ORDER BY scan_time DESC LIMIT 14
+            )
+        """, [token_address]).fetchone()[0] or 0
+
+        if avg7 > 0:
+            vol_ratio = vol_24h / avg7
+            # D1 量缩 (20分)
+            if vol_24h < 1000:
+                d1_score = 0
+            elif vol_ratio <= 0.3: d1_score = 20
+            elif vol_ratio <= 0.6: d1_score = 15
+            elif vol_ratio <= 1.0: d1_score = 10
+            elif vol_ratio <= 1.5: d1_score = 5
+
+    # D3 & D6: 真实吸筹浓度与大盘/精英双轨制得分
+    latest_bm = src.execute("""
+        SELECT MAX(snapshot_time) FROM bubblemap_holders WHERE token_address = ?
+    """, [token_address]).fetchone()[0]
+
+    concentration = 0
+    d3_score = 0
+    d6_score = 0
+    real_users = 0
+    acc_count = 0
+    avg_acc_score = 0
+    avg_macro_score = 0
+
+    if latest_bm:
+        # 获取大盘指标和吸筹数据
+        totals = src.execute("""
+            SELECT
+                SUM(CASE WHEN is_cex=0 AND is_dex=0 AND is_contract=0 THEN 1 ELSE 0 END) as real_user_count,
+                SUM(CASE WHEN is_accumulating=1 THEN 1 ELSE 0 END) as acc_count,
+                AVG(CASE WHEN is_accumulating=1 THEN acc_score ELSE NULL END) as avg_acc_score,
+                AVG(CASE WHEN is_cex=0 AND is_dex=0 AND is_contract=0 THEN acc_score ELSE NULL END) as avg_macro_score
+            FROM bubblemap_holders
+            WHERE token_address = ? AND snapshot_time = ?
+        """, [token_address, latest_bm]).fetchone()
+
+        if totals and totals["real_user_count"]:
+            real_users = totals["real_user_count"]
+            acc_count = totals["acc_count"] or 0
+            concentration = (acc_count / real_users) * 100
+            d3_score = get_acc_concentration_score(concentration)
+
+            avg_acc_score = totals["avg_acc_score"] or 0
+            avg_macro_score = totals["avg_macro_score"] or 0
+            d6_score = get_macro_micro_score(avg_acc_score, avg_macro_score)
+
+    # D4 & D5: Meta持续与留存率
+    latest_meta = sumdb.execute("""
+        SELECT meta_score, meta_verdict FROM meta_snapshots
+        WHERE token_symbol = ? AND scan_time <= ?
+        ORDER BY scan_time DESC LIMIT 1
+    """, [token_symbol, scan_time]).fetchone()
+
+    d4_score = 0
+    d5_score = 0
+    consec_acc = 0
+    retention_7d = 0
+
+    if latest_meta and latest_meta["meta_verdict"] == "ACC":
+        # consec
+        consec_rows = sumdb.execute("""
+            SELECT consec_acc FROM token_history
+            WHERE token_symbol = ? AND computed_date <= ?
+            ORDER BY computed_date DESC LIMIT 1
+        """, [token_symbol, scan_time[:10]]).fetchone()
+        consec_acc = consec_rows["consec_acc"] if consec_rows else 0
+
+        # D4 Meta (15分)
+        if consec_acc >= 25: d4_score = 15
+        elif consec_acc >= 15: d4_score = 12
+        elif consec_acc >= 8: d4_score = 8
+        elif consec_acc >= 3: d4_score = 4
+
+        # D5 留存 (10分)
+        th_row = sumdb.execute("""
+            SELECT retention_7d FROM token_history
+            WHERE token_symbol = ? AND computed_date <= ?
+            ORDER BY computed_date DESC LIMIT 1
+        """, [token_symbol, scan_time[:10]]).fetchone()
+        if th_row and th_row["retention_7d"]:
+            retention_7d = th_row["retention_7d"]
+            if retention_7d >= 95: d5_score = 10
+            elif retention_7d >= 85: d5_score = 8
+            elif retention_7d >= 75: d5_score = 6
+            elif retention_7d >= 60: d5_score = 4
+
+    # D7, D8, D9: futures_snapshots
+    latest_ft = src.execute("""
+        SELECT oi_value_usd, oi_change_24h, funding_rate, long_short_ratio
+        FROM futures_snapshots WHERE token_address = ?
+        ORDER BY scan_time DESC LIMIT 1
+    """, [token_address]).fetchone()
+
+    d7_score = 0
+    d8_score = 0
+    d9_score = 0
+    oi_usd = 0
+    oi_chg = 0
+    fr = 0
+    ls = 0
+
+    if latest_ft:
+        oi_usd = latest_ft["oi_value_usd"] or 0
+        oi_chg = latest_ft["oi_change_24h"] or 0
+        fr = latest_ft["funding_rate"] or 0
+        ls = latest_ft["long_short_ratio"] or 0
+
+        # 过滤搬家假量缩：DEX量缩+OI暴增时调降D1量缩分
+        if oi_chg > 0.15 and vol_ratio <= 0.3 and d1_score == 20:
+            d1_score = 10
+
+        # D7 OI变化 (15分)
+        if oi_usd >= 1000000:
+            if oi_chg >= 0.10: d7_score = 15
+            elif oi_chg >= 0.03: d7_score = 10
+            elif oi_chg >= -0.05: d7_score = 5
+        else:
+            # OI不足$1M，减半
+            if oi_chg >= 0.10: d7_score = 7
+            elif oi_chg >= 0.03: d7_score = 5
+            elif oi_chg >= -0.05: d7_score = 2
+
+        # D8 FR (10分)
+        if fr <= -0.0003: d8_score = 10
+        elif fr <= -0.0001: d8_score = 8
+        elif fr <= 0: d8_score = 5
+        elif fr <= 0.0005: d8_score = 2
+
+        # D9 L/S (8分)
+        if ls <= 0.6: d9_score = 8
+        elif ls <= 0.9: d9_score = 6
+        elif ls <= 1.2: d9_score = 4
+        elif ls <= 1.5: d9_score = 2
+
+    total_score = d1_score + d2_score + d3_score + d4_score + d5_score + d6_score + d7_score + d8_score + d9_score
+
+    # 分级
+    level = "WATCH"
+    if total_score >= 90:
+        level = "IMMINENT"
+    elif total_score >= 65:
+        if vol_ratio <= 0.3:
+            level = "READY_VOL_SHRINK"
+        else:
+            level = "READY"
+    elif total_score >= 45:
+        level = "WATCH"
+    else:
+        level = "NONE"
+
+    return {
+        "symbol": token_symbol, "addr": token_address,
+        "score": total_score, "level": level,
+        "d1": d1_score, "d2": d2_score, "d3": d3_score, "d4": d4_score,
+        "d5": d5_score, "d6": d6_score, "d7": d7_score, "d8": d8_score, "d9": d9_score,
+        "concentration": concentration, "vol_ratio": vol_ratio,
+        "oi_usd": oi_usd, "oi_chg": oi_chg, "fr": fr, "ls": ls, "reserve": reserve,
+        "avg_acc_score": avg_acc_score, "avg_macro_score": avg_macro_score
+    }
+
+
+def ensure_pump_alerts_table(sumdb):
+    """创建 pump_alerts 表"""
+    sumdb.execute("""
+        CREATE TABLE IF NOT EXISTS pump_alerts (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            scan_time       TEXT NOT NULL,
+            token_symbol    TEXT NOT NULL,
+            token_address   TEXT NOT NULL,
+            pump_score      REAL NOT NULL,
+            alert_level     TEXT NOT NULL,
+            d1_score        REAL DEFAULT 0,
+            d2_score        REAL DEFAULT 0,
+            d3_score        REAL DEFAULT 0,
+            d4_score        REAL DEFAULT 0,
+            d5_score        REAL DEFAULT 0,
+            d6_score        REAL DEFAULT 0,
+            d7_score        REAL DEFAULT 0,
+            d8_score        REAL DEFAULT 0,
+            d9_score        REAL DEFAULT 0,
+            concentration   REAL DEFAULT 0,
+            vol_ratio       REAL DEFAULT 0,
+            oi_usd          REAL DEFAULT 0,
+            oi_chg          REAL DEFAULT 0,
+            fr              REAL DEFAULT 0,
+            ls              REAL DEFAULT 0,
+            reserve_usd     REAL DEFAULT 0,
+            UNIQUE(scan_time, token_address)
+        )
+    """)
+    sumdb.commit()
+
+
+def save_pump_alerts(sumdb, scan_time, results):
+    """保存记录到 DB"""
+    saved = 0
+    for r in results:
+        if r["level"] == "NONE":
+            continue
+        sumdb.execute("""
+            INSERT OR REPLACE INTO pump_alerts
+            (scan_time, token_symbol, token_address, pump_score, alert_level,
+             d1_score, d2_score, d3_score, d4_score, d5_score, d6_score, d7_score, d8_score, d9_score,
+             concentration, vol_ratio, oi_usd, oi_chg, fr, ls, reserve_usd)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            scan_time, r["symbol"], r["addr"], r["score"], r["level"],
+            r["d1"], r["d2"], r["d3"], r["d4"], r["d5"], r["d6"], r["d7"], r["d8"], r["d9"],
+            r["concentration"], r["vol_ratio"], r["oi_usd"], r["oi_chg"], r["fr"], r["ls"], r["reserve"]
+        ))
+        saved += 1
+    sumdb.commit()
+    return saved
+
+
+def generate_report(scan_time, results):
+    """生成 Markdown 看板报告"""
+    lines = [f"# 🚀 AI-SUM 拉升前兆引擎报告 (v2) — {scan_time}\n"]
+    lines.append("> 基于 BubbleMap 真实吸筹浓度 + 大盘/精英双轨制 + Futures 链上与合约 9 维偏离扫描")
+    lines.append("> 每 6 小时生成一次 (与 history_report.py 对齐)")
+    lines.append("")
+
+    lines.append("## 📖 报表说明 (Tips)")
+    lines.append("- **pump**: 拉升就绪评分 (满分128). `IMMINENT` ≥90 (🔴) | `READY` ≥65 (🟡) | `WATCH` ≥45 (🟢)")
+    lines.append("- **D1-D6**: 链上评分. D1量缩(20) | D2 LP(20) | D3真实吸筹浓度(20) | D4持续(15) | D5留存(10) | D6精英/大盘双轨(10)")
+    lines.append("- **D7-D9**: 合约评分. D7 OI变化(15) | D8 资金费(10) | D9 多空比(8)")
+    lines.append("- **吸筹%**: 真实吸筹浓度 (排除交易所/合约/CEX后的独立ACC地址占比)")
+    lines.append("- **vol缩比**: 24h量/7d均量 (≤0.3x 为强力锁仓量缩)")
+    lines.append("- **L/S**: 合约主动多空人数比 (<0.6 散户开空做反指)")
+    lines.append("")
+
+    def _fmtk(v):
+        if v is None: return "—"
+        if v >= 1e6: return f"${v/1e6:.1f}M"
+        if v >= 1e3: return f"${v/1e3:.0f}K"
+        return f"${v:.0f}"
+
+    def _render_table(level_results, title, emoji):
+        if not level_results:
+            return ""
+        table = [
+            f"### {emoji} {title} ({len(level_results)} 个)",
+            "",
+            "| 代币 | pump | D1-D6 | D7 | D8 | D9 | 吸筹% | vol缩比 | OI($) | OI变化 | FR | L/S | LP |",
+            "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |"
+        ]
+        for r in level_results:
+            d16 = f"{r['d1']}+{r['d2']}+{r['d3']:.0f}+{r['d4']}+{r['d5']}+{r['d6']}"
+            oi_usd_str = _fmtk(r['oi_usd'])
+            reserve_str = _fmtk(r['reserve'])
+            table.append(
+                f"| **{r['symbol']}** | **{r['score']}** | {d16} | {r['d7']} | {r['d8']} | {r['d9']} "
+                f"| {r['concentration']:.1f}% | {r['vol_ratio']:.2f}x | {oi_usd_str} | {r['oi_chg']:+.1%} "
+                f"| {r['fr']:.4%} | {r['ls']:.2f} | {reserve_str} |"
+            )
+        table.append("")
+        return "\n".join(table)
+
+    # 🔴 IMMINENT
+    imminent = [r for r in results if r["level"] == "IMMINENT"]
+    lines.append(_render_table(imminent, "IMMINENT 即将拉升", "🔴"))
+
+    # 🟡 READY
+    ready = [r for r in results if r["level"] in ("READY", "READY_VOL_SHRINK")]
+    lines.append(_render_table(ready, "READY 量缩/就绪", "🟡"))
+
+    # 🟢 WATCH
+    watch = [r for r in results if r["level"] == "WATCH"]
+    lines.append(_render_table(watch, "WATCH 观察阶段", "🟢"))
+
+    # 链上/合约分歧检测
+    divergence = [r for r in results if r["score"] >= 65 and r["oi_chg"] < -0.10]
+    if divergence:
+        lines.append("## ⚠️ 链上/合约分歧检测 (高评分但合约退潮)")
+        lines.append("| 代币 | pump评分 | 链上吸筹浓度 | vol缩比 | OI变化24h | LP | 含义 |")
+        lines.append("| :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
+        for r in divergence:
+            lines.append(f"| {r['symbol']} | {r['score']} | {r['concentration']:.1f}% | {r['vol_ratio']:.2f}x | {r['oi_chg']:+.1%} | {_fmtk(r['reserve'])} | 链上高度建仓，但衍生品市场减仓离场 |")
+        lines.append("")
+
+    return "\n".join(lines)
+
 
 def run(scan_time=None):
-    scan_time = scan_time or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    logger.info(f"[pump_detector v2] 开始扫描 scan_time={scan_time}")
-    bm=_load_bubblemap(); logger.info(f"  BubbleMap: {len(bm)}")
-    gecko=_load_gecko();  logger.info(f"  Gecko: {len(gecko)}")
-    meta=_load_meta();    logger.info(f"  Meta: {len(meta)}")
-    th=_load_history();   logger.info(f"  History: {len(th)}")
-    names=_load_names()
-    futures=_load_futures()
+    if not scan_time:
+        scan_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    print(f"AI-SUM 拉升前兆扫描开始 | {scan_time}")
+    src = connect(SRC_DB, readonly=True)
+    sumdb = connect(SUM_DB)
+
+    ensure_pump_alerts_table(sumdb)
+
+    # 扫描 watchlist 中的代币
+    tokens = sumdb.execute("""
+        SELECT DISTINCT token_address, token_symbol FROM watchlist
+        WHERE token_address IS NOT NULL AND token_address != ''
+    """).fetchall()
 
     results = []
-    for addr in bm:
-        b,g,m,h = bm[addr], gecko.get(addr,{}), meta.get(addr,{}), th.get(addr,{})
-        ft = futures.get(addr, {})
-        sym = names.get(addr, (m.get("token_symbol") or addr[:10]))
-        score, dims = calc_pump_readiness(b, g, m, h, ft)
-        v24 = g.get("volume_24h",0) or 0; av = g.get("avg_vol_7d",0) or 0
-        vr = (v24/av) if av>0 else (0 if v24==0 else 1)
-        lv = classify(score, vr)
-        results.append({
-            "scan_time":scan_time,"chain":"bsc","token_address":addr,
-            "token_symbol":sym,"pump_score":score,"alert_level":lv,**dims,
-            "acc_count":b.get("acc_count",0) or 0,
-            "acc_pct":round((b.get("acc_count",0) or 0)/max(b.get("real_user_count",0) or 0, 1)*100,1),
-            "avg_acc_score":round(b.get("avg_acc_score",0) or 0,1),
-            "meta_score":round((m.get("meta_score",0) or 0),2) if m else 0,
-            "consec_acc":(h.get("consec_acc",0) or 0) if h else 0,
-            "retention_7d":round((h.get("retention_7d",0) or 0),1) if h else 0,
-            "vol_24h":round(v24,2),"avg_vol_7d":round(av,2),"vol_ratio":round(vr,4),
-            "reserve_usd":round(g.get("reserve_usd",0) or 0,2),
-            "price_usd":g.get("price_usd",0) or 0,
-            "price_change_24h":round(g.get("price_change_24h",0) or 0,2),
-            "oi_value_usd":ft.get("oi_value_usd") or 0,
-            "oi_change_24h":ft.get("oi_change_24h") or 0,
-            "funding_rate":ft.get("funding_rate") or 0,
-            "long_short_ratio":ft.get("long_short_ratio") or 0,
-        })
-    results.sort(key=lambda x: x["pump_score"], reverse=True)
-    _save_to_db(results)
-    _generate_report(results, scan_time)
-    levels = {}
-    for r in results:
-        levels[r["alert_level"]] = levels.get(r["alert_level"],0)+1
-    for lv in ("IMMINENT","READY_VOL_SHRINK","READY","WATCH","NEUTRAL"):
-        if lv in levels: logger.info(f"  {lv}: {levels[lv]}")
-    has_ft = sum(1 for r in results if r.get("oi_value_usd",0)>0)
-    logger.info(f"[pump_detector v2] 完成: {len(results)} 代币 (有合约数据: {has_ft})")
-    return results
+    for t in tokens:
+        try:
+            res = calc_pump_readiness(src, sumdb, t["token_address"], t["token_symbol"], scan_time)
+            results.append(res)
+        except Exception as e:
+            print(f"  代币 {t['token_symbol']} 扫描失败: {e}")
 
-def _save_to_db(results):
-    c = _conn(SUM_DB); ensure_pump_alerts_table(c)
-    for r in results:
-        if r["alert_level"]=="NEUTRAL": continue
-        c.execute("""INSERT INTO pump_alerts (scan_time,chain,token_address,token_symbol,pump_score,alert_level,
-            d1_vol_shrink,d2_lp_stable,d3_acc_density,d4_meta_persist,d5_retention,d6_score_quality,
-            d7_oi_change,d8_funding,d9_long_short,
-            acc_count,acc_pct,avg_acc_score,meta_score,consec_acc,retention_7d,
-            vol_24h,avg_vol_7d,vol_ratio,reserve_usd,price_usd,price_change_24h,
-            oi_value_usd,oi_change_24h,funding_rate,long_short_ratio)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (r["scan_time"],r["chain"],r["token_address"],r["token_symbol"],
-             r["pump_score"],r["alert_level"],
-             r.get("d1",0),r.get("d2",0),r.get("d3",0),r.get("d4",0),r.get("d5",0),r.get("d6",0),
-             r.get("d7",0),r.get("d8",0),r.get("d9",0),
-             r["acc_count"],r["acc_pct"],r["avg_acc_score"],r["meta_score"],
-             r["consec_acc"],r["retention_7d"],
-             r["vol_24h"],r["avg_vol_7d"],r["vol_ratio"],
-             r["reserve_usd"],r["price_usd"],r["price_change_24h"],
-             r["oi_value_usd"],r["oi_change_24h"],r["funding_rate"],r["long_short_ratio"]))
-    c.commit(); c.close()
-    cnt = sum(1 for r in results if r["alert_level"]!="NEUTRAL")
-    logger.info(f"  DB写入: {cnt} 条 (WATCH以上)")
+    src.close()
 
-def _generate_report(results, scan_time):
-    REPORT_DIR.mkdir(parents=True, exist_ok=True)
-    ts = scan_time.replace("-","").replace(":","").replace(" ","_")[:13]
-    fp = REPORT_DIR / f"pump_{ts}.md"
-    levels = {}
-    for r in results: levels[r["alert_level"]]=levels.get(r["alert_level"],0)+1
-    md = [f"# 🚀 拉升前兆扫描报告 v2",f"> 时间: {scan_time} | 代币: {len(results)} | 版本: 9维(链上+合约)",""]
-    md.append("> ⚠ 当前处于全市场低量环境 (量能较峰值-51.6%), D1量缩评分需结合D3/D4/D5交叉验证")
-    md.append("")
-    md.append("## 信号分布\n| 级别 | 数量 |\n|------|------|")
-    for lv in ("IMMINENT","READY_VOL_SHRINK","READY","WATCH","NEUTRAL"):
-        if lv in levels:
-            ic = {"IMMINENT":"🔴","READY_VOL_SHRINK":"🟡","READY":"🟡","WATCH":"🟢","NEUTRAL":"—"}.get(lv,"")
-            md.append(f"| {ic} {lv} | {levels[lv]} |")
-    md.append("")
-    # Tips
-    md.append("## 📖 列说明")
-    md.append("")
-    md.append("| 列 | 含义 |")
-    md.append("|-----|------|")
-    md.append("| pump | 9维综合评分(满分128) — ≥90 IMMINENT / ≥65 READY / ≥45 WATCH |")
-    md.append("| D1-D6 | 链上层6维总分(满分95): D1量缩(20)+D2 LP(20)+D3吸筹密度(20)+D4 Meta持续(15)+D5留存(10)+D6均分(10) |")
-    md.append("| D7 OI | 合约OI变化评分(0-15): OI增+价平=暗中建仓, OI<$1M减半 |")
-    md.append("| D8 FR | 资金费率评分(0-10): 负FR=空头拥挤→轧空前兆, FR<-0.03%得10分 |")
-    md.append("| D9 LS | 多空比评分(0-8): L/S<0.6=散户重度做空→强反指看涨 |")
-    md.append("| 吸筹% | 真实用户吸筹浓度 (ACC/真实用户, 排除CEX/DEX/合约) |")
-    md.append("| vol缩比 | 24h成交量/7d均量 — <0.3=严重量缩(蓄力) |")
-    md.append("| OI($) | 币安永续合约未平仓合约价值(USD) |")
-    md.append("| OI变化 | 24h OI变化百分比 — 正值=资金流入 |")
-    md.append("| FR | Funding Rate 资金费率 — 负值=空头拥挤 |")
-    md.append("| L/S | Long/Short Ratio 散户多空比 — <1散户偏空(反指看涨), >2散户偏多(反指看空) |")
-    md.append("| LP | DEX流动性池储备(USD) |")
-    md.append("")
+    # 按分数排序
+    results.sort(key=lambda x: x["score"], reverse=True)
 
-    # IMMINENT
-    imm = [r for r in results if r["alert_level"]=="IMMINENT"]
-    if imm:
-        md.append(f"## 🔴 IMMINENT ({len(imm)})")
-        md.append("| 代币 | pump | D1-D6 | D7 OI | D8 FR | D9 LS | 吸筹% | vol缩比 | OI($) | OI变化 | FR | L/S | LP |")
-        md.append("|------|------|-------|-------|-------|-------|-------|---------|-------|--------|-----|-----|-----|")
-        for r in imm:
-            d16 = r.get("d1",0)+r.get("d2",0)+r.get("d3",0)+r.get("d4",0)+r.get("d5",0)+r.get("d6",0)
-            oi_str = f"${r['oi_value_usd']:,.0f}" if r['oi_value_usd'] else "—"
-            oi_chg = f"{r['oi_change_24h']:.1%}" if r['oi_change_24h'] else "—"
-            fr_str = f"{r['funding_rate']:.4%}" if r['funding_rate'] else "—"
-            ls_str = f"{r['long_short_ratio']:.2f}" if r['long_short_ratio'] else "—"
-            md.append(f"| **{r['token_symbol']}** | **{r['pump_score']}** | {d16}/95 | {r.get('d7',0)} | {r.get('d8',0)} | {r.get('d9',0)} | {r['acc_pct']}% | {r['vol_ratio']:.3f} | {oi_str} | {oi_chg} | {fr_str} | {ls_str} | ${r['reserve_usd']:,.0f} |")
-        md.append("")
-    # READY
-    rdy = [r for r in results if r["alert_level"].startswith("READY")]
-    if rdy:
-        md.append(f"## 🟡 READY ({len(rdy)})")
-        md.append("| 代币 | pump | D1-D6 | D7 OI | D8 FR | D9 LS | 吸筹% | vol缩比 | OI($) | OI变化 | FR | L/S | LP |")
-        md.append("|------|------|-------|-------|-------|-------|-------|---------|-------|--------|-----|-----|-----|")
-        for r in rdy[:25]:
-            d16 = r.get("d1",0)+r.get("d2",0)+r.get("d3",0)+r.get("d4",0)+r.get("d5",0)+r.get("d6",0)
-            oi_str = f"${r['oi_value_usd']:,.0f}" if r['oi_value_usd'] else "—"
-            oi_chg = f"{r['oi_change_24h']:.1%}" if r.get('oi_change_24h') else "—"
-            fr_str = f"{r['funding_rate']:.4%}" if r.get('funding_rate') else "—"
-            ls_str = f"{r['long_short_ratio']:.2f}" if r.get('long_short_ratio') else "—"
-            md.append(f"| **{r['token_symbol']}** | **{r['pump_score']}** | {d16}/95 | {r.get('d7',0)} | {r.get('d8',0)} | {r.get('d9',0)} | {r['acc_pct']}% | {r['vol_ratio']:.3f} | {oi_str} | {oi_chg} | {fr_str} | {ls_str} | ${r['reserve_usd']:,.0f} |")
-        md.append("")
-    # 链上/合约分歧
-    conflict = [r for r in results if r["alert_level"] in ("IMMINENT","READY_VOL_SHRINK","READY")
-                and r.get("oi_change_24h") and r.get("oi_change_24h") < -0.10]
-    if conflict:
-        md.append("## ⚠ 链上/合约分歧（高评分但OI下降）")
-        md.append("| 代币 | pump | OI变化 | 吸筹% | 说明 |")
-        md.append("|------|------|--------|-------|------|")
-        for r in conflict:
-            md.append(f"| {r['token_symbol']} | {r['pump_score']} | {r['oi_change_24h']:.1%} | {r['acc_pct']}% | 链上吸筹但合约减仓 |")
-        md.append("")
+    # 存盘
+    saved = save_pump_alerts(sumdb, scan_time, results)
+    print(f"  [DB] 保存 {saved} 个告警代币")
 
-    with open(fp, "w", encoding="utf-8") as f: f.write("\n".join(md))
-    logger.info(f"  报告: {fp}")
+    # 生成 Markdown 报告
+    md = generate_report(scan_time, results)
+    out_dir = Path(REPORT_DIR)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    report_path = out_dir / f"pump_{scan_time[:10].replace('-','')}_{scan_time[11:16].replace(':','')}.md"
+    report_path.write_text(md, encoding="utf-8")
+    print(f"  [FILE] 报告生成: {report_path} ({len(md)} bytes)")
+
+    sumdb.close()
+    print("AI-SUM 拉升前兆扫描完成\n")
+
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     run()
