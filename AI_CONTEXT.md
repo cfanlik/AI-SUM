@@ -424,3 +424,14 @@ cd /opt/AI-SUM && python3 meta-verdict/history_report.py
 
 ### history_report 模块8
 - 新增 futures_analysis(): ACC代币合约验证 + OI变化Top10 + FR极端值
+
+
+## D10 与 S11 共振引擎升级 (v10.0)
+1. **D10 Pool 稳定性评分**:
+   - **LP 波动率得分 (Max 4分)**: 统计 gecko_market_data 7天内 reserve_usd 波动范围，波动率 < 3% 得 4 分；< 8% 得 3 分；< 15% 得 2 分；< 25% 得 1 分。
+   - **LP 规模得分 (Max 2分)**: 最新 reserve_usd ≥ $500K 得 2 分；≥ $100K 得 1 分。
+   - **交易活跃度得分 (Max 2分)**: 24h 交易笔数 ≥ 500 得 2 分；≥ 100 得 1 分。
+   - **D10 满分**: LP 波动 + LP 规模 + 活跃度 = 8分，对齐 100 分综合满分权重体系。
+2. **S11 静默建仓信号与三维共振 (🤫)**:
+   - **三维拟合共振**: LP 极稳 (D10 ≥ 6分) + 合约 OI 缓增 (近3个快照持续增长) + 资金费率 FR 为负 + 链上巨鲸吸筹均分上升！
+   - **徽章集成**: 联动 `/api/bubblemap/db/pool-health` 接口，在前端 BubbleMap 列表中自动展示 `🤫` 徽章。
