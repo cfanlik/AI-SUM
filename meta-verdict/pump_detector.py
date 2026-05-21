@@ -209,6 +209,7 @@ def calc_pump_readiness(src, sumdb, token_address, token_symbol, scan_time):
     acc_count = 0
     avg_acc_score = 0
     avg_macro_score = 0
+    control_level = "None"
 
     if latest_bm:
         totals = src.execute("""
@@ -216,7 +217,8 @@ def calc_pump_readiness(src, sumdb, token_address, token_symbol, scan_time):
                 SUM(CASE WHEN is_cex=0 AND is_dex=0 AND is_contract=0 THEN 1 ELSE 0 END) as real_user_count,
                 SUM(CASE WHEN is_accumulating=1 THEN 1 ELSE 0 END) as acc_count,
                 AVG(CASE WHEN is_accumulating=1 THEN acc_score ELSE NULL END) as avg_acc_score,
-                AVG(CASE WHEN is_cex=0 AND is_dex=0 AND is_contract=0 THEN acc_score ELSE NULL END) as avg_macro_score
+                AVG(CASE WHEN is_cex=0 AND is_dex=0 AND is_contract=0 THEN acc_score ELSE NULL END) as avg_macro_score,
+                MAX(control_level) as max_control
             FROM bubblemap_holders
             WHERE token_address = ? AND snapshot_time = ?
         """, [token_address, latest_bm]).fetchone()
@@ -230,6 +232,35 @@ def calc_pump_readiness(src, sumdb, token_address, token_symbol, scan_time):
             avg_acc_score = totals["avg_acc_score"] or 0
             avg_macro_score = totals["avg_macro_score"] or 0
             d6_score = get_macro_micro_score(avg_acc_score, avg_macro_score)
+            
+            control_level = totals["max_control"] or "None"
+            
+            # A/B 级庄控强行赋 D3 满分 15 分
+            if control_level in ("A", "B"):
+                d3_score = 15
+
+    # ─── 计算大户深套率 underwater_ratio ───
+    underwater_ratio = 0.0
+    latest_gmgn = src.execute("""
+        SELECT MAX(snapshot_time) FROM gmgn_holders WHERE token_address = ?
+    """, [token_address]).fetchone()[0]
+    
+    if latest_gmgn:
+        gmgn_totals = src.execute("""
+            SELECT 
+                COUNT(*) as total_holders,
+                SUM(CASE WHEN unrealized_pnl < 0 THEN 1 ELSE 0 END) as loss_holders
+            FROM gmgn_holders
+            WHERE token_address = ? AND snapshot_time = ? AND hold_amount > 0
+        """, [token_address, latest_gmgn]).fetchone()
+        
+        if gmgn_totals and gmgn_totals["total_holders"] > 0:
+            underwater_ratio = (gmgn_totals["loss_holders"] or 0) / gmgn_totals["total_holders"]
+
+    # 🤫 隐秘爆破判定
+    stealth_pump = False
+    if control_level in ("A", "B") and underwater_ratio > 0.90:
+        stealth_pump = True
 
     # D4 & D5: Meta持续与留存率
     latest_meta = sumdb.execute("""
@@ -360,8 +391,6 @@ def calc_pump_readiness(src, sumdb, token_address, token_symbol, scan_time):
         level = "NONE"
 
     # S11 静默建仓信号 (独立于 C10)
-    # 条件: LP 极稳(波动<5%) + OI 正增长(D7>0) + FR 负(D8≥4) + 精英均分 > 大盘分
-    # 核心逻辑: "静默" = OI 缓慢增长（非暴增），LP 不动，FR 持续空头付费
     silent_acc = False
     if (lp_vol_pct is not None and lp_vol_pct < 5
             and d7_score >= 2 and d8_score >= 4
@@ -378,6 +407,9 @@ def calc_pump_readiness(src, sumdb, token_address, token_symbol, scan_time):
         "oi_usd": oi_usd, "oi_chg": oi_chg, "fr": fr, "ls": ls, "reserve": reserve,
         "avg_acc_score": avg_acc_score, "avg_macro_score": avg_macro_score,
         "lp_vol_pct": lp_vol_pct, "silent_acc": silent_acc,
+        "underwater_ratio": round(underwater_ratio, 4),
+        "control_level": control_level,
+        "stealth_pump": stealth_pump,
     }
 
 
@@ -416,6 +448,17 @@ def ensure_pump_alerts_table(sumdb):
     for col_name, col_def in v3_cols.items():
         if col_name not in existing:
             sumdb.execute(f"ALTER TABLE pump_alerts ADD COLUMN {col_name} {col_def}")
+            
+    # v4 升级: 新增 underwater_ratio / control_level / stealth_pump 列
+    v4_cols = {
+        "underwater_ratio": "REAL DEFAULT 0",
+        "control_level": "TEXT DEFAULT 'None'",
+        "stealth_pump": "INTEGER DEFAULT 0"
+    }
+    for col_name, col_def in v4_cols.items():
+        if col_name not in existing:
+            sumdb.execute(f"ALTER TABLE pump_alerts ADD COLUMN {col_name} {col_def}")
+            
     sumdb.commit()
 
 
@@ -430,8 +473,9 @@ def save_pump_alerts(sumdb, scan_time, results):
             (scan_time, token_symbol, token_address, pump_score, alert_level,
              d1_score, d2_score, d3_score, d4_score, d5_score, d6_score,
              d7_score, d8_score, d9_score, d10_score,
-             concentration, vol_ratio, oi_usd, oi_chg, fr, ls, reserve_usd, silent_acc)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             concentration, vol_ratio, oi_usd, oi_chg, fr, ls, reserve_usd, silent_acc,
+             underwater_ratio, control_level, stealth_pump)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             scan_time, r["symbol"], r["addr"], r["score"], r["level"],
             r["d1"], r["d2"], r["d3"], r["d4"], r["d5"], r["d6"],
@@ -439,6 +483,9 @@ def save_pump_alerts(sumdb, scan_time, results):
             r["concentration"], r["vol_ratio"], r["oi_usd"], r["oi_chg"],
             r["fr"], r["ls"], r["reserve"],
             1 if r.get("silent_acc") else 0,
+            r.get("underwater_ratio", 0.0),
+            r.get("control_level", "None"),
+            1 if r.get("stealth_pump") else 0,
         ))
         saved += 1
     sumdb.commit()
@@ -450,6 +497,26 @@ def generate_report(scan_time, results):
     lines = [f"# 🚀 AI-SUM 拉升前兆引擎报告 (v3) — {scan_time}\n"]
     lines.append("> 基于 BubbleMap + Gecko + Futures 10 维评分体系 (满分 100)")
     lines.append("> 每 6 小时生成一次 (与 history_report.py 对齐)")
+    lines.append("")
+
+    # ─── 🤫 STEALTH_PUMP_READY 极秘爆破看板 ───
+    stealth_tokens = [r for r in results if r.get("stealth_pump")]
+    lines.append("## 🤫 STEALTH_PUMP_READY 极秘爆破看板")
+    if stealth_tokens:
+        lines.append("> ⚠️ **警告**：强控盘庄家深度套牢大户（深套率 > 90%），空头爆破一触即发！")
+        lines.append("")
+        lines.append("| 代币 | pump评分 | 庄控级别 | 大户深套率 | 浓度分(D3) | vol缩比(D1) | LP 7d波动% |")
+        lines.append("| :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
+        for r in stealth_tokens:
+            lp_vol = f"{r.get('lp_vol_pct')}%" if r.get('lp_vol_pct') is not None else "—"
+            lines.append(
+                f"| **{r['symbol']}** | **{r['score']}** | `🤫 {r.get('control_level', 'None')}` "
+                f"| {r.get('underwater_ratio', 0.0):.1%} | {r['d3']} | {r['vol_ratio']:.2f}x | {lp_vol} |"
+            )
+    else:
+        lines.append("> [!TIP]")
+        lines.append("> **🤫 STEALTH_PUMP_READY 极秘爆破机制**")
+        lines.append("> 当检测到 A/B 级强庄控且大户深套率 `underwater_ratio > 90%` 时，将在此置顶触发爆破预警。目前暂无代币触发，主力筹码尚在整理中。")
     lines.append("")
 
     lines.append("## 📖 报表说明 (Tips)")
@@ -485,7 +552,14 @@ def generate_report(scan_time, results):
             d16 = f"{r['d1']}+{r['d2']}+{r['d3']:.0f}+{r['d4']}+{r['d5']}+{r['d6']}"
             oi_usd_str = _fmtk(r['oi_usd'])
             reserve_str = _fmtk(r['reserve'])
-            silent_flag = "🤫" if r.get("silent_acc") else ""
+            
+            flags = []
+            if r.get("stealth_pump"):
+                flags.append("🤫 STEALTH_PUMP_READY")
+            elif r.get("silent_acc"):
+                flags.append("🤫")
+            silent_flag = " / ".join(flags) if flags else ""
+            
             table.append(
                 f"| **{r['symbol']}** | **{r['score']}** | {d16} | {r['d7']} | {r['d8']} | {r['d9']} "
                 f"| {r['d10']} | {silent_flag} "
