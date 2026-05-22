@@ -211,6 +211,8 @@ def calc_pump_readiness(src, sumdb, token_address, token_symbol, scan_time):
     avg_macro_score = 0
     control_level = "None"
 
+    associated_addresses = 0
+    associated_ratio = 0.0
     if latest_bm:
         totals = src.execute("""
             SELECT
@@ -218,7 +220,9 @@ def calc_pump_readiness(src, sumdb, token_address, token_symbol, scan_time):
                 SUM(CASE WHEN is_accumulating=1 THEN 1 ELSE 0 END) as acc_count,
                 AVG(CASE WHEN is_accumulating=1 THEN acc_score ELSE NULL END) as avg_acc_score,
                 AVG(CASE WHEN is_cex=0 AND is_dex=0 AND is_contract=0 THEN acc_score ELSE NULL END) as avg_macro_score,
-                MAX(control_level) as max_control
+                MAX(control_level) as max_control,
+                SUM(CASE WHEN inbound_sources LIKE '%0xfa117bd2c80b083c83522ceb402acfbab76f2048%' AND is_cex=0 AND is_dex=0 AND is_contract=0 THEN 1 ELSE 0 END) as associated_addresses,
+                SUM(CASE WHEN inbound_sources LIKE '%0xfa117bd2c80b083c83522ceb402acfbab76f2048%' AND is_cex=0 AND is_dex=0 AND is_contract=0 THEN hold_percentage ELSE 0 END) as associated_ratio
             FROM bubblemap_holders
             WHERE token_address = ? AND snapshot_time = ?
         """, [token_address, latest_bm]).fetchone()
@@ -234,6 +238,8 @@ def calc_pump_readiness(src, sumdb, token_address, token_symbol, scan_time):
             d6_score = get_macro_micro_score(avg_acc_score, avg_macro_score)
             
             control_level = totals["max_control"] or "None"
+            associated_addresses = totals["associated_addresses"] or 0
+            associated_ratio = totals["associated_ratio"] or 0.0
             
             # A/B 级庄控强行赋 D3 满分 15 分
             if control_level in ("A", "B"):
@@ -410,6 +416,8 @@ def calc_pump_readiness(src, sumdb, token_address, token_symbol, scan_time):
         "underwater_ratio": round(underwater_ratio, 4),
         "control_level": control_level,
         "stealth_pump": stealth_pump,
+        "associated_addresses": associated_addresses,
+        "associated_ratio": associated_ratio,
     }
 
 
@@ -517,6 +525,26 @@ def generate_report(scan_time, results):
         lines.append("> [!TIP]")
         lines.append("> **🤫 STEALTH_PUMP_READY 极秘爆破机制**")
         lines.append("> 当检测到 A/B 级强庄控且大户深套率 `underwater_ratio > 90%` 时，将在此置顶触发爆破预警。目前暂无代币触发，主力筹码尚在整理中。")
+    lines.append("")
+
+    # ─── 🔗 BUBBLEMAP 庄控打款关联看板 (穿透) ───
+    control_tokens = [r for r in results if r.get("control_level") in ("A", "B", "C")]
+    lines.append("## 🔗 BUBBLEMAP 庄控打款关联看板 (穿透)")
+    if control_tokens:
+        lines.append("> 💡 **穿透雷达**：BubbleMap 庄控集群打款穿透。A级/B级大户锁仓，代表极佳的安全垫与主力绝对控盘。")
+        lines.append("")
+        lines.append("| 代币 | pump评分 | 庄控级别 | 关联持仓占比 | 关联地址数 | 浓度分(D3) | vol缩比(D1) | 🤫 |")
+        lines.append("| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |")
+        for r in control_tokens:
+            silent_flag = "🤫" if r.get("silent_acc") else ""
+            lines.append(
+                f"| **{r['symbol']}** | **{r['score']}** | `{r.get('control_level', 'None')}级庄控` "
+                f"| {r.get('associated_ratio', 0.0):.2f}% | {r.get('associated_addresses', 0)} | {r['d3']} | {r['vol_ratio']:.2f}x | {silent_flag} |"
+            )
+    else:
+        lines.append("> [!TIP]")
+        lines.append("> **🔗 BUBBLEMAP 庄控打款关联机制**")
+        lines.append("> 目前暂无代币触发 A/B/C 级庄控打款关联。主力筹码尚在默默吸筹或洗盘中。")
     lines.append("")
 
     lines.append("## 📖 报表说明 (Tips)")
