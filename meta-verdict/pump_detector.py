@@ -221,8 +221,8 @@ def calc_pump_readiness(src, sumdb, token_address, token_symbol, scan_time):
                 AVG(CASE WHEN is_accumulating=1 THEN acc_score ELSE NULL END) as avg_acc_score,
                 AVG(CASE WHEN is_cex=0 AND is_dex=0 AND is_contract=0 THEN acc_score ELSE NULL END) as avg_macro_score,
                 MAX(control_level) as max_control,
-                SUM(CASE WHEN inbound_sources LIKE '%0xfa117bd2c80b083c83522ceb402acfbab76f2048%' AND is_cex=0 AND is_dex=0 AND is_contract=0 THEN 1 ELSE 0 END) as associated_addresses,
-                SUM(CASE WHEN inbound_sources LIKE '%0xfa117bd2c80b083c83522ceb402acfbab76f2048%' AND is_cex=0 AND is_dex=0 AND is_contract=0 THEN hold_percentage ELSE 0 END) as associated_ratio
+                COALESCE(MAX(associated_addresses), 0) as associated_addresses,
+                COALESCE(MAX(associated_ratio), 0.0) as associated_ratio
             FROM bubblemap_holders
             WHERE token_address = ? AND snapshot_time = ?
         """, [token_address, latest_bm]).fetchone()
