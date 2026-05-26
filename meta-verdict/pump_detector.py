@@ -26,8 +26,9 @@ REPORT_DIR = "/opt/AI-SUM/report/pump"
 
 def connect(path, readonly=False):
     uri = f"file:{path}?mode=ro" if readonly else path
-    c = sqlite3.connect(uri, uri=readonly)
+    c = sqlite3.connect(uri, uri=readonly, timeout=60.0)
     c.row_factory = sqlite3.Row
+    c.execute("PRAGMA busy_timeout = 60000;")
     return c
 
 
