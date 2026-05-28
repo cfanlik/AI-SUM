@@ -24,6 +24,7 @@ class MetaResult:
     unified_score: float = 0.0
     whale_score:   float = 0.0
     cb_score:      float = 0.0
+    hop2_score:    float = 0.0
 
     # 原始数据透传
     master_signal:  str   = ""
@@ -44,7 +45,7 @@ class MetaResult:
     stage: str = ""   # ACCUMULATING / CONTROLLED / DISTRIBUTING / WATCHLIST / NEUTRAL
 
 
-def arbitrate(data: TokenEngineData) -> MetaResult:
+def arbitrate(data: TokenEngineData, hop2_pct: float = 0.0) -> MetaResult:
     """5 引擎加权积分仲裁"""
     r = MetaResult(
         chain=data.chain,
@@ -93,6 +94,14 @@ def arbitrate(data: TokenEngineData) -> MetaResult:
     # ── cost-basis-scan 积分 ──
     r.cb_score = config.CB_SCORE.get(data.cb_verdict, 0)
 
+    # ── hop2 积分贡献 (v5 闭环重构) ──
+    if hop2_pct >= 0.30:
+        r.hop2_score = 1.50
+    elif hop2_pct >= 0.15:
+        r.hop2_score = 0.80
+    else:
+        r.hop2_score = 0.0
+
     # ── master/unified DIAMOND 信号去重（仅 DIAMOND 同源去重）──
     if r.master_signal == "DIAMOND" and r.unified_signal == "DIAMOND":
         r.unified_score = round(r.unified_score * 0.5, 2)
@@ -109,7 +118,7 @@ def arbitrate(data: TokenEngineData) -> MetaResult:
 
     # ── 综合积分 ──
     r.meta_score = round(
-        r.master_score + r.opus_score + r.unified_score + r.whale_score + r.cb_score, 2
+        r.master_score + r.opus_score + r.unified_score + r.whale_score + r.cb_score + r.hop2_score, 2
     )
 
     # ── 裁决 ──

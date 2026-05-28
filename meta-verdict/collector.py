@@ -270,6 +270,7 @@ def save_meta_result(conn: sqlite3.Connection, result: dict):
             unified_score  REAL DEFAULT 0,
             whale_score    REAL DEFAULT 0,
             cb_score       REAL DEFAULT 0,
+            hop2_score     REAL DEFAULT 0,
             UNIQUE(chain, token_address, scan_time)
         )
     """)
@@ -277,11 +278,11 @@ def save_meta_result(conn: sqlite3.Connection, result: dict):
         INSERT OR REPLACE INTO meta_snapshots
         (scan_time, chain, token_address, token_symbol, meta_score, meta_verdict,
          engine_hits, master_signal, opus_verdict, unified_signal, whale_level, cb_verdict, stage,
-         master_score, opus_score, unified_score, whale_score, cb_score)
+         master_score, opus_score, unified_score, whale_score, cb_score, hop2_score)
         VALUES (:scan_time, :chain, :token_address, :token_symbol, :meta_score, :meta_verdict,
                 :engine_hits, :master_signal, :opus_verdict, :unified_signal, :whale_level,
                 :cb_verdict, :stage,
-                :master_score, :opus_score, :unified_score, :whale_score, :cb_score)
+                :master_score, :opus_score, :unified_score, :whale_score, :cb_score, :hop2_score)
     """, result)
     conn.commit()
 
@@ -314,7 +315,7 @@ def ensure_hop2_tracking_table(conn: sqlite3.Connection):
     conn.commit()
 
 
-def collect_hop2_tracking(sum_conn: sqlite3.Connection, scan_time: str):
+def collect_hop2_tracking(sum_conn: sqlite3.Connection, scan_time: str, tokens_to_track: list = None):
     """
     每轮 meta-verdict 运行时，从 src.bubblemap_holders 采集 hop2 统计。
     前置条件: src DB 已通过 ATTACH 挂载为 'src'。
@@ -329,10 +330,12 @@ def collect_hop2_tracking(sum_conn: sqlite3.Connection, scan_time: str):
     import config as _cfg
     src_db = os.environ.get("SRC_DB_PATH", _cfg.SRC_DB_PATH)
     
-    # 获取 watchlist 中的代币
-    tokens = sum_conn.execute(
-        "SELECT chain, token_address, token_symbol FROM watchlist"
-    ).fetchall()
+    if tokens_to_track is not None:
+        tokens = tokens_to_track
+    else:
+        tokens = sum_conn.execute(
+            "SELECT chain, token_address, token_symbol FROM watchlist"
+        ).fetchall()
     
     if not tokens:
         logger.info("[HOP2] watchlist 为空，跳过采集")
