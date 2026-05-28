@@ -57,12 +57,31 @@ def main():
             return
         args.verbose = True
 
-    # 仲裁
-    acc_list, dist_list = run_arbitration(all_data)
+    # ── hop2 前置动态跟踪采集 ──
+    tokens_to_track = [
+        {"chain": d.chain, "token_address": d.token_address.lower(), "token_symbol": d.token_symbol}
+        for d in all_data
+    ]
+    hop2_saved = collect_hop2_tracking(conn, scan_time, tokens_to_track)
+    logger.info(f"hop2_tracking 动态采集完成: {hop2_saved} 条")
+
+    # 从刚灌好的 hop2_tracking 表中批量读取当前快照百分比
+    hop2_map = {}
+    try:
+        for row in conn.execute("SELECT token_address, hop2_acc_pct FROM hop2_tracking WHERE scan_time = ?", [scan_time]):
+            hop2_map[row["token_address"].lower()] = row["hop2_acc_pct"] or 0
+    except Exception as _e:
+        logger.error(f"加载 hop2 映射失败: {_e}")
+
+    # 一次性完全体仲裁（出厂即获得 hop2 加分与最终裁决判定）
+    all_arbitrated = [arbitrate(d, hop2_pct=hop2_map.get(d.token_address.lower(), 0.0)) for d in all_data]
+
+    # 重新分流生成最终排行列表
+    acc_list = sorted([r for r in all_arbitrated if r.meta_verdict == "ACC"], key=lambda r: r.meta_score, reverse=True)
+    dist_list = sorted([r for r in all_arbitrated if r.meta_verdict == "DIST"], key=lambda r: r.meta_score)
     all_results = acc_list + dist_list
 
-    # 保存全部有信号代币（含 NEUTRAL）— 用于审计和趋势分析
-    all_arbitrated = [arbitrate(d) for d in all_data]
+    # 一次性保存全部完全体代币结果入库
     for r in all_arbitrated:
         save_meta_result(conn, {
             "scan_time":      scan_time,
@@ -83,13 +102,14 @@ def main():
             "unified_score":  r.unified_score,
             "whale_score":    r.whale_score,
             "cb_score":       r.cb_score,
+            "hop2_score":     r.hop2_score,
         })
 
     # ── 矛盾检测 ──
     from conflict_detector import detect_conflicts
     conflicts = detect_conflicts(all_arbitrated, all_data)
 
-    # ── 趋势分析（对比上一轮）──
+    # ── 趋势分析（对比上一轮，基于完全体数据）──
     trend = analyze_trend(conn, all_results, scan_time)
     if trend.has_prev:
         logger.info(f"趋势对比: vs {trend.prev_scan_time} | "
@@ -97,51 +117,8 @@ def main():
                      f"↑{trend.score_up} ↓{trend.score_down} →{trend.stable} "
                      f"跃变{len(trend.jumps)}")
 
-    # 更新生命周期表
+    # 更新生命周期表 (完美追踪完全体状态)
     _update_lifecycle(conn, all_results, scan_time)
-
-    # ── hop2 跟踪采集 ──
-    hop2_saved = collect_hop2_tracking(conn, scan_time)
-    logger.info(f"hop2_tracking 采集完成: {hop2_saved} 条")
-
-    # ── hop2 积分注入 (v5) ──
-    hop2_map = {}
-    try:
-        for row in conn.execute("SELECT token_address, hop2_acc_pct FROM hop2_tracking WHERE scan_time = ?", [scan_time]):
-            hop2_map[row["token_address"].lower()] = row["hop2_acc_pct"] or 0
-    except Exception:
-        pass
-    if hop2_map:
-        import config as _cfg
-        for r in all_arbitrated:
-            pct = hop2_map.get(r.token_address.lower(), 0)
-            if pct >= 0.30:
-                bonus = _cfg.HOP2_ACC_BONUS["high"]
-            elif pct >= 0.15:
-                bonus = _cfg.HOP2_ACC_BONUS["medium"]
-            else:
-                bonus = 0
-            if bonus > 0:
-                r.meta_score = round(r.meta_score + bonus, 2)
-                # 重新判定裁决
-                if r.meta_score >= _cfg.META_ACC_THRESHOLD:
-                    r.meta_verdict = "ACC"
-                logger.debug(f"  {r.token_symbol}: hop2 bonus +{bonus} → {r.meta_score}")
-        # 重新保存带 hop2 bonus 的结果
-        for r in all_arbitrated:
-            if hop2_map.get(r.token_address.lower(), 0) >= 0.15:
-                save_meta_result(conn, {
-                    "scan_time": scan_time, "chain": r.chain,
-                    "token_address": r.token_address, "token_symbol": r.token_symbol,
-                    "meta_score": r.meta_score, "meta_verdict": r.meta_verdict,
-                    "engine_hits": r.engine_hits, "master_signal": r.master_signal,
-                    "opus_verdict": r.opus_verdict, "unified_signal": r.unified_signal,
-                    "whale_level": r.whale_level, "cb_verdict": r.cb_verdict,
-                    "stage": r.stage, "master_score": r.master_score,
-                    "opus_score": r.opus_score, "unified_score": r.unified_score,
-                    "whale_score": r.whale_score, "cb_score": r.cb_score,
-                })
-        logger.info(f"hop2 积分注入: {sum(1 for p in hop2_map.values() if p >= 0.15)}/{len(hop2_map)} 代币获得加分")
 
     # 生成报告（含趋势+健康+矛盾）
     generate_report(acc_list, dist_list, len(all_data), scan_time, trend, health, conflicts)

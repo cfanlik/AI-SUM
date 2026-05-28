@@ -399,10 +399,32 @@ def calc_pump_readiness(src, sumdb, token_address, token_symbol, scan_time):
 
     # S11 静默建仓信号 (独立于 C10)
     silent_acc = False
-    if (lp_vol_pct is not None and lp_vol_pct < 5
-            and d7_score >= 2 and d8_score >= 4
-            and avg_acc_score > avg_macro_score and avg_acc_score > 0):
-        silent_acc = True
+    try:
+        # 条件A: LP 7d波动率 < 5%
+        lp_stable = lp_vol_pct is not None and lp_vol_pct < 5
+        
+        # 条件B: 合约 OI 近 3 个快照持续增长 + 最新 FR 为负
+        ft_rows = src.execute("""
+            SELECT oi_value_usd, funding_rate FROM futures_snapshots
+            WHERE token_address=? ORDER BY scan_time DESC LIMIT 3
+        """, [addr]).fetchall()
+        oi_growing = len(ft_rows) == 3 and ft_rows[0]["oi_value_usd"] > ft_rows[2]["oi_value_usd"]
+        fr_negative = len(ft_rows) > 0 and (ft_rows[0]["funding_rate"] or 0) < 0
+        
+        # 条件C: 链上吸筹均分近 4 个快照呈上升趋势
+        snap_rows = src.execute("""
+            SELECT AVG(CASE WHEN is_accumulating=1 THEN acc_score END) as avg_score
+            FROM bubblemap_holders
+            WHERE token_address=?
+            GROUP BY snapshot_time ORDER BY snapshot_time DESC LIMIT 4
+        """, [addr]).fetchall()
+        scores = [r["avg_score"] for r in snap_rows if r["avg_score"]]
+        score_rising = len(scores) >= 2 and scores[0] > scores[-1]
+        
+        if lp_stable and oi_growing and fr_negative and score_rising:
+            silent_acc = True
+    except Exception as _e:
+        print(f"  [S11] 代币 {token_symbol} 时序趋势计算异常: {_e}")
 
     return {
         "symbol": token_symbol, "addr": token_address,
