@@ -18,6 +18,27 @@ SUM_DB = "/opt/AI-SUM/select-sum.db"
 REPORT_DIR = "/opt/AI-SUM/report/history"
 
 
+def format_price(val) -> str:
+    if val is None:
+        return "—"
+    try:
+        val = float(val)
+    except (ValueError, TypeError):
+        return "—"
+    if val == 0:
+        return "0"
+    if val >= 1:
+        return f"{val:.2f}"
+    if val >= 0.01:
+        return f"{val:.4f}"
+    s = f"{val:.10f}".rstrip('0')
+    if s.endswith('.'):
+        s = s[:-1]
+    if s == "0" or float(s) == 0:
+        return f"{val:.2e}"
+    return s
+
+
 def connect(path, readonly=False):
     uri = f"file:{path}?mode=ro" if readonly else path
     c = sqlite3.connect(uri, uri=readonly)
@@ -208,7 +229,7 @@ def backtest_watchlist(src, sumdb):
         for r in detail[:20]:
             def fmt(v): return f"{v:+.1f}%" if v is not None else "—"
             sig_emoji = "💎" if r["signal"] == "DIAMOND" else "🔴"
-            lines.append(f"| {r['symbol']} | {sig_emoji} | {r['date']} | {r['days_held']}d | ${r['entry']:.4f} | {fmt(r['ret_7d'])} | {fmt(r['ret_14d'])} | {fmt(r['ret_now'])} |")
+            lines.append(f"| {r['symbol']} | {sig_emoji} | {r['date']} | {r['days_held']}d | ${format_price(r['entry'])} | {fmt(r['ret_7d'])} | {fmt(r['ret_14d'])} | {fmt(r['ret_now'])} |")
 
     lines.append("")
     return "\n".join(lines), results

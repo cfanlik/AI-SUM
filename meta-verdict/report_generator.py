@@ -19,6 +19,27 @@ STAGE_LABEL = {
 }
 
 
+def format_price(val) -> str:
+    if val is None:
+        return "—"
+    try:
+        val = float(val)
+    except (ValueError, TypeError):
+        return "—"
+    if val == 0:
+        return "0"
+    if val >= 1:
+        return f"{val:.2f}"
+    if val >= 0.01:
+        return f"{val:.4f}"
+    s = f"{val:.10f}".rstrip('0')
+    if s.endswith('.'):
+        s = s[:-1]
+    if s == "0" or float(s) == 0:
+        return f"{val:.2e}"
+    return s
+
+
 def generate_report(
     acc_list: list[MetaResult],
     dist_list: list[MetaResult],
@@ -76,7 +97,7 @@ def generate_report(
                   f"{STAGE_LABEL.get(r.stage, r.stage):<12}"
                   f"{r.master_signal:<10}{r.opus_score:>7.1f} "
                   f"{r.whale_level:<8}{r.cb_verdict:<22}"
-                  f"${r.cb_gecko_price:>9.4f} ${r.cb_vwap:>9.4f}")
+                  f"${format_price(r.cb_gecko_price):>9} ${format_price(r.cb_vwap):>9}")
 
     # ── 终端: 出货预警 ──
     if dist_list:
@@ -211,7 +232,7 @@ def _build_md(
                 f"| {i} | {r.token_symbol} | **{r.meta_score:.1f}** | {delta_str} "
                 f"| {STAGE_LABEL.get(r.stage, r.stage)} "
                 f"| {r.master_signal} | {r.opus_score:.1f} | {r.unified_signal} | {r.whale_level} "
-                f"| {r.cb_verdict} | ${r.cb_gecko_price:.4f} | {r.engine_hits} |"
+                f"| {r.cb_verdict} | ${format_price(r.cb_gecko_price)} | {r.engine_hits} |"
             )
         lines.append("")
 
@@ -226,7 +247,7 @@ def _build_md(
                 f"| {r.token_symbol} | **{r.meta_score:.1f}** "
                 f"| {STAGE_LABEL.get(r.stage, r.stage)} "
                 f"| {r.unified_signal} | {r.cb_verdict} "
-                f"| {r.cb_windfall_pct:.1f}% | ${r.cb_gecko_price:.4f} |"
+                f"| {r.cb_windfall_pct:.1f}% | ${format_price(r.cb_gecko_price)} |"
             )
         lines.append("")
 
