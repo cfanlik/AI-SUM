@@ -18,6 +18,13 @@ class TokenEngineData:
     token_address: str
     token_symbol: str = "?"
     engine_hits: int = 0
+    diff_acc_count:  int = 0
+    diff_acc_score:  float = 0.0
+    vl_ratio:        float = 0.0
+    new_acc_count:   int = 0
+    exit_acc_count:  int = 0
+    diff_stay_score: float = 0.0
+    diff_total_score:float = 0.0
 
     # master-scan
     master_signal:  str = ""
@@ -226,11 +233,12 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
         tokens[k].cb_signals      = r["triggered_signals"] or ""
         tokens[k].engine_hits += 1
 
-    # ── 价格补全: 从 gecko_market_data 读取 ──
+    # ── 价格补全与时序风险差分分析 (Gemini 3.5 降权回溯版) ──
     try:
         src_db = os.environ.get("SRC_DB_PATH", "/opt/select-coin/data/select.db")
         conn.execute(f"ATTACH '{src_db}' AS src")
         for k, t in tokens.items():
+            # 价格补全
             if t.cb_gecko_price == 0:
                 row = conn.execute(
                     "SELECT price_usd FROM src.gecko_market_data "
@@ -240,9 +248,89 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
                 ).fetchone()
                 if row:
                     t.cb_gecko_price = row[0]
+            
+            # 时序与抗稀释特征计算
+            try:
+                row_vl = conn.execute(
+                    "SELECT vl_ratio FROM src.gecko_market_data "
+                    "WHERE chain=? AND token_address=? AND vl_ratio>=0 "
+                    "ORDER BY scan_time DESC LIMIT 1", (t.chain, t.token_address)
+                ).fetchone()
+                t.vl_ratio = row_vl[0] if row_vl else 0.0
+
+                rows_snap = conn.execute("""
+                    SELECT snapshot_time, wallet_address, is_accumulating, acc_score
+                    FROM src.bubblemap_holders
+                    WHERE chain = ? AND token_address = ? AND snapshot_time IN (
+                        SELECT DISTINCT snapshot_time FROM src.bubblemap_holders
+                        WHERE chain = ? AND token_address = ?
+                        ORDER BY snapshot_time DESC LIMIT 5
+                    )
+                """, (t.chain, t.token_address, t.chain, t.token_address)).fetchall()
+
+                snaps = {}
+                for r in rows_snap:
+                    snaps.setdefault(r["snapshot_time"], {})[r["wallet_address"].lower()] = (r["is_accumulating"], r["acc_score"])
+                
+                times = sorted(snaps.keys(), reverse=True)
+                if len(times) >= 2:
+                    curr_time = times[0]
+                    prev_time = None
+                    from datetime import datetime
+                    curr_dt = datetime.strptime(curr_time, "%Y-%m-%d %H:%M:%S")
+                    
+                    # ── 时间序列向后滑动回溯 ──
+                    for t_str in times[1:]:
+                        t_dt = datetime.strptime(t_str, "%Y-%m-%d %H:%M:%S")
+                        if (curr_dt - t_dt).total_seconds() >= 600:
+                            prev_time = t_str
+                            break
+                    
+                    if not prev_time and len(times) >= 2:
+                        prev_time = times[1]
+
+                    if prev_time:
+                        curr_acc = {addr: sc for addr, (is_acc, sc) in snaps[curr_time].items() if is_acc}
+                        prev_acc = {addr: sc for addr, (is_acc, sc) in snaps[prev_time].items() if is_acc}
+                        
+                        t.diff_acc_count = len(curr_acc) - len(prev_acc)
+                        t.new_acc_count = len(set(curr_acc.keys()) - set(prev_acc.keys()))
+                        t.exit_acc_count = len(set(prev_acc.keys()) - set(curr_acc.keys()))
+                        t.diff_total_score = round(sum(curr_acc.values()) - sum(prev_acc.values()), 2)
+                        
+                        stay_addrs = set(curr_acc.keys()) & set(prev_acc.keys())
+                        if stay_addrs:
+                            curr_stay_avg = sum(curr_acc[a] for a in stay_addrs) / len(stay_addrs)
+                            prev_stay_avg = sum(prev_acc[a] for a in stay_addrs) / len(stay_addrs)
+                            t.diff_stay_score = round(curr_stay_avg - prev_stay_avg, 2)
+                        else:
+                            t.diff_stay_score = 0.0
+                            prev_stay_avg = sum(prev_acc.values()) / len(prev_acc) if prev_acc else 50.0
+
+                        # ── 门差分动态降权模型 (防稀释补丁) ──
+                        new_addrs = set(curr_acc.keys()) - set(prev_acc.keys())
+                        weighted_curr_sum = sum(curr_acc[a] for a in stay_addrs)
+                        total_weight = len(stay_addrs) * 1.0
+                        
+                        for a in new_addrs:
+                            score_a = curr_acc[a]
+                            baseline = prev_stay_avg
+                            if score_a < baseline:
+                                w_a = 0.3
+                            else:
+                                w_a = 1.0
+                            weighted_curr_sum += score_a * w_a
+                            total_weight += w_a
+                            
+                        anti_dilution_curr_avg = (weighted_curr_sum / total_weight) if total_weight > 0 else 0.0
+                        prev_avg = sum(prev_acc.values()) / len(prev_acc) if prev_acc else 0.0
+                        t.diff_acc_score = round(anti_dilution_curr_avg - prev_avg, 2)
+            except Exception as _fe:
+                logger.debug("token time-series analysis failed: %s", _fe)
+
         conn.execute("DETACH src")
     except Exception as _e:
-        logger.warning(f"价格补全失败: {_e}")
+        logger.warning(f"价格补全与时序分析失败: {_e}")
 
     return list(tokens.values())
 
@@ -257,6 +345,7 @@ def save_meta_result(conn: sqlite3.Connection, result: dict):
             token_address  TEXT NOT NULL,
             token_symbol   TEXT,
             meta_score     REAL DEFAULT 0,
+            meta_score_smooth REAL DEFAULT 0,
             meta_verdict   TEXT DEFAULT 'NEUTRAL',
             engine_hits    INTEGER DEFAULT 0,
             master_signal  TEXT DEFAULT '',
@@ -274,12 +363,18 @@ def save_meta_result(conn: sqlite3.Connection, result: dict):
             UNIQUE(chain, token_address, scan_time)
         )
     """)
+    # 防御性 Alter 数据库增加 smoothed 分数物理字段，防老表崩溃
+    try:
+        conn.execute("ALTER TABLE meta_snapshots ADD COLUMN meta_score_smooth REAL DEFAULT 0")
+    except Exception:
+        pass
+        
     conn.execute("""
         INSERT OR REPLACE INTO meta_snapshots
-        (scan_time, chain, token_address, token_symbol, meta_score, meta_verdict,
+        (scan_time, chain, token_address, token_symbol, meta_score, meta_score_smooth, meta_verdict,
          engine_hits, master_signal, opus_verdict, unified_signal, whale_level, cb_verdict, stage,
          master_score, opus_score, unified_score, whale_score, cb_score, hop2_score)
-        VALUES (:scan_time, :chain, :token_address, :token_symbol, :meta_score, :meta_verdict,
+        VALUES (:scan_time, :chain, :token_address, :token_symbol, :meta_score, :meta_score_smooth, :meta_verdict,
                 :engine_hits, :master_signal, :opus_verdict, :unified_signal, :whale_level,
                 :cb_verdict, :stage,
                 :master_score, :opus_score, :unified_score, :whale_score, :cb_score, :hop2_score)
