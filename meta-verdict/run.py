@@ -74,7 +74,7 @@ def main():
         logger.error(f"加载 hop2 映射失败: {_e}")
 
     # 一次性完全体仲裁（出厂即获得 hop2 加分与最终裁决判定）
-    all_arbitrated = [arbitrate(d, hop2_pct=hop2_map.get(d.token_address.lower(), 0.0)) for d in all_data]
+    all_arbitrated = [arbitrate(d, hop2_pct=hop2_map.get(d.token_address.lower(), 0.0), conn=conn, scan_time=scan_time) for d in all_data]
 
     # 重新分流生成最终排行列表
     acc_list = sorted([r for r in all_arbitrated if r.meta_verdict == "ACC"], key=lambda r: r.meta_score, reverse=True)
@@ -89,6 +89,7 @@ def main():
             "token_address":  r.token_address,
             "token_symbol":   r.token_symbol,
             "meta_score":     r.meta_score,
+            "meta_score_smooth": r.meta_score_smooth,
             "meta_verdict":   r.meta_verdict,
             "engine_hits":    r.engine_hits,
             "master_signal":  r.master_signal,

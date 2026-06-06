@@ -5,6 +5,7 @@ meta-verdict 仲裁引擎
 from __future__ import annotations
 from dataclasses import dataclass, field
 import config
+import sqlite3
 from collector import TokenEngineData
 
 
@@ -15,6 +16,7 @@ class MetaResult:
     token_symbol: str
 
     meta_score: float = 0.0
+    meta_score_smooth: float = 0.0
     meta_verdict: str = "NEUTRAL"   # ACC / DIST / NEUTRAL
     engine_hits: int = 0
 
@@ -45,7 +47,7 @@ class MetaResult:
     stage: str = ""   # ACCUMULATING / CONTROLLED / DISTRIBUTING / WATCHLIST / NEUTRAL
 
 
-def arbitrate(data: TokenEngineData, hop2_pct: float = 0.0) -> MetaResult:
+def arbitrate(data: TokenEngineData, hop2_pct: float = 0.0, conn: sqlite3.Connection = None, scan_time: str = None) -> MetaResult:
     """5 引擎加权积分仲裁"""
     r = MetaResult(
         chain=data.chain,
@@ -121,6 +123,60 @@ def arbitrate(data: TokenEngineData, hop2_pct: float = 0.0) -> MetaResult:
         r.master_score + r.opus_score + r.unified_score + r.whale_score + r.cb_score + r.hop2_score, 2
     )
 
+    # ── EWMA_3 不对称平滑分 (防暴雷滞后) ──
+    history_scores = []
+    if conn is not None and scan_time:
+        try:
+            cursor = conn.execute("""
+                SELECT meta_score FROM meta_snapshots
+                WHERE chain = ? AND token_address = ? AND scan_time < ?
+                ORDER BY scan_time DESC LIMIT 2
+            """, (data.chain, data.token_address.lower(), scan_time))
+            history_scores = [row[0] for row in cursor.fetchall()]
+        except Exception:
+            pass
+
+    current_score = r.meta_score
+    r.meta_score_smooth = current_score
+
+    if len(history_scores) >= 1:
+        prev_score = history_scores[0]
+        # 不对称平滑熔断：跌幅超 1.5 分（约跌 20% 以上）则直接熔断平滑以防预警滞后
+        is_sudden_drop = (current_score < prev_score) and ((prev_score - current_score) >= 1.5)
+        
+        if not is_sudden_drop:
+            if len(history_scores) >= 2:
+                r.meta_score_smooth = round(0.6 * current_score + 0.3 * history_scores[0] + 0.1 * history_scores[1], 2)
+            else:
+                r.meta_score_smooth = round((0.6 * current_score + 0.3 * history_scores[0]) / 0.9, 2)
+        else:
+            r.meta_score_smooth = current_score
+
+    # ── 假说2: 加速吸筹防御性共振判定与加分 ──
+    is_accelerating = (
+        (data.diff_acc_count >= 5 or data.new_acc_count >= 5)
+        and (data.diff_acc_score >= 3.0 or data.diff_stay_score >= 2.0 or data.diff_total_score >= 200)
+        and data.vl_ratio >= 5.0
+    )
+    if is_accelerating:
+        r.meta_score = round(r.meta_score + 1.5, 2)
+        r.meta_score_smooth = round(r.meta_score_smooth + 1.5, 2)
+
+    # ── 洗盘换手惩罚 (防御情况1) ──
+    total_acc = (data.diff_acc_count + data.new_acc_count)  # 估算当前吸筹数
+    turnover_rate = data.new_acc_count / total_acc if total_acc > 0 else 0.0
+    
+    is_wash_trading = (
+        data.new_acc_count >= 2
+        and data.diff_acc_count <= 0
+        and turnover_rate >= 0.20
+        and total_acc >= 3
+    )
+
+    if is_wash_trading:
+        r.meta_score = round(r.meta_score - 1.5, 2)
+        r.meta_score_smooth = round(r.meta_score_smooth - 1.5, 2)
+
     # ── 裁决 ──
     if r.meta_score >= config.META_ACC_THRESHOLD:
         r.meta_verdict = "ACC"
@@ -130,13 +186,19 @@ def arbitrate(data: TokenEngineData, hop2_pct: float = 0.0) -> MetaResult:
         r.meta_verdict = "NEUTRAL"
 
     # ── 生命周期阶段 ──
-    r.stage = _infer_stage(r, data)
+    r.stage = _infer_stage(r, data, is_accelerating, is_wash_trading)
 
     return r
 
 
-def _infer_stage(r: MetaResult, data: TokenEngineData) -> str:
+def _infer_stage(r: MetaResult, data: TokenEngineData, is_accelerating: bool = False, is_wash_trading: bool = False) -> str:
     """推断代币生命周期阶段"""
+    if is_wash_trading:
+        return "DISTRIBUTING"
+
+    if is_accelerating:
+        return "ACC_ACCELERATING"
+
     # 极度控盘：master DIAMOND + whale HIGH
     if r.master_signal == "DIAMOND" and r.whale_level == "HIGH":
         return "CONTROLLED"
