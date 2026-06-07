@@ -30,19 +30,19 @@ def connect(path, readonly=False):
 
 
 def get_acc_concentration_score(concentration):
-    """D3 评分：真实用户吸筹浓度分 (满分 14 分)"""
+    """D3 评分：真实用户吸筹浓度分 (满分 15 分)"""
     if concentration is None:
         return 0
     if concentration >= 40.0:
-        return 14
+        return 15
     elif concentration >= 25.0:
-        return 11
+        return 12
     elif concentration >= 15.0:
-        return 8
+        return 9
     elif concentration >= 8.0:
-        return 5
+        return 6
     elif concentration >= 3.0:
-        return 2
+        return 3
     return 0
 
 
@@ -71,15 +71,33 @@ def get_macro_micro_score(avg_acc_score, avg_macro_score):
     return max(0, min(6, score))
 
 
-def get_pool_stability_score(src, token_address):
-    """D10 评分：Pool 稳定性 (满分 7 分)"""
+def get_pool_stability_score(src, token_address, scan_time=None):
+    """D10 评分：Pool 稳定性 (满分 8 分)"""
     week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
-    rows = src.execute("""
-        SELECT reserve_usd, buys_24h, sells_24h
-        FROM gecko_market_data
-        WHERE token_address = ? AND scan_time >= ?
-        ORDER BY scan_time DESC
-    """, [token_address, week_ago]).fetchall()
+    if scan_time:
+        # 从 scan_time 解析并锁定 7 天历史区间
+        from datetime import datetime as dt
+        try:
+            dt_scan = dt.fromisoformat(scan_time.replace("+00:00", "").replace("Z", ""))
+        except Exception:
+            try:
+                dt_scan = dt.strptime(scan_time, "%Y-%m-%d %H:%M:%S")
+            except Exception:
+                dt_scan = dt.now()
+        week_ago = (dt_scan - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+        rows = src.execute("""
+            SELECT reserve_usd, buys_24h, sells_24h
+            FROM gecko_market_data
+            WHERE token_address = ? AND scan_time >= ? AND scan_time <= ?
+            ORDER BY scan_time DESC
+        """, [token_address, week_ago, scan_time]).fetchall()
+    else:
+        rows = src.execute("""
+            SELECT reserve_usd, buys_24h, sells_24h
+            FROM gecko_market_data
+            WHERE token_address = ? AND scan_time >= ?
+            ORDER BY scan_time DESC
+        """, [token_address, week_ago]).fetchall()
 
     if not rows:
         return 0, None, 0, 0
@@ -95,10 +113,12 @@ def get_pool_stability_score(src, token_address):
         r_max, r_min = max(reserves), min(reserves)
         lp_vol_pct = round((r_max - r_min) / r_max * 100, 1) if r_max > 0 else 100
         if lp_vol_pct < 3:
-            lp_vol_score = 3
+            lp_vol_score = 4
         elif lp_vol_pct < 8:
-            lp_vol_score = 2
+            lp_vol_score = 3
         elif lp_vol_pct < 15:
+            lp_vol_score = 2
+        elif lp_vol_pct < 25:
             lp_vol_score = 1
 
     lp_size_score = 0
@@ -116,17 +136,25 @@ def get_pool_stability_score(src, token_address):
     return lp_vol_score + lp_size_score + activity_score, lp_vol_pct, reserve_latest, txns
 
 
-def get_dex_lp_resonance_score(src, token_address):
+def get_dex_lp_resonance_score(src, token_address, scan_time=None):
     """
     D11 评分：DEX LP 深度波动共振 (满分 5 分)
     直接读取外挂分析器计算落库在 pool_volatility_snapshots 中的最新多尺度数据。
     """
-    row = src.execute("""
-        SELECT lp_chg_24h, add_ratio_24h, whale_share_24h, a5_triggered, s5_triggered, reason
-        FROM pool_volatility_snapshots
-        WHERE token_address = ?
-        ORDER BY scan_time DESC LIMIT 1
-    """, [token_address]).fetchone()
+    if scan_time:
+        row = src.execute("""
+            SELECT lp_chg_24h, add_ratio_24h, whale_share_24h, a5_triggered, s5_triggered, reason
+            FROM pool_volatility_snapshots
+            WHERE token_address = ? AND scan_time <= ?
+            ORDER BY scan_time DESC LIMIT 1
+        """, [token_address, scan_time]).fetchone()
+    else:
+        row = src.execute("""
+            SELECT lp_chg_24h, add_ratio_24h, whale_share_24h, a5_triggered, s5_triggered, reason
+            FROM pool_volatility_snapshots
+            WHERE token_address = ?
+            ORDER BY scan_time DESC LIMIT 1
+        """, [token_address]).fetchone()
     
     if not row:
         return 0, 0.0, 0.0, 0.0, False, False, ""
@@ -154,12 +182,12 @@ def calc_pump_readiness(src, sumdb, token_address, token_symbol, scan_time):
     """计算单币 11 维拉升指数 (满分 100)"""
     addr = token_address.lower() if token_address else ""
 
-    # D1 & D2: gecko 交易量与 LP
+    # D1 & D2: gecko 交易量与 LP (限定 scan_time 实现回测对齐)
     latest_gecko = src.execute("""
         SELECT volume_24h, reserve_usd, price_change_24h
-        FROM gecko_market_data WHERE token_address = ?
+        FROM gecko_market_data WHERE token_address = ? AND scan_time <= ?
         ORDER BY scan_time DESC LIMIT 1
-    """, [token_address]).fetchone()
+    """, [token_address, scan_time]).fetchone()
 
     d1_score = 0
     d2_score = 0
@@ -173,43 +201,43 @@ def calc_pump_readiness(src, sumdb, token_address, token_symbol, scan_time):
         reserve = latest_gecko["reserve_usd"] or 0
         price_chg = latest_gecko["price_change_24h"] or 0
 
-        # D2 LP 规模 (10分)
+        # D2 LP 规模 (12分)
         if reserve >= 500000:
-            d2_score = 10
+            d2_score = 12
         elif reserve >= 100000:
-            d2_score = 8
+            d2_score = 9
         elif reserve >= 50000:
-            d2_score = 5
+            d2_score = 6
         elif reserve >= 10000:
-            d2_score = 2
+            d2_score = 3
 
         # 7d 均量
         avg7 = src.execute("""
             SELECT AVG(volume_24h) FROM (
                 SELECT volume_24h FROM gecko_market_data
-                WHERE token_address = ? AND volume_24h > 0
+                WHERE token_address = ? AND volume_24h > 0 AND scan_time <= ?
                 ORDER BY scan_time DESC LIMIT 14
             )
-        """, [token_address]).fetchone()[0] or 0
+        """, [token_address, scan_time]).fetchone()[0] or 0
 
         if avg7 > 0:
             vol_ratio = vol_24h / avg7
-            # D1 量缩 (13分)
+            # D1 量缩 (15分)
             if vol_24h < 1000:
                 d1_score = 0
             elif vol_ratio <= 0.3:
-                d1_score = 13
+                d1_score = 15
             elif vol_ratio <= 0.6:
-                d1_score = 9
+                d1_score = 11
             elif vol_ratio <= 1.0:
-                d1_score = 6
+                d1_score = 7
             elif vol_ratio <= 1.5:
-                d1_score = 3
+                d1_score = 4
 
-    # D3 & D6: 真实浓度与大盘/精英双轨制
+    # D3 & D6: 真实浓度与大盘/精英双轨制 (限定 snapshot_time <= scan_time)
     latest_bm = src.execute("""
-        SELECT MAX(snapshot_time) FROM bubblemap_holders WHERE token_address = ?
-    """, [token_address]).fetchone()[0]
+        SELECT MAX(snapshot_time) FROM bubblemap_holders WHERE token_address = ? AND snapshot_time <= ?
+    """, [token_address, scan_time]).fetchone()[0]
 
     concentration = 0
     d3_score = 0
@@ -251,13 +279,13 @@ def calc_pump_readiness(src, sumdb, token_address, token_symbol, scan_time):
             associated_ratio = totals["associated_ratio"] or 0.0
             
             if control_level in ("A", "B"):
-                d3_score = 14
+                d3_score = 15
 
     # 爆破计算
     underwater_ratio = 0.0
     latest_gmgn = src.execute("""
-        SELECT MAX(snapshot_time) FROM gmgn_holders WHERE token_address = ?
-    """, [token_address]).fetchone()[0]
+        SELECT MAX(snapshot_time) FROM gmgn_holders WHERE token_address = ? AND snapshot_time <= ?
+    """, [token_address, scan_time]).fetchone()[0]
     
     if latest_gmgn:
         gmgn_totals = src.execute("""
@@ -322,12 +350,12 @@ def calc_pump_readiness(src, sumdb, token_address, token_symbol, scan_time):
             elif retention_7d >= 60:
                 d5_score = 2
 
-    # D7, D8, D9: futures
+    # D7, D8, D9: futures (限定 scan_time 时间)
     latest_ft = src.execute("""
         SELECT oi_value_usd, oi_change_24h, funding_rate, long_short_ratio
-        FROM futures_snapshots WHERE token_address = ?
+        FROM futures_snapshots WHERE token_address = ? AND scan_time <= ?
         ORDER BY scan_time DESC LIMIT 1
-    """, [token_address]).fetchone()
+    """, [token_address, scan_time]).fetchone()
 
     d7_score = 0
     d8_score = 0
@@ -343,24 +371,24 @@ def calc_pump_readiness(src, sumdb, token_address, token_symbol, scan_time):
         fr = latest_ft["funding_rate"] or 0
         ls = latest_ft["long_short_ratio"] or 0
 
-        if oi_chg > 0.15 and vol_ratio <= 0.3 and d1_score == 13:
-            d1_score = 6
+        if oi_chg > 0.15 and vol_ratio <= 0.3 and d1_score == 15:
+            d1_score = 7
 
-        # D7 OI变化 (10分)
+        # D7 OI变化 (12分)
         if oi_usd >= 1000000:
             if oi_chg >= 0.10:
-                d7_score = 10
+                d7_score = 12
             elif oi_chg >= 0.03:
-                d7_score = 7
+                d7_score = 8
             elif oi_chg >= -0.05:
-                d7_score = 3
+                d7_score = 4
         else:
             if oi_chg >= 0.10:
-                d7_score = 5
+                d7_score = 6
             elif oi_chg >= 0.03:
-                d7_score = 3
+                d7_score = 4
             elif oi_chg >= -0.05:
-                d7_score = 1
+                d7_score = 2
 
         # D8 FR (7分)
         if fr <= -0.0003:
@@ -380,11 +408,11 @@ def calc_pump_readiness(src, sumdb, token_address, token_symbol, scan_time):
         elif ls <= 1.2:
             d9_score = 2
 
-    # D10 Pool 稳定性 (7分)
-    d10_score, lp_vol_pct, _, d10_txns = get_pool_stability_score(src, token_address)
+    # D10 Pool 稳定性 (8分)
+    d10_score, lp_vol_pct, _, d10_txns = get_pool_stability_score(src, token_address, scan_time)
 
     # 🛠️ 融合同步：D11 DEX LP 波动共振得分 (5分)
-    d11_score, lp_chg_24h, add_ratio_24h, whale_share_24h, a5_triggered, s5_triggered, d11_reason = get_dex_lp_resonance_score(src, token_address)
+    d11_score, lp_chg_24h, add_ratio_24h, whale_share_24h, a5_triggered, s5_triggered, d11_reason = get_dex_lp_resonance_score(src, token_address, scan_time)
 
     total_score = (d1_score + d2_score + d3_score + d4_score + d5_score
                    + d6_score + d7_score + d8_score + d9_score + d10_score + d11_score)
@@ -606,9 +634,9 @@ def generate_report(scan_time, results):
 
     lines.append("## 📖 报表说明 (Tips)")
     lines.append("- **pump**: 拉升就绪评分 (满分 100). `IMMINENT` ≥70 (🔴) | `READY` ≥50 (🟡) | `WATCH` ≥35 (🟢)")
-    lines.append("- **D1-D6**: 链上评分 (合计 56 分). D1量缩(13) | D2 LP规模(10) | D3吸筹浓度(14) | D4 Meta持续(9) | D5留存(6) | D6双轨(6)")
-    lines.append("- **D7-D9**: 合约评分 (合计 22 分). D7 OI变化(10) | D8 资金费率(7) | D9 多空比(5)")
-    lines.append("- **D10**: Pool 稳定性 (7 分). LP 7d波动率(3) + LP规模(2) + 交易活跃度(2)")
+    lines.append("- **D1-D6**: 链上评分 (合计 66 分). D1量缩(15) | D2 LP规模(12) | D3吸筹浓度(15) | D4 Meta持续(9) | D5留存(6) | D6双轨(6)")
+    lines.append("- **D7-D9**: 合约评分 (合计 24 分). D7 OI变化(12) | D8 资金费率(7) | D9 多空比(5)")
+    lines.append("- **D10**: Pool 稳定性 (8 分). LP 7d波动率(4) + LP规模(2) + 交易活跃度(2)")
     lines.append("- **D11**: DEX LP 波动共振 (5 分). 外挂分析器提取的 24h 时序差分与大户流向评分")
     lines.append("- **DEX LP (24h)**: 过去 24 小时 LP 变动水位率")
     lines.append("- **Add%**: 24 小时内流动性添加金额占总 LP 变化的比例")
