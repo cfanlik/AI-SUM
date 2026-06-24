@@ -605,7 +605,7 @@ def save_pump_alerts(sumdb, scan_time, results):
              d7_score, d8_score, d9_score, d10_score, d11_score,
              concentration, vol_ratio, oi_usd, oi_chg, fr, ls, reserve_usd, silent_acc,
              underwater_ratio, control_level, stealth_pump, high_leverage_squeeze)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             scan_time, r["symbol"], r["addr"], r["score"], r["level"],
             r["d1"], r["d2"], r["d3"], r["d4"], r["d5"], r["d6"],
