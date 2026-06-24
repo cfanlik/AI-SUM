@@ -286,6 +286,7 @@ cd /opt/AI-SUM && python3 meta-verdict/history_report.py
 ## 版本历史
 
 | 版本 | 日期 | 关键变更 |
+| **嵌套拓扑着色对齐** | **2026-06-02** | **主链/DEX 多层嵌套共振网纠错自洽**：升级精准着色匹配机制，注入子 boss 嵌套拓扑过滤，消解多源庄控打款遮蔽以精准归位成员编号。 |
 |------|------|----------|
 | **故障修复与安全门控** | **2026-05-20** | **回测落库修复与交易量安全门控**：修复 `save_token_history` 参数绑定遗漏 Bug，恢复日常回测数据落库；在 `pump_detector` 的 D1 评分中引入 **Volume Guard（绝对交易量安全门控）**（24h量<$1,000时强制给0分），杜绝死币零交易量缩误判。 |
 | **双轨与浓度升级** | **2026-05-19** | **真实用户吸筹浓度与大盘/精英双轨评分**：重新定义吸筹占比为排除交易所及多重合约后的“真实吸筹浓度”并精细化6档打分（D3）；D6均分演进为“精英均分+大盘门控”双轨设计；`history_report` 看板升级为浓度和大盘/精英双轨指标展示，`token_history` 增加 `concentration`, `macro_score`, `micro_score` 落库。 |
@@ -372,18 +373,18 @@ cd /opt/AI-SUM && python3 meta-verdict/history_report.py
 ## pump_detector v2 — 拉升前兆引擎 (2026-05-10, 双轨与浓度升级 2026-05-19)
 
 ### 功能
-从 BubbleMap + Gecko + Meta + TokenHistory + Futures 五表计算 9 维 pump_readiness 评分，分级输出告警。
+从 BubbleMap + Gecko + Meta + TokenHistory + Futures 五表计算 11 维 pump_readiness 评分，分级输出告警。
 
-### 9 维评分 (满分128)
+### 11 维评分 (满分100)
 
 | 维度 | 满分 | 数据源 | 说明 |
 |------|------|--------|------|
-| D1 量缩程度 | 20 | gecko volume_24h vs 7d均量 | DEX量缩+OI暴增→降分(过滤资金搬家假量缩) |
-| D2 LP稳定性 | 20 | gecko reserve_usd | LP≥$500K得20分 |
-| D3 真实吸筹浓度 | 20 | bubblemap (acc/real_users) | 排除交易所/多重合约噪点后的真实用户吸筹浓度。浓度≥40.0%得20分（35天时序p90水位） |
-| D4 Meta持续 | 15 | consec_acc + meta_score | 连续ACC≥25轮且浓度足够得15分 |
-| D5 留存率 | 10 | retention_7d | ≥95%得10分 |
-| D6 精英均分+大盘门控 | 10 | avg_acc_score + avg_macro_score | 精英主力均分≥80得10分。引入大盘分门控：大盘分<44扣3分；大盘分≥53溢价奖2分（D6上限10分，防溢出） |
+| D1 量缩程度 | 15 | gecko volume_24h vs 7d均量 | DEX量缩+OI暴增→降分(过滤资金搬家假量缩) |
+| D2 LP规模 | 12 | gecko reserve_usd | LP≥$500K得12分 |
+| D3 真实吸筹浓度 | 15 | bubblemap (acc/real_users) | 排除交易所/多重合约噪点后的真实用户吸筹浓度。浓度≥40.0%得15分（35天时序p90水位） |
+| D4 Meta持续 | 9 | consec_acc + meta_score | 连续ACC≥25轮且浓度足够得9分 |
+| D5 留存率 | 6 | retention_7d | ≥95%得6分 |
+| D6 精英均分+大盘门控 | 6 | avg_acc_score + avg_macro_score | 精英主力均分≥80得6分。引入大盘分门控：大盘分<44扣1分；大盘分≥53溢价奖1分（D6上限6分，防溢出） |
 
 ### 🚀 2026-05-19 双轨制与真实吸筹浓度升级说明
 - **真实用户吸筹浓度**：重构 D3 分母为非交易所、非DEX、非合约的真实独立地址持仓数。精细区间阈值为：`[3%, 8%, 15%, 25%, 40%]`，彻底规避假吸筹噪音引起的评分压制。
@@ -391,17 +392,19 @@ cd /opt/AI-SUM && python3 meta-verdict/history_report.py
   - **精英均分 (avg_acc_score)**：仅统计已被打上 ACC 吸筹标记的核心主力钱包之均分，用于衡量最主力吸筹力量的质量。
   - **大盘分 (avg_macro_score)**：统计所有非 CEX/DEX/合约的独立地址之均分，客观描绘项目的整体大盘持仓基本面质量。
   - **D6门控融合**：D6 分数在继承精英主力均分打分的同时，采用大盘分百分位（低估<44, 强势≥53）对底部分数实施升降级修正，极大强化了评分面对全盘大户共识度时的响应敏锐度。
-| D7 OI变化 | 15 | futures oi_change_24h | OI增+价平=暗中建仓, OI<$1M减半 |
-| D8 资金费率(FR) | 10 | futures funding_rate | 负FR=空头拥挤→轧空前兆, FR<-0.03%得10分 |
-| D9 多空比(LS) | 8 | futures long_short_ratio | L/S<0.6=散户重度做空→强反指看涨 |
+| D7 OI变化 | 12 | futures oi_change_24h | OI增+价平=暗中建仓, OI<$1M减半 |
+| D8 资金费率(7) | 7 | futures funding_rate | 负FR=空头拥挤→轧空前兆, FR<-0.03%得7分 |
+| D9 多空比(LS) | 5 | futures long_short_ratio | L/S<0.6=散户重度做空→强反指看涨 |
+| D10 Pool稳定性 | 8 | gecko_market_data | LP 7d波动率极稳(4分) + LP规模(2分) + 交易活跃度(2分)，合计 8 分 |
+| D11 DEX LP共振 | 5 | pool_volatility_snapshots | 24h LP时序差分与做市注入(A5)共振打分，最高 5 分 |
 
 ### 告警分级 (v2 阈值)
 | 级别 | 阈值 | 说明 |
 |------|------|------|
-| 🔴 IMMINENT | ≥90 | 即将拉升 |
-| 🟡 READY_VOL_SHRINK | ≥65 且 vol_ratio<0.3 | 量缩就绪 |
-| 🟡 READY | ≥65 | 就绪 |
-| 🟢 WATCH | ≥45 | 观察 |
+| 🔴 IMMINENT | ≥70 | 即将拉升 |
+| 🟡 READY_VOL_SHRINK | ≥50 且 vol_ratio<0.3 | 量缩就绪 |
+| 🟡 READY | ≥50 | 就绪 |
+| 🟢 WATCH | ≥35 | 观察 |
 
 ### 报告格式
 - IMMINENT 和 READY 使用统一 13 列表格: 代币/pump/D1-D6/D7 OI/D8 FR/D9 LS/吸筹%/vol缩比/OI($)/OI变化/FR/L/S/LP

@@ -25,6 +25,27 @@ def conn_rw(path):
     c.row_factory = sqlite3.Row
     return c
 
+
+def format_price(val) -> str:
+    if val is None:
+        return "—"
+    try:
+        val = float(val)
+    except (ValueError, TypeError):
+        return "—"
+    if val == 0:
+        return "0"
+    if val >= 1:
+        return f"{val:.2f}"
+    if val >= 0.01:
+        return f"{val:.4f}"
+    s = f"{val:.10f}".rstrip('0')
+    if s.endswith('.'):
+        s = s[:-1]
+    if s == "0" or float(s) == 0:
+        return f"{val:.2e}"
+    return s
+
 # ═══ W1: BTC Beta ═══
 def w1_btc_beta(sumdb, srcdb, mkt, start, end):
     lines = ["## 📊 W1: BTC Beta 关联分析\n"]
@@ -137,7 +158,7 @@ def w4_portfolio(sumdb, srcdb, start, end):
     lines.append("| 代币 | 入场价 | 当前价 | 收益 |")
     lines.append("|------|--------|--------|------|")
     for p in sorted(positions, key=lambda x: -x["ret"])[:10]:
-        lines.append(f"| {p['sym']} | ${p['entry']:.4f} | ${p['exit']:.4f} | {p['ret']:+.1f}% |")
+        lines.append(f"| {p['sym']} | ${format_price(p['entry'])} | ${format_price(p['exit'])} | {p['ret']:+.1f}% |")
     return "\n".join(lines)
 
 # ═══ W5: 合约-现货分歧 ═══

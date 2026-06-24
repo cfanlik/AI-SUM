@@ -23,13 +23,13 @@ import config
 
 # 权重定义
 WEIGHTS = {
-    "A1": 8, "A2": 5, "A3": 4, "A4": 5,   # ACC total=22
-    "D1": 5, "D2": 4, "D3": 6,              # DIST total=15
-    "S1": 5, "S2": 4, "S3": 2,              # STRUCT total=11
+    "A1": 8, "A2": 5, "A3": 4, "A4": 5, "A5": 4,   # ACC total=26 (新增 A5)
+    "D1": 5, "D2": 4, "D3": 6,                       # DIST total=15
+    "S1": 5, "S2": 4, "S3": 2, "S5": 5,              # STRUCT total=16 (新增 S5)
 }
-ACC_TOTAL = WEIGHTS["A1"] + WEIGHTS["A2"] + WEIGHTS["A3"] + WEIGHTS["A4"]  # 22
+ACC_TOTAL = WEIGHTS["A1"] + WEIGHTS["A2"] + WEIGHTS["A3"] + WEIGHTS["A4"] + WEIGHTS["A5"]  # 26
 DIST_TOTAL = WEIGHTS["D1"] + WEIGHTS["D2"] + WEIGHTS["D3"]                 # 15
-STRUCT_TOTAL = WEIGHTS["S1"] + WEIGHTS["S2"] + WEIGHTS["S3"]               # 11
+STRUCT_TOTAL = WEIGHTS["S1"] + WEIGHTS["S2"] + WEIGHTS["S3"] + WEIGHTS["S5"]               # 16
 
 
 @dataclass
@@ -120,6 +120,20 @@ def evaluate(
         r.triggered.append("A4(CEX流出)")
         r.signal_details["A4"] = cex["a4"]
 
+    # 🔗 外挂注入: A5 DEX LP 强庄做市信号 (A5, 4分)
+    try:
+        import sys
+        if "/opt/select-coin" not in sys.path:
+            sys.path.insert(0, "/opt/select-coin")
+        from onchain import dex_pool_analyzer
+        lp_signals = dex_pool_analyzer.generate_resonance_signals(r.chain, r.token_address, r.pool_address)
+        if lp_signals.get("A5_triggered"):
+            acc_hit += WEIGHTS["A5"]
+            r.triggered.append("A5(DEX LP注入)")
+            r.signal_details["A5"] = lp_signals["metrics"]
+    except Exception as e:
+        pass
+
     r.acc_score = round(acc_hit / ACC_TOTAL * 100, 1)
 
     # ── DIST 维度 ──
@@ -165,6 +179,20 @@ def evaluate(
     if market.get("s4_vl_triggered"):
         r.triggered.append(f"S4(V/L={market.get('vl_ratio', 0)})")
         r.signal_details["S4"] = {"vl_ratio": market.get("vl_ratio", 0)}
+
+    # 🔗 外挂注入: S5 DEX LP 恶意撤池抽毯风险 (S5, 5分)
+    try:
+        import sys
+        if "/opt/select-coin" not in sys.path:
+            sys.path.insert(0, "/opt/select-coin")
+        from onchain import dex_pool_analyzer
+        lp_signals = dex_pool_analyzer.generate_resonance_signals(r.chain, r.token_address, r.pool_address)
+        if lp_signals.get("S5_triggered"):
+            struct_hit += WEIGHTS["S5"]
+            r.triggered.append("S5(DEX LP流失风险)")
+            r.signal_details["S5"] = lp_signals["metrics"]
+    except Exception as e:
+        pass
 
     r.struct_risk = round(struct_hit / STRUCT_TOTAL * 100, 1)
 
