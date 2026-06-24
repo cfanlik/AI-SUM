@@ -84,11 +84,10 @@ def get_macro_micro_score(avg_acc_score, avg_macro_score):
 def get_pool_stability_score(src, token_address):
     """
     D10 评分：Pool 稳定性 (满分 8 分)
-    基于 gecko_market_data 近 7 天 reserve_usd 时序数据。
+    基于 gecko_market_data 近 7 天 reserve_usd 时序 data。
 
     子项:
-      - LP 7d 波动率 (max 4): 极稳(<3%)→4, 稳(<8%)→3, 正常(<15%)→2, 波动(<25%)→1
-      - LP 规模 (max 2): ≥$500K→2, ≥$100K→1
+      - LP 7d 波动率 (max 6): 极稳(<3%)→6, 稳(<8%)→5, 正常(<15%)→3, 波动(<25%)→1
       - 交易活跃度 (max 2): ≥500txns→2, ≥100→1
 
     返回: (d10_score, lp_volatility_pct, reserve_latest, txns_24h)
@@ -109,27 +108,20 @@ def get_pool_stability_score(src, token_address):
     reserve_latest = latest["reserve_usd"] or 0
     txns = (latest["buys_24h"] or 0) + (latest["sells_24h"] or 0)
 
-    # 子项1: LP 波动率 (max 4)
+    # 子项1: LP 波动率 (max 6)（已移除 LP 规模 2 分重复计权，转移至此项）
     lp_vol_score = 0
     lp_vol_pct = None
     if len(reserves) >= 2:
         r_max, r_min = max(reserves), min(reserves)
         lp_vol_pct = round((r_max - r_min) / r_max * 100, 1) if r_max > 0 else 100
         if lp_vol_pct < 3:
-            lp_vol_score = 4
+            lp_vol_score = 6
         elif lp_vol_pct < 8:
-            lp_vol_score = 3
+            lp_vol_score = 5
         elif lp_vol_pct < 15:
-            lp_vol_score = 2
+            lp_vol_score = 3
         elif lp_vol_pct < 25:
             lp_vol_score = 1
-
-    # 子项2: LP 规模 (max 2)
-    lp_size_score = 0
-    if reserve_latest >= 500_000:
-        lp_size_score = 2
-    elif reserve_latest >= 100_000:
-        lp_size_score = 1
 
     # 子项3: 交易活跃度 (max 2)
     activity_score = 0
@@ -138,7 +130,7 @@ def get_pool_stability_score(src, token_address):
     elif txns >= 100:
         activity_score = 1
 
-    d10_total = lp_vol_score + lp_size_score + activity_score
+    d10_total = lp_vol_score + activity_score
     return d10_total, lp_vol_pct, reserve_latest, txns
 
 
@@ -162,7 +154,8 @@ def calc_pump_readiness(src, sumdb, token_address, token_symbol, scan_time):
 
     if latest_gecko:
         vol_24h = latest_gecko["volume_24h"] or 0
-        reserve = latest_gecko["reserve_usd"] or 0
+        # 防御性上限截断（防范 RLS 等 21.8 亿 LP 数据污染）
+        reserve = min(latest_gecko["reserve_usd"] or 0, 50_000_000)
         price_chg = latest_gecko["price_change_24h"] or 0
 
         # D2 LP规模 (12分)
@@ -197,6 +190,14 @@ def calc_pump_readiness(src, sumdb, token_address, token_symbol, scan_time):
                 d1_score = 7
             elif vol_ratio <= 1.5:
                 d1_score = 4
+
+            # 激活 price_chg 作为 D1 量缩得分的修正因子
+            if price_chg < -5.0 and vol_ratio <= 0.5:
+                # 缩量下跌说明筹码恐慌出清完毕，加 2 分
+                d1_score = min(15, d1_score + 2)
+            elif price_chg > 10.0 and vol_ratio <= 0.5:
+                # 缩量上涨说明已经开始拉升，调降前兆分 3 分
+                d1_score = max(0, d1_score - 3)
 
     # D3 & D6: 真实吸筹浓度与大盘/精英双轨制得分
     latest_bm = src.execute("""
@@ -281,6 +282,7 @@ def calc_pump_readiness(src, sumdb, token_address, token_symbol, scan_time):
     consec_acc = 0
     retention_7d = 0
 
+    # D4 Meta持续 (10分) — 保持在 ACC 嵌套内，consec_acc 定义依赖 ACC 状态
     if latest_meta and latest_meta["meta_verdict"] == "ACC":
         consec_rows = sumdb.execute("""
             SELECT consec_acc FROM token_history
@@ -289,7 +291,6 @@ def calc_pump_readiness(src, sumdb, token_address, token_symbol, scan_time):
         """, [token_symbol, scan_time[:10]]).fetchone()
         consec_acc = consec_rows["consec_acc"] if consec_rows else 0
 
-        # D4 Meta持续 (10分)
         if consec_acc >= 25:
             d4_score = 10
         elif consec_acc >= 15:
@@ -299,22 +300,22 @@ def calc_pump_readiness(src, sumdb, token_address, token_symbol, scan_time):
         elif consec_acc >= 3:
             d4_score = 3
 
-        # D5 留存 (7分)
-        th_row = sumdb.execute("""
-            SELECT retention_7d FROM token_history
-            WHERE token_symbol = ? AND computed_date <= ?
-            ORDER BY computed_date DESC LIMIT 1
-        """, [token_symbol, scan_time[:10]]).fetchone()
-        if th_row and th_row["retention_7d"]:
-            retention_7d = th_row["retention_7d"]
-            if retention_7d >= 95:
-                d5_score = 7
-            elif retention_7d >= 85:
-                d5_score = 5
-            elif retention_7d >= 75:
-                d5_score = 4
-            elif retention_7d >= 60:
-                d5_score = 3
+    # D5 留存 (7分) — 剥离 ACC 嵌套，作为链上客观吸筹指标独立计算
+    th_row = sumdb.execute("""
+        SELECT retention_7d FROM token_history
+        WHERE token_symbol = ? AND computed_date <= ?
+        ORDER BY computed_date DESC LIMIT 1
+    """, [token_symbol, scan_time[:10]]).fetchone()
+    if th_row and th_row["retention_7d"]:
+        retention_7d = th_row["retention_7d"]
+        if retention_7d >= 95:
+            d5_score = 7
+        elif retention_7d >= 85:
+            d5_score = 5
+        elif retention_7d >= 75:
+            d5_score = 4
+        elif retention_7d >= 60:
+            d5_score = 3
 
     # D7, D8, D9: futures_snapshots
     latest_ft = src.execute("""
@@ -338,8 +339,10 @@ def calc_pump_readiness(src, sumdb, token_address, token_symbol, scan_time):
         ls = latest_ft["long_short_ratio"] or 0
 
         # 过滤搬家假量缩：DEX量缩+OI暴增时调降D1量缩分
+        # 优化：增加例外条件以防止误伤轧空标的。仅当代币为死币 (vol_24h < 1000) 或非轧空状态 (fr >= 0) 时才扣分
         if oi_chg > 0.15 and vol_ratio <= 0.3 and d1_score == 15:
-            d1_score = 7
+            if vol_24h < 1000 or fr >= 0:
+                d1_score = 7
 
         # D7 OI变化 (12分)
         if oi_usd >= 1000000:
@@ -358,14 +361,15 @@ def calc_pump_readiness(src, sumdb, token_address, token_symbol, scan_time):
                 d7_score = 2
 
         # D8 FR (8分)
+        # 优化：修正语义不自洽。fr <= 0 才计分，正资金费率得分归零
         if fr <= -0.0003:
             d8_score = 8
         elif fr <= -0.0001:
             d8_score = 6
         elif fr <= 0:
             d8_score = 4
-        elif fr <= 0.0005:
-            d8_score = 1
+        else:
+            d8_score = 0
 
         # D9 L/S (6分)
         if ls <= 0.6:
@@ -383,45 +387,70 @@ def calc_pump_readiness(src, sumdb, token_address, token_symbol, scan_time):
     total_score = (d1_score + d2_score + d3_score + d4_score + d5_score
                    + d6_score + d7_score + d8_score + d9_score + d10_score)
 
-    # 分级 (满分100)
-    level = "WATCH"
-    if total_score >= 70:
-        level = "IMMINENT"
-    elif total_score >= 50:
-        if vol_ratio <= 0.3:
-            level = "READY_VOL_SHRINK"
-        else:
-            level = "READY"
-    elif total_score >= 35:
-        level = "WATCH"
-    else:
-        level = "NONE"
+    # OI/LP 杠杆轧空检测 (高持仓额远超现货LP深度且资金费率为负)
+    high_leverage_squeeze = False
+    if latest_ft and oi_usd >= 500000 and reserve > 0:
+        if (oi_usd / reserve) >= 10.0 and fr < 0:
+            high_leverage_squeeze = True
 
-    # S11 静默建仓信号 (独立于 C10)
+    # 双轨阈值分流评级，解决无合约偏见，并适配不可达阈值修复 (IMMINENT 70->62, READY 50->48)
+    level = "WATCH"
+    if latest_ft is not None:
+        # 1. 有合约代币评级体系
+        if total_score >= 62:
+            level = "IMMINENT"
+        elif total_score >= 48:
+            if vol_ratio <= 0.3:
+                level = "READY_VOL_SHRINK"
+            else:
+                level = "READY"
+        elif total_score >= 35:
+            level = "WATCH"
+        else:
+            level = "NONE"
+    else:
+        # 2. 无合约代币评级体系 (最高上限为 76 分)
+        if total_score >= 56:
+            level = "IMMINENT"
+        elif total_score >= 40:
+            if vol_ratio <= 0.3:
+                level = "READY_VOL_SHRINK"
+            else:
+                level = "READY"
+        elif total_score >= 28:
+            level = "WATCH"
+        else:
+            level = "NONE"
+
+    # S11 静默建仓信号 (放宽条件至 3-of-4)
     silent_acc = False
     try:
-        # 条件A: LP 7d波动率 < 5%
+        # 条件1: LP 7d波动率 < 5%
         lp_stable = lp_vol_pct is not None and lp_vol_pct < 5
         
-        # 条件B: 合约 OI 近 3 个快照持续增长 + 最新 FR 为负
+        # 条件2: 合约 OI 近 3 个快照持续增长
         ft_rows = src.execute("""
             SELECT oi_value_usd, funding_rate FROM futures_snapshots
-            WHERE token_address=? ORDER BY scan_time DESC LIMIT 3
-        """, [addr]).fetchall()
+            WHERE LOWER(token_address)=LOWER(?) ORDER BY scan_time DESC LIMIT 3
+        """, [token_address]).fetchall()
         oi_growing = len(ft_rows) == 3 and ft_rows[0]["oi_value_usd"] > ft_rows[2]["oi_value_usd"]
+        
+        # 条件3: 最新 FR 为负
         fr_negative = len(ft_rows) > 0 and (ft_rows[0]["funding_rate"] or 0) < 0
         
-        # 条件C: 链上吸筹均分近 4 个快照呈上升趋势
+        # 条件4: 链上吸筹均分近 4 个快照呈上升趋势
         snap_rows = src.execute("""
             SELECT AVG(CASE WHEN is_accumulating=1 THEN acc_score END) as avg_score
             FROM bubblemap_holders
-            WHERE token_address=?
+            WHERE LOWER(token_address)=LOWER(?)
             GROUP BY snapshot_time ORDER BY snapshot_time DESC LIMIT 4
-        """, [addr]).fetchall()
+        """, [token_address]).fetchall()
         scores = [r["avg_score"] for r in snap_rows if r["avg_score"]]
         score_rising = len(scores) >= 2 and scores[0] > scores[-1]
         
-        if lp_stable and oi_growing and fr_negative and score_rising:
+        # 4条件中满足3条即认定为静默建仓
+        conditions = [lp_stable, oi_growing, fr_negative, score_rising]
+        if sum(1 for c in conditions if c) >= 3:
             silent_acc = True
     except Exception as _e:
         print(f"  [S11] 代币 {token_symbol} 时序趋势计算异常: {_e}")
@@ -441,6 +470,8 @@ def calc_pump_readiness(src, sumdb, token_address, token_symbol, scan_time):
         "stealth_pump": stealth_pump,
         "associated_addresses": associated_addresses,
         "associated_ratio": associated_ratio,
+        "high_leverage_squeeze": high_leverage_squeeze,
+        "has_ft": latest_ft is not None
     }
 
 
@@ -480,11 +511,12 @@ def ensure_pump_alerts_table(sumdb):
         if col_name not in existing:
             sumdb.execute(f"ALTER TABLE pump_alerts ADD COLUMN {col_name} {col_def}")
             
-    # v4 升级: 新增 underwater_ratio / control_level / stealth_pump 列
+    # v4 升级: 新增 underwater_ratio / control_level / stealth_pump / high_leverage_squeeze 列
     v4_cols = {
         "underwater_ratio": "REAL DEFAULT 0",
         "control_level": "TEXT DEFAULT 'None'",
-        "stealth_pump": "INTEGER DEFAULT 0"
+        "stealth_pump": "INTEGER DEFAULT 0",
+        "high_leverage_squeeze": "INTEGER DEFAULT 0"
     }
     for col_name, col_def in v4_cols.items():
         if col_name not in existing:
@@ -505,8 +537,8 @@ def save_pump_alerts(sumdb, scan_time, results):
              d1_score, d2_score, d3_score, d4_score, d5_score, d6_score,
              d7_score, d8_score, d9_score, d10_score,
              concentration, vol_ratio, oi_usd, oi_chg, fr, ls, reserve_usd, silent_acc,
-             underwater_ratio, control_level, stealth_pump)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             underwater_ratio, control_level, stealth_pump, high_leverage_squeeze)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             scan_time, r["symbol"], r["addr"], r["score"], r["level"],
             r["d1"], r["d2"], r["d3"], r["d4"], r["d5"], r["d6"],
@@ -517,6 +549,7 @@ def save_pump_alerts(sumdb, scan_time, results):
             r.get("underwater_ratio", 0.0),
             r.get("control_level", "None"),
             1 if r.get("stealth_pump") else 0,
+            1 if r.get("high_leverage_squeeze") else 0,
         ))
         saved += 1
     sumdb.commit()
@@ -571,11 +604,13 @@ def generate_report(scan_time, results):
     lines.append("")
 
     lines.append("## 📖 报表说明 (Tips)")
-    lines.append("- **pump**: 拉升就绪评分 (满分 100). `IMMINENT` ≥70 (🔴) | `READY` ≥50 (🟡) | `WATCH` ≥35 (🟢)")
-    lines.append("- **D1-D6**: 链上评分 (合计 66 分). D1量缩(15) | D2 LP规模(12) | D3吸筹浓度(15) | D4 Meta持续(10) | D5留存(7) | D6精英/大盘双轨(7)")
-    lines.append("- **D7-D9**: 合约评分 (合计 26 分). D7 OI变化(12) | D8 资金费率(8) | D9 多空比(6)")
-    lines.append("- **D10**: Pool 稳定性 (8 分). LP 7d波动率(4) + LP规模(2) + 交易活跃度(2)")
-    lines.append("- **🤫**: S11 静默建仓信号 — LP极稳 + OI缓增 + FR负 + 链上均分持续上升")
+    lines.append("- **pump**: 拉升就绪评分. 有合约代币: `IMMINENT` ≥62 (🔴) | `READY` ≥48 (🟡) | `WATCH` ≥35 (🟢). 纯现货代币: `IMMINENT` ≥56 (🔴) | `READY` ≥40 (🟡) | `WATCH` ≥28 (🟢)")
+    lines.append("- **D1-D6**: 链上评分 (合计 66 分). D1量缩(15) | D2 LP规模(12) | D3吸筹浓度(15) | D4 Meta持续(10) | D5留存(7) | D6双轨(7)")
+    lines.append("- **D7-D9**: 合约评分 (合计 26 分). D7 OI变化(12) | D8 资金费率(8) | D9 多空比(6) (无合约现货代币此三项为 0)")
+    lines.append("- **D10**: Pool 稳定性 (8 分). LP 7d波动率(6) + 交易活跃度(2) (已剔除 LP 规模分以消除重复计权)")
+    lines.append("- **🤫**: S11 静默建仓信号 — LP极稳 + OI增长 + FR负 + 链上吸筹升 (4中3即触发)")
+    lines.append("- **⚡**: 杠杆轧空预警 — 合约持仓额大于现货LP 10倍以上且资金费率为负")
+    lines.append("- **🔗 纯链上**: 未在衍生品合约交易所上线的纯现货代币 (实行独立评分及告警阈值分轨)")
     lines.append("- **吸筹%**: 真实吸筹浓度 (排除交易所/合约/CEX后的独立ACC地址占比)")
     lines.append("- **vol缩比**: 24h量/7d均量 (≤0.3x 为强力锁仓量缩)")
     lines.append("- **L/S**: 合约主动多空人数比 (<0.6 散户开空做反指)")
