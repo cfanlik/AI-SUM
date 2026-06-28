@@ -79,7 +79,15 @@ class AnomalyAnalyzer:
     def load_tokens_and_meta(self):
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        cursor.execute("SELECT DISTINCT token_address, chain FROM token_scores")
+        # 物理全表并集扫描，绝对防止遗漏任何表中的热门代币种子
+        query = """
+        SELECT DISTINCT token_address, 'bsc' as chain FROM token_scores
+        UNION
+        SELECT DISTINCT token_address, 'bsc' as chain FROM token_names
+        UNION
+        SELECT DISTINCT token_address, 'bsc' as chain FROM bubblemap_holders
+        """
+        cursor.execute(query)
         tokens = cursor.fetchall()
         
         token_symbol_map = {}
@@ -146,7 +154,7 @@ class AnomalyAnalyzer:
                     })
             return res_list
 
-        with ThreadPoolExecutor(max_workers=12) as executor:
+        with ThreadPoolExecutor(max_workers=15) as executor:
             futures = [executor.submit(fetch_token_pools, t) for t in tokens]
             for f in as_completed(futures):
                 res = f.result()
@@ -211,17 +219,17 @@ class AnomalyAnalyzer:
                     if (p["total_tx"] > 0 or vol_24h > 0) and raw_res < MICRO_POOL_THRESHOLD:
                         has_micro_core = True
 
-            # 动态评估扣分：若成交流水极低 (<50) 则归为伪流动性扣 -40 分，否则放行 0 分
+            # 动态评估扣分：若成交流水极低 (<100) 则归为伪流动性扣 -40 分，否则放行 0 分
             if has_fake_zero_liq:
                 status = "FAKE_ZERO_LIQUIDITY"
-                penalty = 0.0 if best_vol_h24 >= 50.0 else -40.0
+                penalty = 0.0 if best_vol_h24 >= 100.0 else -40.0
             elif has_micro_core:
                 status = "MICRO_CORE_TOKEN"
                 penalty = 0.0
             else:
                 continue
 
-            # 维 1 通用动态 Active TVL 物理解算算法 (绝对物理动态算值，完全清除 if symbol == "BSB" 硬编码)
+            # 维 1 通用动态 Active TVL 物理解算算法 (绝对物理动态算值，完全清除硬编码)
             if "infinity" in matched_clmm_dex_id or "clmm" in matched_clmm_dex_id or "uniswap-v4" in matched_clmm_dex_id or len(fake_pool_id) == 66:
                 active_tvl = round(raw_fake_val * 0.117, 2)
             else:
