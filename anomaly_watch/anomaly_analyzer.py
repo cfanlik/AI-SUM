@@ -40,11 +40,19 @@ def fetch_json(url):
     return None
 
 class AnomalyAnalyzer:
+    STABLECOINS = {
+        "0x55d398326f99059ff775485246999027b3197955", "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+        "0xe9e7cea3dedca5984780bafc599bd69add087d56", "0x8d0d000ee44948fc98c9b98a4fa4921476f08b0d",
+        "0xc5f0f7b66764f6ec8c8dff7ba683102295e16409", "0x1af3f329e8be154074d8769d1ffa4ee058b1dbc3",
+        "0xdac17f958d2ee523a2206206994597c13d831ec7", "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
+    }
+
     def __init__(self):
         self.db_path = DB_PATH
         self.ai_sum_db_path = AI_SUM_DB_PATH
 
-    def load_tokens(self):
+    def load_tokens_and_meta(self):
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("SELECT DISTINCT token_address, chain FROM token_scores")
@@ -55,10 +63,29 @@ class AnomalyAnalyzer:
         for row in cursor.fetchall():
             token_symbol_map[row[0].lower()] = row[1]
         conn.close()
-        return tokens, token_symbol_map
+
+        # 联表获取 AI-SUM meta_snapshots 最新数据
+        meta_map = {}
+        if os.path.exists(self.ai_sum_db_path):
+            conn_sum = sqlite3.connect(self.ai_sum_db_path)
+            cur_sum = conn_sum.cursor()
+            try:
+                cur_sum.execute("SELECT token_address, meta_score, meta_verdict, stage, whale_level FROM meta_snapshots ORDER BY scan_time DESC")
+                for row in cur_sum.fetchall():
+                    addr = row[0].lower()
+                    if addr not in meta_map:
+                        meta_map[addr] = {
+                            "meta_score": row[1], "meta_verdict": row[2],
+                            "stage": row[3], "whale_level": row[4]
+                        }
+            except Exception:
+                pass
+            conn_sum.close()
+
+        return tokens, token_symbol_map, meta_map
 
     def analyze(self):
-        tokens, token_symbol_map = self.load_tokens()
+        tokens, token_symbol_map, meta_map = self.load_tokens_and_meta()
         raw_pools = []
 
         def fetch_token_pools(item):
@@ -100,27 +127,61 @@ class AnomalyAnalyzer:
                 res = f.result()
                 if res: raw_pools.extend(res)
 
-        sanitized = []
+        # 按代币维度聚合去重与风控标记
+        token_groups = {}
         for p in raw_pools:
-            b_id = clean_addr(p["base_token_id"])
-            q_id = clean_addr(p["quote_token_id"])
-            t_id = clean_addr(p["token"])
-            is_core = (b_id in CORE_ASSETS or q_id in CORE_ASSETS or t_id in CORE_ASSETS)
-            raw_reserve = p["reserve_in_usd"]
+            t_addr = p["token"].lower()
+            if t_addr not in token_groups:
+                token_groups[t_addr] = {
+                    "token": p["token"], "symbol": p["symbol"], "pools": [],
+                    "has_stable_fake": False, "has_micro": False
+                }
+            token_groups[t_addr]["pools"].append(p)
+
+        token_results = []
+        for addr, group in token_groups.items():
+            meta_info = meta_map.get(addr, {"meta_score": None, "meta_verdict": "N/A", "stage": "N/A", "whale_level": "N/A"})
             
-            if not is_core:
-                p["final_reserve"] = 0.0
-                p["status"] = "NON_CORE_PAIR"
-            elif p["total_tx"] > 0 or p["vol_h24"] > 0 or raw_reserve >= MICRO_POOL_THRESHOLD:
-                if raw_reserve < MICRO_POOL_THRESHOLD:
-                    p["final_reserve"] = raw_reserve
-                    p["status"] = "MICRO_CORE_POOL"
-                else:
-                    p["final_reserve"] = raw_reserve
-                    p["status"] = "VALID_LARGE_POOL"
+            has_fake_zero_liq = False
+            has_micro_core = False
+            raw_fake_val = 0.0
+            fake_pair_name = ""
+
+            for p in group["pools"]:
+                b_id = clean_addr(p["base_token_id"])
+                q_id = clean_addr(p["quote_token_id"])
+                is_stable = (b_id in self.STABLECOINS or q_id in self.STABLECOINS)
+                raw_res = p["reserve_in_usd"]
+                
+                # 核心风控判定：配对稳定币但零交易换手 (伪流动性陷阱)
+                if is_stable and p["total_tx"] == 0 and p["vol_h24"] == 0:
+                    has_fake_zero_liq = True
+                    raw_fake_val = max(raw_fake_val, raw_res)
+                    fake_pair_name = p["pair_name"]
+                elif is_core_asset := (b_id in CORE_ASSETS or q_id in CORE_ASSETS):
+                    if (p["total_tx"] > 0 or p["vol_h24"] > 0) and raw_res < MICRO_POOL_THRESHOLD:
+                        has_micro_core = True
+
+            if has_fake_zero_liq:
+                status = "FAKE_ZERO_LIQUIDITY"
+                penalty = -40.0
+            elif has_micro_core:
+                status = "MICRO_CORE_TOKEN"
+                penalty = 0.0
             else:
-                p["final_reserve"] = 0.0
-                p["status"] = "DEAD_ZOMBIE_POOL"
-            sanitized.append(p)
-            
-        return sanitized
+                continue
+
+            token_results.append({
+                "token": group["token"],
+                "symbol": group["symbol"],
+                "status": status,
+                "fake_pair_name": fake_pair_name,
+                "raw_fake_val": raw_fake_val,
+                "penalty": penalty,
+                "meta_score": meta_info["meta_score"],
+                "meta_verdict": meta_info["meta_verdict"],
+                "stage": meta_info["stage"],
+                "whale_level": meta_info["whale_level"]
+            })
+
+        return token_results
