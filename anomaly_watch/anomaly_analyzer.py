@@ -4,7 +4,7 @@ import json
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from anomaly_watch.config import DB_PATH, AI_SUM_DB_PATH, MICRO_POOL_THRESHOLD, CORE_ASSETS
+from anomaly_watch.config import DB_PATH, AI_SUM_DB_PATH, MICRO_POOL_THRESHOLD, LARGE_FAKE_THRESHOLD, CORE_ASSETS
 
 def get_env_proxy():
     env_path = "/opt/select-coin/.env"
@@ -64,7 +64,6 @@ class AnomalyAnalyzer:
             token_symbol_map[row[0].lower()] = row[1]
         conn.close()
 
-        # 联表获取 AI-SUM meta_snapshots 最新数据
         meta_map = {}
         if os.path.exists(self.ai_sum_db_path):
             conn_sum = sqlite3.connect(self.ai_sum_db_path)
@@ -127,14 +126,12 @@ class AnomalyAnalyzer:
                 res = f.result()
                 if res: raw_pools.extend(res)
 
-        # 按代币维度聚合去重与风控标记
         token_groups = {}
         for p in raw_pools:
             t_addr = p["token"].lower()
             if t_addr not in token_groups:
                 token_groups[t_addr] = {
-                    "token": p["token"], "symbol": p["symbol"], "pools": [],
-                    "has_stable_fake": False, "has_micro": False
+                    "token": p["token"], "symbol": p["symbol"], "pools": []
                 }
             token_groups[t_addr]["pools"].append(p)
 
@@ -154,12 +151,13 @@ class AnomalyAnalyzer:
                 is_stable = (b_id in self.STABLECOINS or q_id in self.STABLECOINS)
                 raw_res = p["reserve_in_usd"]
                 
-                # 核心风控判定：配对稳定币但零交易换手 (伪流动性陷阱)
-                if is_stable and p["total_tx"] == 0 and p["vol_h24"] == 0:
+                # 防伪伪流动性判定：配对稳定币，API标称 >= LARGE_FAKE_THRESHOLD (10万美金) 且 零交易换手 (物理解算资金为0)
+                if is_stable and raw_res >= LARGE_FAKE_THRESHOLD and (p["total_tx"] == 0 or raw_res > 1000000):
                     has_fake_zero_liq = True
-                    raw_fake_val = max(raw_fake_val, raw_res)
-                    fake_pair_name = p["pair_name"]
-                    fake_pool_id = p["pool_id"]
+                    if raw_res > raw_fake_val:
+                        raw_fake_val = raw_res
+                        fake_pair_name = p["pair_name"]
+                        fake_pool_id = p["pool_id"]
                 elif is_core_asset := (b_id in CORE_ASSETS or q_id in CORE_ASSETS):
                     if (p["total_tx"] > 0 or p["vol_h24"] > 0) and raw_res < MICRO_POOL_THRESHOLD:
                         has_micro_core = True
@@ -177,7 +175,8 @@ class AnomalyAnalyzer:
                 "token": group["token"],
                 "symbol": group["symbol"],
                 "status": status,
-                "fake_pair_name": fake_pair_name, "pool_id": fake_pool_id,
+                "fake_pair_name": fake_pair_name,
+                "pool_id": fake_pool_id,
                 "raw_fake_val": raw_fake_val,
                 "penalty": penalty,
                 "meta_score": meta_info["meta_score"],
