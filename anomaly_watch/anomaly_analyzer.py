@@ -146,6 +146,7 @@ class AnomalyAnalyzer:
             has_micro_core = False
             raw_fake_val = 0.0
             fake_pair_name = ""
+            fake_pool_id = ""
 
             for p in group["pools"]:
                 b_id = clean_addr(p["base_token_id"])
@@ -158,6 +159,7 @@ class AnomalyAnalyzer:
                     has_fake_zero_liq = True
                     raw_fake_val = max(raw_fake_val, raw_res)
                     fake_pair_name = p["pair_name"]
+                    fake_pool_id = p["pool_id"]
                 elif is_core_asset := (b_id in CORE_ASSETS or q_id in CORE_ASSETS):
                     if (p["total_tx"] > 0 or p["vol_h24"] > 0) and raw_res < MICRO_POOL_THRESHOLD:
                         has_micro_core = True
@@ -175,7 +177,7 @@ class AnomalyAnalyzer:
                 "token": group["token"],
                 "symbol": group["symbol"],
                 "status": status,
-                "fake_pair_name": fake_pair_name,
+                "fake_pair_name": fake_pair_name, "pool_id": fake_pool_id,
                 "raw_fake_val": raw_fake_val,
                 "penalty": penalty,
                 "meta_score": meta_info["meta_score"],
