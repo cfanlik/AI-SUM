@@ -1,11 +1,11 @@
 import os
 import sys
 
-# 独立物理配置
 DB_PATH = os.getenv("DB_PATH", "/opt/select-coin/data/select.db")
 AI_SUM_DB_PATH = os.getenv("AI_SUM_DB_PATH", "/opt/AI-SUM/select-sum.db")
 
 MICRO_POOL_THRESHOLD = 5000.0
+LARGE_FAKE_THRESHOLD = 100000.0
 
 CORE_ASSETS = {
     "0x55d398326f99059ff775485246999027b3197955", "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",

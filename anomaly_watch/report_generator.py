@@ -23,7 +23,7 @@ class AnomalyReportGenerator:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         filepath = os.path.join(self.output_dir, f"anomaly_{timestamp}.md")
         
-        fake_liq_tokens = [t for t in token_results if t["status"] == "FAKE_ZERO_LIQUIDITY"]
+        fake_liq_tokens = [t for t in token_results if t["status"] == "FAKE_ZERO_LIQUIDITY (> $10万)"]
         micro_tokens = [t for t in token_results if t["status"] == "MICRO_CORE_TOKEN"]
         
         fake_liq_tokens.sort(key=lambda x: x["raw_fake_val"], reverse=True)
@@ -31,8 +31,8 @@ class AnomalyReportGenerator:
         content = f"# AI-SUM 伪流动性陷阱与异常风控专报\n\n"
         content += f"> 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 识别伪流动性陷阱代币: {len(fake_liq_tokens)} 个\n\n"
         
-        content += "## 一、 🚨 重点关注：无真实流动性高危代币列表 (FAKE_ZERO_LIQUIDITY)\n\n"
-        content += "> **物理风控断言**：此类代币表面配对主流稳定币 (USDT/USDC/BUSD)，但链上真实换手为零或零交易量，属于典型的物理伪流动性诱多陷阱。系统将在 Meta 仲裁中物理扣除 -40 分惩罚分。\n\n"
+        content += "## 一、 🚨 重点关注：无真实流动性高危代币列表 (FAKE_ZERO_LIQUIDITY (> $10万))\n\n"
+        content += "> **物理风控断言**：此类代币表面配对主流稳定币 (USDT/USDC/BUSD)，但链上真实换手为零或零交易量，属于典型的物理伪流动性诱多陷阱。系统将在 Meta 仲裁中物理扣除 -40 分惩罚分（物理筛查起点: $100,000.00）。\n\n"
         content += "| 序号 | 代币名称 (Symbol) | 代币合约地址 | 池子地址 | 识别配对名称 | API 原始虚高标称 | 物理真实流动性 | Meta 仲裁惩罚扣分 | 最新仲裁判定 (Verdict) | 当前生命周期阶段 (Stage) |\n"
         content += "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n"
         
