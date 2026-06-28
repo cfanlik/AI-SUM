@@ -1,5 +1,4 @@
 import os
-import json
 from datetime import datetime
 
 class AnomalyReportGenerator:
@@ -7,33 +6,33 @@ class AnomalyReportGenerator:
         self.output_dir = output_dir
         os.makedirs(self.output_dir, exist_ok=True)
 
-    def generate_report(self, pools):
+    def generate_report(self, token_results):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         filepath = os.path.join(self.output_dir, f"anomaly_{timestamp}.md")
         
-        micro_pools = [p for p in pools if p["status"] == "MICRO_CORE_POOL"]
-        zombie_pools = [p for p in pools if p["status"] == "DEAD_ZOMBIE_POOL"]
-        non_core_pools = [p for p in pools if p["status"] == "NON_CORE_PAIR"]
-        valid_pools = [p for p in pools if p["status"] == "VALID_LARGE_POOL"]
+        fake_liq_tokens = [t for t in token_results if t["status"] == "FAKE_ZERO_LIQUIDITY"]
+        micro_tokens = [t for t in token_results if t["status"] == "MICRO_CORE_TOKEN"]
         
-        micro_pools.sort(key=lambda x: x["final_reserve"], reverse=True)
+        fake_liq_tokens.sort(key=lambda x: x["raw_fake_val"], reverse=True)
         
-        content = f"# AI-SUM 异常关注 (Anomaly Watchlist) 专报\n\n"
-        content += f"> 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 总监控 CLAMM 池子: {len(pools)} 个\n\n"
+        content = f"# AI-SUM 伪流动性陷阱与异常风控专报\n\n"
+        content += f"> 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 识别伪流动性陷阱代币: {len(fake_liq_tokens)} 个\n\n"
         
-        content += "## 一、物理解算物理汇总表\n\n"
-        content += "| 防伪状态标识 | 物理定义 | 数量 (个) | 占比 (%) |\n"
-        content += "| :--- | :--- | :--- | :--- |\n"
-        content += f"| `VALID_LARGE_POOL` | 真实换手活跃大池 (≥$5000) | {len(valid_pools)} | {len(valid_pools)/len(pools)*100:.2f}% |\n"
-        content += f"| `MICRO_CORE_POOL` | 核心有效微型池 (<$5000 具备换手) | {len(micro_pools)} | {len(micro_pools)/len(pools)*100:.2f}% |\n"
-        content += f"| `DEAD_ZOMBIE_POOL` | 链上僵尸死池 (零换手覆盖为$0) | {len(zombie_pools)} | {len(zombie_pools)/len(pools)*100:.2f}% |\n"
-        content += f"| `NON_CORE_PAIR` | 无价值山寨互刷池 (非硬通货) | {len(non_core_pools)} | {len(non_core_pools)/len(pools)*100:.2f}% |\n\n"
+        content += "## 一、 🚨 重点关注：无真实流动性高危代币列表 (FAKE_ZERO_LIQUIDITY)\n\n"
+        content += "> **物理风控断言**：此类代币表面配对主流稳定币 (USDT/USDC/BUSD)，但链上真实换手为零或零交易量，属于典型的物理伪流动性诱多陷阱。系统将在 Meta 仲裁中物理扣除 -40 分惩罚分。\n\n"
+        content += "| 序号 | 代币名称 (Symbol) | 代币合约地址 | 识别配对名称 | API 原始虚高标称 | 物理真实流动性 | Meta 仲裁惩罚扣分 | 最新仲裁判定 (Verdict) | 当前生命周期阶段 (Stage) |\n"
+        content += "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n"
         
-        content += "## 二、真实核心微型池明细表 (MICRO_CORE_POOL)\n\n"
-        content += "| 序号 | 代币 (Symbol) | 代币合约 | DEX ID | 池子 ID (PoolID) | 交易对名称 | 真实储备金 (USD) | 24h 交易笔数 |\n"
-        content += "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n"
-        for i, p in enumerate(micro_pools, 1):
-            content += f"| {i} | `{p['symbol']}` | `{p['token']}` | `{p['dex_id']}` | `{p['pool_id'][:12]}...` | {p['pair_name']} | ${p['final_reserve']:,.2f} | {p['total_tx']} 笔 |\n"
+        for i, t in enumerate(fake_liq_tokens, 1):
+            score_str = f"{t['meta_score']:.1f}" if t['meta_score'] is not None else "-"
+            content += f"| {i} | `{t['symbol']}` | `{t['token']}` | {t['fake_pair_name']} | ${t['raw_fake_val']:,.2f} | **$0.00 (无流动性)** | **{t['penalty']:.0f} 分** | `{t['meta_verdict']}` | `{t['stage']}` |\n"
+            
+        content += "\n## 二、核心有效微型代币备忘表 (MICRO_CORE_TOKENS)\n\n"
+        content += "| 序号 | 代币名称 (Symbol) | 代币合约地址 | 仲裁综合得分 (Meta Score) | 最新仲裁判定 | 当前生命周期阶段 | 庄控等级 |\n"
+        content += "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n"
+        for i, t in enumerate(micro_tokens[:15], 1):
+            score_str = f"{t['meta_score']:.1f}" if t['meta_score'] is not None else "-"
+            content += f"| {i} | `{t['symbol']}` | `{t['token']}` | **{score_str}** | `{t['meta_verdict']}` | `{t['stage']}` | `{t['whale_level']}` |\n"
             
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
