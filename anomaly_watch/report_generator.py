@@ -23,8 +23,8 @@ class AnomalyReportGenerator:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         filepath = os.path.join(self.output_dir, f"anomaly_{timestamp}.md")
         
-        fake_liq_tokens = [t for t in token_results if t["status"] == "FAKE_ZERO_LIQUIDITY (> $10万)"]
-        micro_tokens = [t for t in token_results if t["status"] == "MICRO_CORE_TOKEN"]
+        fake_liq_tokens = [t for t in token_results if "FAKE" in t["status"]]
+        micro_tokens = [t for t in token_results if "MICRO" in t["status"]]
         
         fake_liq_tokens.sort(key=lambda x: x["raw_fake_val"], reverse=True)
         
@@ -37,6 +37,7 @@ class AnomalyReportGenerator:
         content += "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n"
         
         for i, t in enumerate(fake_liq_tokens, 1):
+            score_str = f"{t['meta_score']:.1f}" if t['meta_score'] is not None else "-"
             t_addr_fmt = format_hover_addr(t['token'])
             p_addr_fmt = format_hover_addr(t.get('pool_id', 'N/A'))
             content += f"| {i} | `{t['symbol']}` | {t_addr_fmt} | {p_addr_fmt} | {t['fake_pair_name']} | ${t['raw_fake_val']:,.2f} | **$0.00 (无流动性)** | **{t['penalty']:.0f} 分** | `{t['meta_verdict']}` | `{t['stage']}` |\n"

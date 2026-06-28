@@ -151,10 +151,10 @@ class AnomalyAnalyzer:
                 is_stable = (b_id in self.STABLECOINS or q_id in self.STABLECOINS)
                 raw_res = p["reserve_in_usd"]
                 
-                # 防伪伪流动性判定：配对稳定币，API标称 >= LARGE_FAKE_THRESHOLD (10万美金) 且 零交易换手 (物理解算资金为0)
-                if is_stable and raw_res >= LARGE_FAKE_THRESHOLD and (p["total_tx"] == 0 or raw_res > 1000000):
+                # 防伪伪流动性判定：配对稳定币，API标称 >= LARGE_FAKE_THRESHOLD (10万美金)
+                if is_stable and raw_res >= LARGE_FAKE_THRESHOLD:
                     has_fake_zero_liq = True
-                    if raw_res > raw_fake_val:
+                    if raw_res >= raw_fake_val:
                         raw_fake_val = raw_res
                         fake_pair_name = p["pair_name"]
                         fake_pool_id = p["pool_id"]
