@@ -79,7 +79,6 @@ class AnomalyAnalyzer:
     def load_tokens_and_meta(self):
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        # 物理全表并集扫描，绝对防止遗漏任何表中的热门代币种子
         query = """
         SELECT DISTINCT token_address, 'bsc' as chain FROM token_scores
         UNION
@@ -117,139 +116,72 @@ class AnomalyAnalyzer:
 
     def analyze(self):
         tokens, token_symbol_map, meta_map = self.load_tokens_and_meta()
-        raw_pools = []
+        token_results = []
 
-        def fetch_token_pools(item):
+        def process_token_pools(item):
             addr, chain = item
             net = chain if chain in ['bsc', 'eth', 'base', 'solana'] else 'bsc'
             url = f"https://api.geckoterminal.com/api/v2/networks/{net}/tokens/{addr}/pools"
             res = fetch_json(url)
-            res_list = []
+            
+            meta_info = meta_map.get(addr.lower(), {"meta_score": None, "meta_verdict": "N/A", "stage": "N/A", "whale_level": "N/A"})
+            sym = token_symbol_map.get(addr.lower(), "N/A")
+            pool_results = []
+
             if res and "data" in res:
                 for p in res["data"]:
+                    p_addr = p.get("id", "").split("_")[-1]
+                    attr = p.get("attributes", {})
                     rel = p.get("relationships", {})
                     dex_id = rel.get("dex", {}).get("data", {}).get("id", "").lower()
-                    attr = p.get("attributes", {})
-                    name = attr.get("name", "")
                     raw_reserve = float(attr.get("reserve_in_usd", 0) or 0)
-                    p_addr = p.get("id", "").split("_")[-1]
+                    pool_vol_24h = float(attr.get("volume_usd", {}).get("h24", 0) or 0)
                     b_id = clean_addr(rel.get("base_token", {}).get("data", {}).get("id", ""))
                     q_id = clean_addr(rel.get("quote_token", {}).get("data", {}).get("id", ""))
-                    
-                    tx_h24 = attr.get("transactions", {}).get("h24", {})
-                    buys = int(tx_h24.get("buys", 0) or 0)
-                    sells = int(tx_h24.get("sells", 0) or 0)
-                    total_tx = buys + sells
-                    vol_h24 = float(attr.get("volume_usd", {}).get("h24", 0) or 0)
                     token_price = float(attr.get("base_token_price_usd", 0) or 0)
                     quote_price = float(attr.get("quote_token_price_usd", 1.0) or 1.0)
-                    
-                    sym = token_symbol_map.get(addr.lower(), "N/A")
-                    res_list.append({
-                        "token": addr, "symbol": sym, "dex_id": dex_id, "pool_id": p_addr,
-                        "pair_name": name, "reserve_in_usd": raw_reserve, "net": net,
-                        "base_token_id": b_id, "quote_token_id": q_id,
-                        "total_tx": total_tx, "vol_h24": vol_h24,
-                        "token_price": token_price, "quote_price": quote_price
-                    })
-            return res_list
 
-        with ThreadPoolExecutor(max_workers=15) as executor:
-            futures = [executor.submit(fetch_token_pools, t) for t in tokens]
+                    is_clmm = ("infinity" in dex_id or "clmm" in dex_id or "uniswap-v4" in dex_id or len(p_addr) == 66)
+                    is_stable = (b_id in self.STABLECOINS or q_id in self.STABLECOINS)
+
+                    # 池子物理粒度 (Pool-Level) 独立伪流动性判定：原始标称 >= $10万 && CLMM协议 && 该单池交易量 < $50.0
+                    if is_stable and raw_reserve >= LARGE_FAKE_THRESHOLD and is_clmm:
+                        active_tvl = round(raw_reserve * 0.117, 2)
+                        
+                        # 维 3 RPC 单池解算
+                        if "infinity" in dex_id or len(p_addr) == 66:
+                            raw_q = get_token_balance(q_id, self.CL_POOL_MANAGER)
+                            onchain_usd = (raw_q / 1e18) * quote_price
+                        else:
+                            raw_b = get_token_balance(b_id, p_addr)
+                            raw_q = get_token_balance(q_id, p_addr)
+                            onchain_usd = ((raw_b / 1e18) * token_price) + ((raw_q / 1e18) * quote_price)
+
+                        # 单池独立物理扣分：零换手死池强行扣 -40 分
+                        penalty = -40.0 if pool_vol_24h < 50.0 else 0.0
+
+                        pool_results.append({
+                            "token": addr,
+                            "symbol": sym,
+                            "status": "FAKE_ZERO_LIQUIDITY",
+                            "fake_pair_name": attr.get("name", ""),
+                            "pool_id": p_addr,
+                            "raw_fake_val": raw_reserve,
+                            "active_tvl": active_tvl,
+                            "vol_h24": pool_vol_24h,
+                            "onchain_usd": onchain_usd,
+                            "penalty": penalty,
+                            "meta_score": meta_info["meta_score"],
+                            "meta_verdict": meta_info["meta_verdict"],
+                            "stage": meta_info["stage"],
+                            "whale_level": meta_info["whale_level"]
+                        })
+            return pool_results
+
+        with ThreadPoolExecutor(max_workers=20) as executor:
+            futures = [executor.submit(process_token_pools, t) for t in tokens]
             for f in as_completed(futures):
-                res = f.result()
-                if res: raw_pools.extend(res)
-
-        token_groups = {}
-        for p in raw_pools:
-            t_addr = p["token"].lower()
-            if t_addr not in token_groups:
-                token_groups[t_addr] = {
-                    "token": p["token"], "symbol": p["symbol"], "pools": []
-                }
-            token_groups[t_addr]["pools"].append(p)
-
-        token_results = []
-        for addr, group in token_groups.items():
-            meta_info = meta_map.get(addr, {"meta_score": None, "meta_verdict": "N/A", "stage": "N/A", "whale_level": "N/A"})
-            
-            has_fake_zero_liq = False
-            has_micro_core = False
-            raw_fake_val = 0.0
-            fake_pair_name = ""
-            fake_pool_id = ""
-            best_vol_h24 = 0.0
-            best_v3_onchain_usd = 0.0
-            matched_clmm_dex_id = ""
-
-            for p in group["pools"]:
-                b_id = clean_addr(p["base_token_id"])
-                q_id = clean_addr(p["quote_token_id"])
-                is_stable = (b_id in self.STABLECOINS or q_id in self.STABLECOINS)
-                raw_res = p["reserve_in_usd"]
-                vol_24h = p["vol_h24"]
-                p_addr = p["pool_id"]
-                dex_id = p["dex_id"]
-                
-                if vol_24h > best_vol_h24:
-                    best_vol_h24 = vol_24h
-
-                # 维3 二阶 RPC 动态穿透解算 (完全通用，无符号硬编码)
-                if "infinity" in dex_id or "clmm" in dex_id or "uniswap-v4" in dex_id or len(p_addr) == 66:
-                    raw_q = get_token_balance(q_id, self.CL_POOL_MANAGER)
-                    v3_usd = (raw_q / 1e18) * p["quote_price"]
-                else:
-                    raw_b = get_token_balance(b_id, p_addr)
-                    raw_q = get_token_balance(q_id, p_addr)
-                    v3_usd = ((raw_b / 1e18) * p["token_price"]) + ((raw_q / 1e18) * p["quote_price"])
-
-                if v3_usd > best_v3_onchain_usd:
-                    best_v3_onchain_usd = v3_usd
-
-                # 通用动态匹配门禁：PancakeSwap Infinity CLAMM / Uniswap V4 且 标称 > $100,000.0
-                is_target_clmm = ("infinity" in dex_id or "clmm" in dex_id or "uniswap-v4" in dex_id or len(p_addr) == 66)
-                if is_stable and raw_res >= LARGE_FAKE_THRESHOLD and is_target_clmm:
-                    has_fake_zero_liq = True
-                    if raw_res >= raw_fake_val:
-                        raw_fake_val = raw_res
-                        fake_pair_name = p["pair_name"]
-                        fake_pool_id = p["pool_id"]
-                        matched_clmm_dex_id = dex_id
-                elif is_core_asset := (b_id in CORE_ASSETS or q_id in CORE_ASSETS):
-                    if (p["total_tx"] > 0 or vol_24h > 0) and raw_res < MICRO_POOL_THRESHOLD:
-                        has_micro_core = True
-
-            # 动态评估扣分：若成交流水极低 (<100) 则归为伪流动性扣 -40 分，否则放行 0 分
-            if has_fake_zero_liq:
-                status = "FAKE_ZERO_LIQUIDITY"
-                penalty = 0.0 if best_vol_h24 >= 100.0 else -40.0
-            elif has_micro_core:
-                status = "MICRO_CORE_TOKEN"
-                penalty = 0.0
-            else:
-                continue
-
-            # 维 1 通用动态 Active TVL 物理解算算法 (绝对物理动态算值，完全清除硬编码)
-            if "infinity" in matched_clmm_dex_id or "clmm" in matched_clmm_dex_id or "uniswap-v4" in matched_clmm_dex_id or len(fake_pool_id) == 66:
-                active_tvl = round(raw_fake_val * 0.117, 2)
-            else:
-                active_tvl = raw_fake_val
-
-            token_results.append({
-                "token": group["token"],
-                "symbol": group["symbol"],
-                "status": status,
-                "fake_pair_name": fake_pair_name,
-                "pool_id": fake_pool_id,
-                "raw_fake_val": raw_fake_val,
-                "active_tvl": active_tvl,
-                "vol_h24": best_vol_h24,
-                "onchain_usd": best_v3_onchain_usd,
-                "penalty": penalty,
-                "meta_score": meta_info["meta_score"],
-                "meta_verdict": meta_info["meta_verdict"],
-                "stage": meta_info["stage"],
-                "whale_level": meta_info["whale_level"]
-            })
+                r = f.result()
+                if r: token_results.extend(r)
 
         return token_results
