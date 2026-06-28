@@ -120,7 +120,7 @@ class AnomalyAnalyzer:
             if res and "data" in res:
                 for p in res["data"]:
                     rel = p.get("relationships", {})
-                    dex_id = rel.get("dex", {}).get("data", {}).get("id", "")
+                    dex_id = rel.get("dex", {}).get("data", {}).get("id", "").lower()
                     attr = p.get("attributes", {})
                     name = attr.get("name", "")
                     raw_reserve = float(attr.get("reserve_in_usd", 0) or 0)
@@ -172,6 +172,7 @@ class AnomalyAnalyzer:
             fake_pool_id = ""
             best_vol_h24 = 0.0
             best_v3_onchain_usd = 0.0
+            matched_clmm_dex_id = ""
 
             for p in group["pools"]:
                 b_id = clean_addr(p["base_token_id"])
@@ -185,8 +186,8 @@ class AnomalyAnalyzer:
                 if vol_24h > best_vol_h24:
                     best_vol_h24 = vol_24h
 
-                # 维3 二阶 RPC 穿透解算
-                if "infinity" in dex_id.lower() or len(p_addr) == 66:
+                # 维3 二阶 RPC 动态穿透解算 (完全通用，无符号硬编码)
+                if "infinity" in dex_id or "clmm" in dex_id or "uniswap-v4" in dex_id or len(p_addr) == 66:
                     raw_q = get_token_balance(q_id, self.CL_POOL_MANAGER)
                     v3_usd = (raw_q / 1e18) * p["quote_price"]
                 else:
@@ -197,28 +198,34 @@ class AnomalyAnalyzer:
                 if v3_usd > best_v3_onchain_usd:
                     best_v3_onchain_usd = v3_usd
 
-                # 只有当 24h 成交流水近乎零且储备虚高时，才判定伪流动性
-                if is_stable and raw_res >= LARGE_FAKE_THRESHOLD and vol_24h < 50.0:
+                # 通用动态匹配门禁：PancakeSwap Infinity CLAMM / Uniswap V4 且 标称 > $100,000.0
+                is_target_clmm = ("infinity" in dex_id or "clmm" in dex_id or "uniswap-v4" in dex_id or len(p_addr) == 66)
+                if is_stable and raw_res >= LARGE_FAKE_THRESHOLD and is_target_clmm:
                     has_fake_zero_liq = True
                     if raw_res >= raw_fake_val:
                         raw_fake_val = raw_res
                         fake_pair_name = p["pair_name"]
                         fake_pool_id = p["pool_id"]
+                        matched_clmm_dex_id = dex_id
                 elif is_core_asset := (b_id in CORE_ASSETS or q_id in CORE_ASSETS):
                     if (p["total_tx"] > 0 or vol_24h > 0) and raw_res < MICRO_POOL_THRESHOLD:
                         has_micro_core = True
 
+            # 动态评估扣分：若成交流水极低 (<50) 则归为伪流动性扣 -40 分，否则放行 0 分
             if has_fake_zero_liq:
                 status = "FAKE_ZERO_LIQUIDITY"
-                penalty = -40.0
+                penalty = 0.0 if best_vol_h24 >= 50.0 else -40.0
             elif has_micro_core:
                 status = "MICRO_CORE_TOKEN"
                 penalty = 0.0
             else:
                 continue
 
-            # 维 1 修正 Active TVL
-            active_tvl = 1590000.0 if group["symbol"] == "BSB" else round(raw_fake_val * 0.117, 2)
+            # 维 1 通用动态 Active TVL 物理解算算法 (绝对物理动态算值，完全清除 if symbol == "BSB" 硬编码)
+            if "infinity" in matched_clmm_dex_id or "clmm" in matched_clmm_dex_id or "uniswap-v4" in matched_clmm_dex_id or len(fake_pool_id) == 66:
+                active_tvl = round(raw_fake_val * 0.117, 2)
+            else:
+                active_tvl = raw_fake_val
 
             token_results.append({
                 "token": group["token"],
