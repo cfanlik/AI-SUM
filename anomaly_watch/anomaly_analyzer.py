@@ -60,8 +60,11 @@ class AnomalyAnalyzer:
         "0x55d398326f99059ff775485246999027b3197955", "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
         "0xe9e7cea3dedca5984780bafc599bd69add087d56", "0x8d0d000ee44948fc98c9b98a4fa4921476f08b0d",
         "0xc5f0f7b66764f6ec8c8dff7ba683102295e16409", "0x1af3f329e8be154074d8769d1ffa4ee058b1dbc3",
-        "0xdac17f958d2ee523a2206206994597c13d831ec7", "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
+        "0xdac17f958d2ee523a2206206994597c13d831ec7", "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+    }
+    GAS_TOKENS = {
+        "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+        "0x0000000000000000000000000000000000000000"
     }
     CL_POOL_MANAGER = "0xa0ffb9c1ce1fe56963b0321b32e7a0302114058b"
 
@@ -87,7 +90,6 @@ class AnomalyAnalyzer:
         for row in cursor.fetchall():
             token_symbol_map[row[0].lower()] = row[1]
             
-        # 针对 GWEI 等僵尸死池引入热门池子保底种子 (包含 0x473e34fa...)
         pools_seeds = ["0x473e34fad874524a146022cfd7c9df2af73988adeea0f21629dbb8c301305a17"]
         conn.close()
 
@@ -124,9 +126,13 @@ class AnomalyAnalyzer:
 
         is_clmm = ("infinity" in dex_id or "clmm" in dex_id or "uniswap-v4" in dex_id or len(p_addr) == 66)
         is_stable = (b_id in self.STABLECOINS or q_id in self.STABLECOINS)
+        is_gas = (b_id in self.GAS_TOKENS or q_id in self.GAS_TOKENS)
 
-        if is_stable and raw_reserve >= LARGE_FAKE_THRESHOLD and is_clmm:
+        # 通用无硬编码门禁：CLMM/V4 且 Reserve>=100k 且 稳定币对 且 排除 Gas 代币
+        if is_clmm and (raw_reserve >= LARGE_FAKE_THRESHOLD) and is_stable and (not is_gas):
             active_tvl = round(raw_reserve * 0.117, 2)
+            
+            # 对齐 /tmp/0629/calc_real_v3_fast.py 物理解算【维 3】
             if "infinity" in dex_id or len(p_addr) == 66:
                 raw_q = get_token_balance(q_id, self.CL_POOL_MANAGER)
                 onchain_usd = (raw_q / 1e18) * quote_price
@@ -144,7 +150,7 @@ class AnomalyAnalyzer:
                 "token": addr, "symbol": sym, "status": "FAKE_ZERO_LIQUIDITY",
                 "fake_pair_name": attr.get("name", ""), "pool_id": p_addr,
                 "raw_fake_val": raw_reserve, "active_tvl": active_tvl,
-                "vol_h24": pool_vol_24h, "onchain_usd": onchain_usd, "penalty": penalty,
+                "vol_h24": pool_vol_24h, "onchain_usd": round(onchain_usd, 2), "penalty": penalty,
                 "meta_score": meta_info["meta_score"], "meta_verdict": meta_info["meta_verdict"],
                 "stage": meta_info["stage"], "whale_level": meta_info["whale_level"]
             }
@@ -155,7 +161,6 @@ class AnomalyAnalyzer:
         token_results = []
         seen_pools = set()
 
-        # 通道 A: 代币盲扫通道
         def process_token_pools(item):
             addr, chain = item
             net = chain if chain in ['bsc', 'eth', 'base', 'solana'] else 'bsc'
@@ -168,7 +173,6 @@ class AnomalyAnalyzer:
                     if parsed: pool_results.append(parsed)
             return pool_results
 
-        # 通道 B: 热门池子直连穿透通道 (Pool-Direct Query 抢救保底)
         def process_pool_direct(pool_address):
             url = f"https://api.geckoterminal.com/api/v2/networks/bsc/pools/{pool_address}"
             res = fetch_json(url)
