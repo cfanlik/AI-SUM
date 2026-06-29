@@ -5,6 +5,9 @@
     "https://bsc-dataseed1.ninicoin.io/"
   ],
   "CL_POOL_MANAGER": "0xa0ffb9c1ce1fe56963b0321b32e7a0302114058b",
+  "POOLS_SEEDS": [
+    "0x473e34fad874524a146022cfd7c9df2af73988adeea0f21629dbb8c301305a17"
+  ],
   "STABLECOINS": [
     "0x55d398326f99059ff775485246999027b3197955",
     "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",

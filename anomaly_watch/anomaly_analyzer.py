@@ -8,7 +8,8 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from config import get_proxy
-from anomaly_watch.config import DB_PATH, AI_SUM_DB_PATH, MICRO_POOL_THRESHOLD, LARGE_FAKE_THRESHOLD, CORE_ASSETS, STABLECOINS, GAS_TOKENS, CL_POOL_MANAGER, RPC_ENDPOINTS
+import urllib.error
+from anomaly_watch.config import DB_PATH, AI_SUM_DB_PATH, MICRO_POOL_THRESHOLD, LARGE_FAKE_THRESHOLD, CORE_ASSETS, STABLECOINS, GAS_TOKENS, CL_POOL_MANAGER, RPC_ENDPOINTS, POOLS_SEEDS, ACTIVE_TVL_FACTOR, PENALTY_SCORE
 
 def clean_addr(s):
     if not s: return ""
@@ -16,7 +17,7 @@ def clean_addr(s):
     if "_" in s: s = s.split("_")[-1]
     return s
 
-def fetch_json(url, max_retries=3):
+def fetch_json(url, max_retries=4):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     for attempt in range(max_retries):
         p_url = get_proxy()
@@ -27,26 +28,32 @@ def fetch_json(url, max_retries=3):
             with opener.open(req, timeout=4) as resp:
                 if resp.status == 200:
                     return json.loads(resp.read().decode('utf-8'))
+        except urllib.error.HTTPError as e:
+            # 捕获 HTTP 429 Rate Limit 或 403 封禁，强制沉睡并轮换代理
+            time.sleep(0.3 * (attempt + 1))
         except Exception:
             time.sleep(0.2 * (attempt + 1))
     return None
 
 def rpc_call(method, params):
     headers = {'Content-Type': 'application/json'}
-    p_url = get_proxy()
-    proxy_handler = urllib.request.ProxyHandler({'http': p_url, 'https': p_url}) if p_url else urllib.request.BaseHandler()
-    opener = urllib.request.build_opener(proxy_handler)
     data = json.dumps({"jsonrpc": "2.0", "method": method, "params": params, "id": 1}).encode('utf-8')
     
     for rpc_url in RPC_ENDPOINTS:
-        try:
-            req = urllib.request.Request(rpc_url, data=data, headers=headers)
-            with opener.open(req, timeout=4) as resp:
-                res = json.loads(resp.read().decode('utf-8'))
-                if res and "result" in res:
-                    return res
-        except Exception:
-            continue
+        # 针对每个 RPC 节点提供最多 2 次代理轮询尝试
+        for attempt in range(2):
+            p_url = get_proxy()
+            proxy_handler = urllib.request.ProxyHandler({'http': p_url, 'https': p_url}) if p_url else urllib.request.BaseHandler()
+            opener = urllib.request.build_opener(proxy_handler)
+            try:
+                req = urllib.request.Request(rpc_url, data=data, headers=headers)
+                with opener.open(req, timeout=4) as resp:
+                    res = json.loads(resp.read().decode('utf-8'))
+                    if res and "result" in res:
+                        return res
+            except Exception:
+                time.sleep(0.1)
+                continue
     return None
 
 def get_token_balance(token_address, owner_address):
@@ -85,7 +92,7 @@ class AnomalyAnalyzer:
         for row in cursor.fetchall():
             token_symbol_map[row[0].lower()] = row[1]
             
-        pools_seeds = ["0x473e34fad874524a146022cfd7c9df2af73988adeea0f21629dbb8c301305a17"]
+        pools_seeds = POOLS_SEEDS
         conn.close()
 
         meta_map = {}
@@ -125,7 +132,7 @@ class AnomalyAnalyzer:
 
         # 严格风控门禁：CLMM/V4 且 标称Reserve >= $10万 且 精准稳定币配对 且 物理排除Gas币/其它配对干扰
         if is_clmm and (raw_reserve >= LARGE_FAKE_THRESHOLD) and is_stable and (not is_gas):
-            active_tvl = round(raw_reserve * 0.117, 2)
+            active_tvl = round(raw_reserve * ACTIVE_TVL_FACTOR, 2)
             
             # 对齐 /tmp/0629/calc_real_v3_fast.py 物理解算【维 3】
             pools_to_calc = all_pools if all_pools else [p]
@@ -151,7 +158,7 @@ class AnomalyAnalyzer:
                     val_q = (raw_q / 1e18) * cur_quote_price
                     onchain_usd += (val_b + val_q)
 
-            penalty = -40.0 if pool_vol_24h < 50.0 else 0.0
+            penalty = PENALTY_SCORE if pool_vol_24h < 50.0 else 0.0
             addr = b_id if b_id not in STABLECOINS else q_id
             sym = token_symbol_map.get(addr.lower(), "N/A")
             meta_info = meta_map.get(addr.lower(), {"meta_score": None, "meta_verdict": "N/A", "stage": "N/A", "whale_level": "N/A"})
