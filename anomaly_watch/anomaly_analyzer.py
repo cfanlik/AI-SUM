@@ -8,7 +8,7 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from config import get_proxy
-from anomaly_watch.config import DB_PATH, AI_SUM_DB_PATH, MICRO_POOL_THRESHOLD, LARGE_FAKE_THRESHOLD, CORE_ASSETS
+from anomaly_watch.config import DB_PATH, AI_SUM_DB_PATH, MICRO_POOL_THRESHOLD, LARGE_FAKE_THRESHOLD, CORE_ASSETS, STABLECOINS, GAS_TOKENS, CL_POOL_MANAGER, RPC_ENDPOINTS
 
 def clean_addr(s):
     if not s: return ""
@@ -32,18 +32,22 @@ def fetch_json(url, max_retries=3):
     return None
 
 def rpc_call(method, params):
-    RPC_URL = "https://bsc-dataseed.binance.org/"
     headers = {'Content-Type': 'application/json'}
     p_url = get_proxy()
     proxy_handler = urllib.request.ProxyHandler({'http': p_url, 'https': p_url}) if p_url else urllib.request.BaseHandler()
     opener = urllib.request.build_opener(proxy_handler)
     data = json.dumps({"jsonrpc": "2.0", "method": method, "params": params, "id": 1}).encode('utf-8')
-    req = urllib.request.Request(RPC_URL, data=data, headers=headers)
-    try:
-        with opener.open(req, timeout=4) as resp:
-            return json.loads(resp.read().decode('utf-8'))
-    except Exception:
-        return None
+    
+    for rpc_url in RPC_ENDPOINTS:
+        try:
+            req = urllib.request.Request(rpc_url, data=data, headers=headers)
+            with opener.open(req, timeout=4) as resp:
+                res = json.loads(resp.read().decode('utf-8'))
+                if res and "result" in res:
+                    return res
+        except Exception:
+            continue
+    return None
 
 def get_token_balance(token_address, owner_address):
     if not token_address or not owner_address or token_address == "N/A": return 0
@@ -56,21 +60,12 @@ def get_token_balance(token_address, owner_address):
     return 0
 
 class AnomalyAnalyzer:
-    STABLECOINS = {
-        "0x55d398326f99059ff775485246999027b3197955", "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
-        "0xe9e7cea3dedca5984780bafc599bd69add087d56", "0x8d0d000ee44948fc98c9b98a4fa4921476f08b0d",
-        "0xc5f0f7b66764f6ec8c8dff7ba683102295e16409", "0x1af3f329e8be154074d8769d1ffa4ee058b1dbc3",
-        "0xdac17f958d2ee523a2206206994597c13d831ec7", "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
-    }
-    GAS_TOKENS = {
-        "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-        "0x0000000000000000000000000000000000000000"
-    }
-    CL_POOL_MANAGER = "0xa0ffb9c1ce1fe56963b0321b32e7a0302114058b"
-
     def __init__(self):
         self.db_path = DB_PATH
         self.ai_sum_db_path = AI_SUM_DB_PATH
+        self.stablecoins = STABLECOINS
+        self.gas_tokens = GAS_TOKENS
+        self.cl_pool_manager = CL_POOL_MANAGER
 
     def load_tokens_pools_and_meta(self):
         conn = sqlite3.connect(self.db_path)
@@ -125,10 +120,10 @@ class AnomalyAnalyzer:
         quote_price = float(attr.get("quote_token_price_usd", 1.0) or 1.0)
 
         is_clmm = ("infinity" in dex_id or "clmm" in dex_id or "uniswap-v4" in dex_id or len(p_addr) == 66)
-        is_stable = (b_id in self.STABLECOINS or q_id in self.STABLECOINS)
-        is_gas = (b_id in self.GAS_TOKENS or q_id in self.GAS_TOKENS)
+        is_stable = (b_id in STABLECOINS or q_id in STABLECOINS)
+        is_gas = (b_id in GAS_TOKENS or q_id in GAS_TOKENS)
 
-        # 通用无硬编码门禁：CLMM/V4 且 Reserve>=100k 且 稳定币对 且 排除 Gas 代币
+        # 严格风控门禁：CLMM/V4 且 标称Reserve >= $10万 且 精准稳定币配对 且 物理排除Gas币/其它配对干扰
         if is_clmm and (raw_reserve >= LARGE_FAKE_THRESHOLD) and is_stable and (not is_gas):
             active_tvl = round(raw_reserve * 0.117, 2)
             
@@ -146,7 +141,7 @@ class AnomalyAnalyzer:
                 cur_quote_price = float(cur_attr.get("quote_token_price_usd", 1.0) or 1.0)
 
                 if "infinity" in cur_dex_id or len(cur_p_addr) == 66:
-                    raw_q = get_token_balance(cur_q_id, self.CL_POOL_MANAGER)
+                    raw_q = get_token_balance(cur_q_id, CL_POOL_MANAGER)
                     val_q = (raw_q / 1e18) * cur_quote_price
                     if val_q > 0: onchain_usd += val_q
                 else:
@@ -157,7 +152,7 @@ class AnomalyAnalyzer:
                     onchain_usd += (val_b + val_q)
 
             penalty = -40.0 if pool_vol_24h < 50.0 else 0.0
-            addr = b_id if b_id not in self.STABLECOINS else q_id
+            addr = b_id if b_id not in STABLECOINS else q_id
             sym = token_symbol_map.get(addr.lower(), "N/A")
             meta_info = meta_map.get(addr.lower(), {"meta_score": None, "meta_verdict": "N/A", "stage": "N/A", "whale_level": "N/A"})
 
