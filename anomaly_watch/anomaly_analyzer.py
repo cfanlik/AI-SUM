@@ -84,13 +84,7 @@ class AnomalyAnalyzer:
     def load_tokens_pools_and_meta(self):
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        query = """
-        SELECT DISTINCT token_address, 'bsc' as chain FROM token_scores
-        UNION
-        SELECT DISTINCT token_address, 'bsc' as chain FROM token_names
-        UNION
-        SELECT DISTINCT token_address, 'bsc' as chain FROM bubblemap_holders
-        """
+        query = "SELECT DISTINCT token_address, 'bsc' as chain FROM bubblemap_holders"
         cursor.execute(query)
         tokens = cursor.fetchall()
         
@@ -133,7 +127,8 @@ class AnomalyAnalyzer:
         token_price = float(attr.get("base_token_price_usd", 0) or 0)
         quote_price = float(attr.get("quote_token_price_usd", 1.0) or 1.0)
 
-        is_clmm = ("infinity" in dex_id or "clmm" in dex_id or "uniswap-v4" in dex_id or len(p_addr) == 66)
+        # 物理精准断言：只允许 PancakeSwap Infinity CLAMM 与 Uniswap V4 (或 66 字节长哈希) 进入风控审计
+        is_clmm = ("infinity" in dex_id or "uniswap-v4" in dex_id or len(p_addr) == 66)
         is_legal_pair = (b_id in LEGAL_QUOTE_ASSETS or q_id in LEGAL_QUOTE_ASSETS)
 
         # 核心物理风控门禁：CLMM/V4 且 标称Reserve >= $10万 且 包含稳定币或BNB/WBNB等主链Gas合法对
