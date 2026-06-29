@@ -64,6 +64,15 @@ def get_token_balance(token_address, owner_address):
         except Exception: return 0
     return 0
 
+def get_native_or_token_balance(token_addr, owner_addr):
+    if not token_addr or token_addr == "0x0000000000000000000000000000000000000000":
+        r = rpc_call("eth_getBalance", [owner_addr, "latest"])
+        if r and "result" in r and r["result"] != "0x":
+            try: return int(r["result"], 16)
+            except Exception: return 0
+        return 0
+    return get_token_balance(token_addr, owner_addr)
+
 class AnomalyAnalyzer:
     def __init__(self):
         self.db_path = DB_PATH
@@ -75,13 +84,7 @@ class AnomalyAnalyzer:
     def load_tokens_pools_and_meta(self):
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        query = """
-        SELECT DISTINCT token_address, 'bsc' as chain FROM token_scores
-        UNION
-        SELECT DISTINCT token_address, 'bsc' as chain FROM token_names
-        UNION
-        SELECT DISTINCT token_address, 'bsc' as chain FROM bubblemap_holders
-        """
+        query = "SELECT DISTINCT token_address, 'bsc' as chain FROM bubblemap_holders"
         cursor.execute(query)
         tokens = cursor.fetchall()
         
@@ -124,7 +127,8 @@ class AnomalyAnalyzer:
         token_price = float(attr.get("base_token_price_usd", 0) or 0)
         quote_price = float(attr.get("quote_token_price_usd", 1.0) or 1.0)
 
-        is_clmm = ("infinity" in dex_id or "clmm" in dex_id or "uniswap-v4" in dex_id or len(p_addr) == 66)
+        # 物理精准断言：只允许 PancakeSwap Infinity CLAMM 与 Uniswap V4 (或 66 字节长哈希) 进入风控审计
+        is_clmm = ("infinity" in dex_id or "uniswap-v4" in dex_id or len(p_addr) == 66)
         is_legal_pair = (b_id in LEGAL_QUOTE_ASSETS or q_id in LEGAL_QUOTE_ASSETS)
 
         # 核心物理风控门禁：CLMM/V4 且 标称Reserve >= $10万 且 包含稳定币或BNB/WBNB等主链Gas合法对
@@ -135,16 +139,13 @@ class AnomalyAnalyzer:
             # 核心物理单池独立解算：仅对当前物理池合约检索真实托管本金，彻底隔离多池污染
             onchain_usd = 0.0
             cur_p_addr = p_addr
-            if "infinity" in dex_id or len(cur_p_addr) == 66:
-                raw_q = get_token_balance(q_id, CL_POOL_MANAGER)
-                val_q = (raw_q / 1e18) * quote_price
-                if val_q > 0: onchain_usd += val_q
-            else:
-                raw_b = get_token_balance(b_id, cur_p_addr)
-                raw_q = get_token_balance(q_id, cur_p_addr)
-                val_b = (raw_b / 1e18) * token_price
-                val_q = (raw_q / 1e18) * quote_price
-                onchain_usd += (val_b + val_q)
+            target_owner = CL_POOL_MANAGER if ("infinity" in dex_id or len(cur_p_addr) == 66) else cur_p_addr
+            
+            raw_b = get_native_or_token_balance(b_id, target_owner)
+            raw_q = get_native_or_token_balance(q_id, target_owner)
+            val_b = (raw_b / 1e18) * token_price
+            val_q = (raw_q / 1e18) * quote_price
+            onchain_usd = val_b + val_q
 
             # 核心诱多防误杀断言：维 3 链上实测托管本金必须小等于 $10,000 美元
             if onchain_usd < ONCHAIN_FAKE_LIMIT:
