@@ -24,8 +24,8 @@ class AnomalyReportGenerator:
         content += "> **物理风控断言**：绝对物理拆分四大维度（维1：API标称/Active TVL，维2：24h成交流水，维3：RPC实测沉淀本金，维4：庄控与仲裁判定）。零换手伪流动性诱多陷阱将在 Meta 仲裁中物理扣除 -40 分（物理筛查起点: $100,000.00）。\n\n"
 
         # 表头优化为两行 <br> 分隔，压缩列宽度
-        content += "| 序号 | 代币名称<br>(Symbol) | 代币合约地址 | 池子地址 | 识别配对名称 | 维 1：API 理论虚拟标称<br>(Virtual Reserve / Active TVL) | 维 2：物理 24h 真实成交流水<br>(24h Volume) | 维 3：链上合约实际托管本金<br>(On-Chain Balance) | Meta 仲裁<br>惩罚扣分 | 维 4：最新仲裁判定<br>(Verdict) | 维 4：当前生命周期阶段<br>(Stage) | 维 4：庄控等级<br>(Whale Level) |\n"
-        content += "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n"
+        content += "| 序号 | 代币名称<br>(Symbol) | 代币合约地址 | 池子地址 | 识别配对名称 | 维 1：API 理论虚拟标称 | 维 2：24h 流水 | 维 3：链上合约实际托管本金 |\n"
+        content += "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n"
 
         for idx, t in enumerate(fake_liq_tokens, 1):
             addr = t['token']
@@ -36,18 +36,11 @@ class AnomalyReportGenerator:
             trunc_pool = f"`{p_id[:5]}...{p_id[-6:]}`" if p_id != 'N/A' else 'N/A'
             span_pool = f'<span title="{p_id}">{trunc_pool}</span>' if p_id != 'N/A' else 'N/A'
 
-            raw_val_str = f"${t['raw_fake_val']:,.2f}"
-            act_val_str = f"${t['active_tvl']:,.2f}"
-            dim1_str = f"{raw_val_str}<br>*(修正Active TVL: {act_val_str})*"
-            
-            dim2_str = f"**${t['vol_h24']:,.2f}**"
+            dim1_str = f"**${t['active_tvl']:,.2f}**"
+            dim2_str = f"${t['vol_h24']:,.2f}"
             dim3_str = f"**${t['onchain_usd']:,.2f}**"
-            penalty_str = f"**{t['penalty']:.0f} 分**"
-            verdict_str = f"`{t['meta_verdict']}`"
-            stage_str = f"`{t['stage']}`"
-            whale_str = f"`{t['whale_level']}`" if t['whale_level'] != 'N/A' else '`-`'
 
-            content += f"| {idx} | `{t['symbol']}` | {span_addr} | {span_pool} | {t['fake_pair_name']} | {dim1_str} | {dim2_str} | {dim3_str} | {penalty_str} | {verdict_str} | {stage_str} | {whale_str} |\n"
+            content += f"| {idx} | `{t['symbol']}` | {span_addr} | {span_pool} | {t['fake_pair_name']} | {dim1_str} | {dim2_str} | {dim3_str} |\n"
 
         content += "\n## 二、 核心有效微型代币备忘表 (MICRO_CORE_TOKENS)\n\n"
         content += "| 序号 | 代币名称<br>(Symbol) | 代币合约地址 | 仲裁综合得分<br>(Meta Score) | 维 4：最新仲裁判定<br>(Verdict) | 维 4：当前生命周期阶段<br>(Stage) | 维 4：庄控等级<br>(Whale Level) |\n"
