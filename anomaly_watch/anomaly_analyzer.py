@@ -64,6 +64,15 @@ def get_token_balance(token_address, owner_address):
         except Exception: return 0
     return 0
 
+def get_native_or_token_balance(token_addr, owner_addr):
+    if not token_addr or token_addr == "0x0000000000000000000000000000000000000000":
+        r = rpc_call("eth_getBalance", [owner_addr, "latest"])
+        if r and "result" in r and r["result"] != "0x":
+            try: return int(r["result"], 16)
+            except Exception: return 0
+        return 0
+    return get_token_balance(token_addr, owner_addr)
+
 class AnomalyAnalyzer:
     def __init__(self):
         self.db_path = DB_PATH
@@ -135,16 +144,13 @@ class AnomalyAnalyzer:
             # 核心物理单池独立解算：仅对当前物理池合约检索真实托管本金，彻底隔离多池污染
             onchain_usd = 0.0
             cur_p_addr = p_addr
-            if "infinity" in dex_id or len(cur_p_addr) == 66:
-                raw_q = get_token_balance(q_id, CL_POOL_MANAGER)
-                val_q = (raw_q / 1e18) * quote_price
-                if val_q > 0: onchain_usd += val_q
-            else:
-                raw_b = get_token_balance(b_id, cur_p_addr)
-                raw_q = get_token_balance(q_id, cur_p_addr)
-                val_b = (raw_b / 1e18) * token_price
-                val_q = (raw_q / 1e18) * quote_price
-                onchain_usd += (val_b + val_q)
+            target_owner = CL_POOL_MANAGER if ("infinity" in dex_id or len(cur_p_addr) == 66) else cur_p_addr
+            
+            raw_b = get_native_or_token_balance(b_id, target_owner)
+            raw_q = get_native_or_token_balance(q_id, target_owner)
+            val_b = (raw_b / 1e18) * token_price
+            val_q = (raw_q / 1e18) * quote_price
+            onchain_usd = val_b + val_q
 
             # 核心诱多防误杀断言：维 3 链上实测托管本金必须小等于 $10,000 美元
             if onchain_usd < ONCHAIN_FAKE_LIMIT:
