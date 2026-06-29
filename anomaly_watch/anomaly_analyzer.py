@@ -112,7 +112,7 @@ class AnomalyAnalyzer:
 
         return tokens, pools_seeds, token_symbol_map, meta_map
 
-    def parse_single_pool_data(self, p, token_symbol_map, meta_map):
+    def parse_single_pool_data(self, p, token_symbol_map, meta_map, all_pools=None):
         p_addr = p.get("id", "").split("_")[-1]
         attr = p.get("attributes", {})
         rel = p.get("relationships", {})
@@ -133,13 +133,28 @@ class AnomalyAnalyzer:
             active_tvl = round(raw_reserve * 0.117, 2)
             
             # 对齐 /tmp/0629/calc_real_v3_fast.py 物理解算【维 3】
-            if "infinity" in dex_id or len(p_addr) == 66:
-                raw_q = get_token_balance(q_id, self.CL_POOL_MANAGER)
-                onchain_usd = (raw_q / 1e18) * quote_price
-            else:
-                raw_b = get_token_balance(b_id, p_addr)
-                raw_q = get_token_balance(q_id, p_addr)
-                onchain_usd = ((raw_b / 1e18) * token_price) + ((raw_q / 1e18) * quote_price)
+            pools_to_calc = all_pools if all_pools else [p]
+            onchain_usd = 0.0
+            for pool_item in pools_to_calc[:2]:
+                cur_p_addr = pool_item.get("id", "").split("_")[-1]
+                cur_attr = pool_item.get("attributes", {})
+                cur_rel = pool_item.get("relationships", {})
+                cur_dex_id = cur_rel.get("dex", {}).get("data", {}).get("id", "").lower()
+                cur_b_id = clean_addr(cur_rel.get("base_token", {}).get("data", {}).get("id", ""))
+                cur_q_id = clean_addr(cur_rel.get("quote_token", {}).get("data", {}).get("id", ""))
+                cur_token_price = float(cur_attr.get("base_token_price_usd", 0) or 0)
+                cur_quote_price = float(cur_attr.get("quote_token_price_usd", 1.0) or 1.0)
+
+                if "infinity" in cur_dex_id or len(cur_p_addr) == 66:
+                    raw_q = get_token_balance(cur_q_id, self.CL_POOL_MANAGER)
+                    val_q = (raw_q / 1e18) * cur_quote_price
+                    if val_q > 0: onchain_usd += val_q
+                else:
+                    raw_b = get_token_balance(cur_b_id, cur_p_addr)
+                    raw_q = get_token_balance(cur_q_id, cur_p_addr)
+                    val_b = (raw_b / 1e18) * cur_token_price
+                    val_q = (raw_q / 1e18) * cur_quote_price
+                    onchain_usd += (val_b + val_q)
 
             penalty = -40.0 if pool_vol_24h < 50.0 else 0.0
             addr = b_id if b_id not in self.STABLECOINS else q_id
@@ -168,8 +183,9 @@ class AnomalyAnalyzer:
             res = fetch_json(url)
             pool_results = []
             if res and "data" in res:
-                for p in res["data"]:
-                    parsed = self.parse_single_pool_data(p, token_symbol_map, meta_map)
+                all_p = res["data"]
+                for p in all_p:
+                    parsed = self.parse_single_pool_data(p, token_symbol_map, meta_map, all_pools=all_p)
                     if parsed: pool_results.append(parsed)
             return pool_results
 
@@ -177,7 +193,7 @@ class AnomalyAnalyzer:
             url = f"https://api.geckoterminal.com/api/v2/networks/bsc/pools/{pool_address}"
             res = fetch_json(url)
             if res and "data" in res:
-                parsed = self.parse_single_pool_data(res["data"], token_symbol_map, meta_map)
+                parsed = self.parse_single_pool_data(res["data"], token_symbol_map, meta_map, all_pools=[res["data"]])
                 return [parsed] if parsed else []
             return []
 
