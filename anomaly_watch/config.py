@@ -1,5 +1,5 @@
 import os
-import sys
+import json
 
 DB_PATH = os.getenv("DB_PATH", "/opt/select-coin/data/select.db")
 AI_SUM_DB_PATH = os.getenv("AI_SUM_DB_PATH", "/opt/AI-SUM/select-sum.db")
@@ -7,15 +7,19 @@ AI_SUM_DB_PATH = os.getenv("AI_SUM_DB_PATH", "/opt/AI-SUM/select-sum.db")
 MICRO_POOL_THRESHOLD = 5000.0
 LARGE_FAKE_THRESHOLD = 100000.0
 
-CORE_ASSETS = {
-    "0x55d398326f99059ff775485246999027b3197955", "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
-    "0xe9e7cea3dedca5984780bafc599bd69add087d56", "0x8d0d000ee44948fc98c9b98a4fa4921476f08b0d",
-    "0xc5f0f7b66764f6ec8c8dff7ba683102295e16409", "0x1af3f329e8be154074d8769d1ffa4ee058b1dbc3",
-    "0xdac17f958d2ee523a2206206994597c13d831ec7", "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-    "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", "es9vmfrznebfdj3b25w74fhd8wts2cqv5dpx599144f",
-    "epjfwdd5aufqssqem2qn1xzybapc8g4wggkzpw54v28", "0x0000000000000000000000000000000000000000",
-    "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", "0x2170ed0880ac9a755fd29b2688956bd959f933f8",
-    "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", "0x4200000000000000000000000000000000000006",
-    "so11111111111111111111111111111111111111112", "0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c",
-    "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599", "0xcb97678385d86d2c2574610887e5b326305a415a"
-}
+# 动态解析 JSON 资产配置文件
+CONFIG_FILE = os.path.join(os.path.dirname(__file__), "assets_config.json")
+_config_data = {}
+if os.path.exists(CONFIG_FILE):
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            _config_data = json.load(f)
+    except Exception:
+        pass
+
+RPC_ENDPOINTS = _config_data.get("RPC_ENDPOINTS", ["https://bsc-dataseed.binance.org/"])
+CL_POOL_MANAGER = _config_data.get("CL_POOL_MANAGER", "0xa0ffb9c1ce1fe56963b0321b32e7a0302114058b")
+STABLECOINS = set(_config_data.get("STABLECOINS", []))
+GAS_TOKENS = set(_config_data.get("GAS_TOKENS", []))
+CORE_ASSETS = set(_config_data.get("CORE_ASSETS", []))
+
