@@ -1,24 +1,14 @@
+import sys
+sys.path.insert(0, "/opt/select-coin")
+sys.path.insert(0, "/opt/AI-SUM")
 import sqlite3
 import urllib.request
 import json
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from config import get_proxy
 from anomaly_watch.config import DB_PATH, AI_SUM_DB_PATH, MICRO_POOL_THRESHOLD, LARGE_FAKE_THRESHOLD, CORE_ASSETS
-
-def get_env_proxy():
-    env_path = "/opt/select-coin/.env"
-    if os.path.exists(env_path):
-        with open(env_path, "r") as f:
-            for line in f:
-                if line.startswith("PROXY_URL="):
-                    val = line.split("=", 1)[1].strip().strip('"').strip("'")
-                    if val:
-                        if val.startswith("socks://"): val = val.replace("socks://", "socks5://")
-                        return val
-    return None
-
-PROXY_URL = get_env_proxy()
 
 def clean_addr(s):
     if not s: return ""
@@ -26,23 +16,26 @@ def clean_addr(s):
     if "_" in s: s = s.split("_")[-1]
     return s
 
-def fetch_json(url):
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    proxy_handler = urllib.request.ProxyHandler({'http': PROXY_URL, 'https': PROXY_URL}) if PROXY_URL else urllib.request.BaseHandler()
-    opener = urllib.request.build_opener(proxy_handler)
-    req = urllib.request.Request(url, headers=headers)
-    for retry in range(2):
+def fetch_json(url, max_retries=3):
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    for attempt in range(max_retries):
+        p_url = get_proxy()
+        proxy_handler = urllib.request.ProxyHandler({'http': p_url, 'https': p_url}) if p_url else urllib.request.BaseHandler()
+        opener = urllib.request.build_opener(proxy_handler)
+        req = urllib.request.Request(url, headers=headers)
         try:
             with opener.open(req, timeout=5) as resp:
-                return json.loads(resp.read().decode('utf-8'))
+                if resp.status == 200:
+                    return json.loads(resp.read().decode('utf-8'))
         except Exception:
-            time.sleep(0.2)
+            time.sleep(0.2 * (attempt + 1))
     return None
 
 def rpc_call(method, params):
     RPC_URL = "https://bsc-dataseed.binance.org/"
     headers = {'Content-Type': 'application/json'}
-    proxy_handler = urllib.request.ProxyHandler({'http': PROXY_URL, 'https': PROXY_URL}) if PROXY_URL else urllib.request.BaseHandler()
+    p_url = get_proxy()
+    proxy_handler = urllib.request.ProxyHandler({'http': p_url, 'https': p_url}) if p_url else urllib.request.BaseHandler()
     opener = urllib.request.build_opener(proxy_handler)
     data = json.dumps({"jsonrpc": "2.0", "method": method, "params": params, "id": 1}).encode('utf-8')
     req = urllib.request.Request(RPC_URL, data=data, headers=headers)
@@ -178,7 +171,7 @@ class AnomalyAnalyzer:
                         })
             return pool_results
 
-        with ThreadPoolExecutor(max_workers=20) as executor:
+        with ThreadPoolExecutor(max_workers=10) as executor:
             futures = [executor.submit(process_token_pools, t) for t in tokens]
             for f in as_completed(futures):
                 r = f.result()
