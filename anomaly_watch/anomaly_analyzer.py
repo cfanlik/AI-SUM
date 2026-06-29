@@ -129,30 +129,22 @@ class AnomalyAnalyzer:
 
         # 核心物理风控门禁：CLMM/V4 且 标称Reserve >= $10万 且 包含稳定币或BNB/WBNB等主链Gas合法对
         if is_clmm and (raw_reserve >= LARGE_FAKE_THRESHOLD) and is_legal_pair:
-            active_tvl = round(raw_reserve * ACTIVE_TVL_FACTOR, 2)
+            # 维 1 直接展现 API 原始名义价值（如 Pancake 官网 1.3M 挂单假象）
+            active_tvl = round(raw_reserve, 2)
             
-            pools_to_calc = all_pools if all_pools else [p]
+            # 核心物理单池独立解算：仅对当前物理池合约检索真实托管本金，彻底隔离多池污染
             onchain_usd = 0.0
-            for pool_item in pools_to_calc[:2]:
-                cur_p_addr = pool_item.get("id", "").split("_")[-1]
-                cur_attr = pool_item.get("attributes", {})
-                cur_rel = pool_item.get("relationships", {})
-                cur_dex_id = cur_rel.get("dex", {}).get("data", {}).get("id", "").lower()
-                cur_b_id = clean_addr(cur_rel.get("base_token", {}).get("data", {}).get("id", ""))
-                cur_q_id = clean_addr(cur_rel.get("quote_token", {}).get("data", {}).get("id", ""))
-                cur_token_price = float(cur_attr.get("base_token_price_usd", 0) or 0)
-                cur_quote_price = float(cur_attr.get("quote_token_price_usd", 1.0) or 1.0)
-
-                if "infinity" in cur_dex_id or len(cur_p_addr) == 66:
-                    raw_q = get_token_balance(cur_q_id, CL_POOL_MANAGER)
-                    val_q = (raw_q / 1e18) * cur_quote_price
-                    if val_q > 0: onchain_usd += val_q
-                else:
-                    raw_b = get_token_balance(cur_b_id, cur_p_addr)
-                    raw_q = get_token_balance(cur_q_id, cur_p_addr)
-                    val_b = (raw_b / 1e18) * cur_token_price
-                    val_q = (raw_q / 1e18) * cur_quote_price
-                    onchain_usd += (val_b + val_q)
+            cur_p_addr = p_addr
+            if "infinity" in dex_id or len(cur_p_addr) == 66:
+                raw_q = get_token_balance(q_id, CL_POOL_MANAGER)
+                val_q = (raw_q / 1e18) * quote_price
+                if val_q > 0: onchain_usd += val_q
+            else:
+                raw_b = get_token_balance(b_id, cur_p_addr)
+                raw_q = get_token_balance(q_id, cur_p_addr)
+                val_b = (raw_b / 1e18) * token_price
+                val_q = (raw_q / 1e18) * quote_price
+                onchain_usd += (val_b + val_q)
 
             # 核心诱多防误杀断言：维 3 链上实测托管本金必须小等于 $10,000 美元
             if onchain_usd < ONCHAIN_FAKE_LIMIT:
