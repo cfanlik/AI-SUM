@@ -9,7 +9,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from config import get_proxy
 import urllib.error
-from anomaly_watch.config import DB_PATH, AI_SUM_DB_PATH, MICRO_POOL_THRESHOLD, LARGE_FAKE_THRESHOLD, CORE_ASSETS, STABLECOINS, GAS_TOKENS, CL_POOL_MANAGER, RPC_ENDPOINTS, POOLS_SEEDS, ACTIVE_TVL_FACTOR, PENALTY_SCORE
+from anomaly_watch.config import DB_PATH, AI_SUM_DB_PATH, MICRO_POOL_THRESHOLD, LARGE_FAKE_THRESHOLD, CORE_ASSETS, STABLECOINS, GAS_TOKENS, CL_POOL_MANAGER, RPC_ENDPOINTS, POOLS_SEEDS, ACTIVE_TVL_FACTOR, PENALTY_SCORE, ONCHAIN_FAKE_LIMIT, LEGAL_QUOTE_ASSETS
 
 def clean_addr(s):
     if not s: return ""
@@ -29,7 +29,6 @@ def fetch_json(url, max_retries=4):
                 if resp.status == 200:
                     return json.loads(resp.read().decode('utf-8'))
         except urllib.error.HTTPError as e:
-            # 捕获 HTTP 429 Rate Limit 或 403 封禁，强制沉睡并轮换代理
             time.sleep(0.3 * (attempt + 1))
         except Exception:
             time.sleep(0.2 * (attempt + 1))
@@ -40,7 +39,6 @@ def rpc_call(method, params):
     data = json.dumps({"jsonrpc": "2.0", "method": method, "params": params, "id": 1}).encode('utf-8')
     
     for rpc_url in RPC_ENDPOINTS:
-        # 针对每个 RPC 节点提供最多 2 次代理轮询尝试
         for attempt in range(2):
             p_url = get_proxy()
             proxy_handler = urllib.request.ProxyHandler({'http': p_url, 'https': p_url}) if p_url else urllib.request.BaseHandler()
@@ -127,14 +125,12 @@ class AnomalyAnalyzer:
         quote_price = float(attr.get("quote_token_price_usd", 1.0) or 1.0)
 
         is_clmm = ("infinity" in dex_id or "clmm" in dex_id or "uniswap-v4" in dex_id or len(p_addr) == 66)
-        is_stable = (b_id in STABLECOINS or q_id in STABLECOINS)
-        is_gas = (b_id in GAS_TOKENS or q_id in GAS_TOKENS)
+        is_legal_pair = (b_id in LEGAL_QUOTE_ASSETS or q_id in LEGAL_QUOTE_ASSETS)
 
-        # 严格风控门禁：CLMM/V4 且 标称Reserve >= $10万 且 精准稳定币配对 且 物理排除Gas币/其它配对干扰
-        if is_clmm and (raw_reserve >= LARGE_FAKE_THRESHOLD) and is_stable and (not is_gas):
+        # 核心物理风控门禁：CLMM/V4 且 标称Reserve >= $10万 且 包含稳定币或BNB/WBNB等主链Gas合法对
+        if is_clmm and (raw_reserve >= LARGE_FAKE_THRESHOLD) and is_legal_pair:
             active_tvl = round(raw_reserve * ACTIVE_TVL_FACTOR, 2)
             
-            # 对齐 /tmp/0629/calc_real_v3_fast.py 物理解算【维 3】
             pools_to_calc = all_pools if all_pools else [p]
             onchain_usd = 0.0
             for pool_item in pools_to_calc[:2]:
@@ -158,19 +154,21 @@ class AnomalyAnalyzer:
                     val_q = (raw_q / 1e18) * cur_quote_price
                     onchain_usd += (val_b + val_q)
 
-            penalty = PENALTY_SCORE if pool_vol_24h < 50.0 else 0.0
-            addr = b_id if b_id not in STABLECOINS else q_id
-            sym = token_symbol_map.get(addr.lower(), "N/A")
-            meta_info = meta_map.get(addr.lower(), {"meta_score": None, "meta_verdict": "N/A", "stage": "N/A", "whale_level": "N/A"})
+            # 核心诱多防误杀断言：维 3 链上实测托管本金必须小等于 $10,000 美元
+            if onchain_usd < ONCHAIN_FAKE_LIMIT:
+                penalty = PENALTY_SCORE if pool_vol_24h < 50.0 else 0.0
+                addr = b_id if b_id not in LEGAL_QUOTE_ASSETS else q_id
+                sym = token_symbol_map.get(addr.lower(), "N/A")
+                meta_info = meta_map.get(addr.lower(), {"meta_score": None, "meta_verdict": "N/A", "stage": "N/A", "whale_level": "N/A"})
 
-            return {
-                "token": addr, "symbol": sym, "status": "FAKE_ZERO_LIQUIDITY",
-                "fake_pair_name": attr.get("name", ""), "pool_id": p_addr,
-                "raw_fake_val": raw_reserve, "active_tvl": active_tvl,
-                "vol_h24": pool_vol_24h, "onchain_usd": round(onchain_usd, 2), "penalty": penalty,
-                "meta_score": meta_info["meta_score"], "meta_verdict": meta_info["meta_verdict"],
-                "stage": meta_info["stage"], "whale_level": meta_info["whale_level"]
-            }
+                return {
+                    "token": addr, "symbol": sym, "status": "FAKE_ZERO_LIQUIDITY",
+                    "fake_pair_name": attr.get("name", ""), "pool_id": p_addr,
+                    "raw_fake_val": raw_reserve, "active_tvl": active_tvl,
+                    "vol_h24": pool_vol_24h, "onchain_usd": round(onchain_usd, 2), "penalty": penalty,
+                    "meta_score": meta_info["meta_score"], "meta_verdict": meta_info["meta_verdict"],
+                    "stage": meta_info["stage"], "whale_level": meta_info["whale_level"]
+                }
         return None
 
     def analyze(self):

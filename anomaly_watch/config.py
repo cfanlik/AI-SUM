@@ -6,6 +6,7 @@ AI_SUM_DB_PATH = os.getenv("AI_SUM_DB_PATH", "/opt/AI-SUM/select-sum.db")
 
 MICRO_POOL_THRESHOLD = 5000.0
 LARGE_FAKE_THRESHOLD = 100000.0
+ONCHAIN_FAKE_LIMIT = 10000.0
 ACTIVE_TVL_FACTOR = 0.117
 PENALTY_SCORE = -40.0
 
@@ -25,4 +26,11 @@ POOLS_SEEDS = _config_data.get("POOLS_SEEDS", ["0x473e34fad874524a146022cfd7c9df
 STABLECOINS = set(_config_data.get("STABLECOINS", []))
 GAS_TOKENS = set(_config_data.get("GAS_TOKENS", []))
 CORE_ASSETS = set(_config_data.get("CORE_ASSETS", []))
+
+# 合法交易对结算资产（稳定币 + 主链 Gas/原生资产）
+LEGAL_QUOTE_ASSETS = STABLECOINS.union({
+    "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", # WBNB / BNB
+    "0x2170ed0880ac9a755fd29b2688956bd959f933f8", # WETH / ETH
+    "0x0000000000000000000000000000000000000000"  # Native Zero
+})
 
