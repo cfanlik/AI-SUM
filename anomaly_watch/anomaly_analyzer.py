@@ -163,7 +163,7 @@ class AnomalyAnalyzer:
             # 核心物理单池独立解算：使用精度自适应与 Singleton 智能路由算法
             dec_b = get_decimals(b_id)
             dec_q = get_decimals(q_id)
-            is_singleton = ("infinity" in dex_id or "uniswap-v4" in dex_id or len(cur_p_addr) == 66)
+            is_singleton = ("infinity" in dex_id or "uniswap-v4" in dex_id or len(p_addr) == 66)
 
             if is_singleton:
                 vault_addr = INFINITY_VAULTS.get("bsc", "0x238a358808379702088667322f80ac48bad5e6c4")
@@ -175,14 +175,14 @@ class AnomalyAnalyzer:
                 val_target_usd = (raw_bal / (10 ** target_decimals)) * target_price
                 onchain_usd = val_target_usd * 2.0  # 双边估算法
             else:
-                raw_b = get_native_or_token_balance(b_id, cur_p_addr)
-                raw_q = get_native_or_token_balance(q_id, cur_p_addr)
+                raw_b = get_native_or_token_balance(b_id, p_addr)
+                raw_q = get_native_or_token_balance(q_id, p_addr)
                 val_b = (raw_b / (10 ** dec_b)) * token_price
                 val_q = (raw_q / (10 ** dec_q)) * quote_price
                 onchain_usd = val_b + val_q
 
             # 核心诱多防误杀断言：维 3 链上实测托管本金必须小等于 $10,000 美元
-            if onchain_usd < ONCHAIN_FAKE_LIMIT:
+            if onchain_usd < ONCHAIN_FAKE_LIMIT or onchain_usd < raw_reserve * ACTIVE_TVL_FACTOR:
                 penalty = PENALTY_SCORE if pool_vol_24h < 50.0 else 0.0
                 addr = b_id if b_id not in LEGAL_QUOTE_ASSETS else q_id
                 sym = token_symbol_map.get(addr.lower(), "N/A")
