@@ -182,7 +182,7 @@ class AnomalyAnalyzer:
                 onchain_usd = val_b + val_q
 
             # 核心诱多防误杀断言：维 3 链上实测托管本金必须小等于 $10,000 美元
-            if onchain_usd < ONCHAIN_FAKE_LIMIT or onchain_usd < raw_reserve * ACTIVE_TVL_FACTOR:
+            if onchain_usd < ONCHAIN_FAKE_LIMIT or (onchain_usd < LARGE_FAKE_THRESHOLD and onchain_usd < raw_reserve * ACTIVE_TVL_FACTOR):
                 penalty = PENALTY_SCORE if pool_vol_24h < 50.0 else 0.0
                 addr = b_id if b_id not in LEGAL_QUOTE_ASSETS else q_id
                 sym = token_symbol_map.get(addr.lower(), "N/A")
