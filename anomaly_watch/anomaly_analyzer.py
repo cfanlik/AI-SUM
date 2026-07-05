@@ -2,13 +2,12 @@ import sys
 sys.path.insert(0, "/opt/select-coin")
 sys.path.insert(0, "/opt/AI-SUM")
 import sqlite3
-import urllib.request
+import httpx
 import json
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from config import get_proxy
-import urllib.error
 from anomaly_watch.config import DB_PATH, AI_SUM_DB_PATH, MICRO_POOL_THRESHOLD, LARGE_FAKE_THRESHOLD, CORE_ASSETS, STABLECOINS, GAS_TOKENS, CL_POOL_MANAGER, RPC_ENDPOINTS, POOLS_SEEDS, ACTIVE_TVL_FACTOR, PENALTY_SCORE, ONCHAIN_FAKE_LIMIT, LEGAL_QUOTE_ASSETS
 
 def clean_addr(s):
@@ -17,18 +16,21 @@ def clean_addr(s):
     if "_" in s: s = s.split("_")[-1]
     return s
 
+INFINITY_VAULTS = {
+    "bsc": "0x238a358808379702088667322f80ac48bad5e6c4"
+}
+decimals_cache = {}
+
 def fetch_json(url, max_retries=4):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     for attempt in range(max_retries):
         p_url = get_proxy()
-        proxy_handler = urllib.request.ProxyHandler({'http': p_url, 'https': p_url}) if p_url else urllib.request.BaseHandler()
-        opener = urllib.request.build_opener(proxy_handler)
-        req = urllib.request.Request(url, headers=headers)
         try:
-            with opener.open(req, timeout=4) as resp:
-                if resp.status == 200:
-                    return json.loads(resp.read().decode('utf-8'))
-        except urllib.error.HTTPError as e:
+            with httpx.Client(proxy=p_url, headers=headers, timeout=4.0) as client:
+                resp = client.get(url)
+                if resp.status_code == 200:
+                    return resp.json()
+        except httpx.HTTPError:
             time.sleep(0.3 * (attempt + 1))
         except Exception:
             time.sleep(0.2 * (attempt + 1))
@@ -36,23 +38,45 @@ def fetch_json(url, max_retries=4):
 
 def rpc_call(method, params):
     headers = {'Content-Type': 'application/json'}
-    data = json.dumps({"jsonrpc": "2.0", "method": method, "params": params, "id": 1}).encode('utf-8')
-    
+    data = {"jsonrpc": "2.0", "method": method, "params": params, "id": 1}
     for rpc_url in RPC_ENDPOINTS:
         for attempt in range(2):
             p_url = get_proxy()
-            proxy_handler = urllib.request.ProxyHandler({'http': p_url, 'https': p_url}) if p_url else urllib.request.BaseHandler()
-            opener = urllib.request.build_opener(proxy_handler)
             try:
-                req = urllib.request.Request(rpc_url, data=data, headers=headers)
-                with opener.open(req, timeout=4) as resp:
-                    res = json.loads(resp.read().decode('utf-8'))
-                    if res and "result" in res:
-                        return res
+                with httpx.Client(proxy=p_url, headers=headers, timeout=4.0) as client:
+                    resp = client.post(rpc_url, json=data)
+                    if resp.status_code == 200:
+                        res = resp.json()
+                        if res and "result" in res:
+                            return res
             except Exception:
                 time.sleep(0.1)
                 continue
     return None
+
+def get_decimals(token_address):
+    if not token_address or token_address == "0x0000000000000000000000000000000000000000":
+        return 18
+    addr_lower = token_address.lower()
+    
+    # OOM 防护断言：内存缓存软上限保护，防止极端场景下 dict 无限增大
+    if len(decimals_cache) > 2000:
+        decimals_cache.clear()
+        
+    if addr_lower in decimals_cache:
+        return decimals_cache[addr_lower]
+    
+    # decimals() selector: 0x313ce567
+    r = rpc_call("eth_call", [{"to": token_address, "data": "0x313ce567"}, "latest"])
+    if r and "result" in r and r["result"] != "0x":
+        try:
+            val = int(r["result"], 16)
+            decimals_cache[addr_lower] = val
+            return val
+        except Exception:
+            pass
+    decimals_cache[addr_lower] = 18  # 默认回退
+    return 18
 
 def get_token_balance(token_address, owner_address):
     if not token_address or not owner_address or token_address == "N/A": return 0
@@ -136,16 +160,26 @@ class AnomalyAnalyzer:
             # 维 1 直接展现 API 原始名义价值（如 Pancake 官网 1.3M 挂单假象）
             active_tvl = round(raw_reserve, 2)
             
-            # 核心物理单池独立解算：仅对当前物理池合约检索真实托管本金，彻底隔离多池污染
-            onchain_usd = 0.0
-            cur_p_addr = p_addr
-            target_owner = CL_POOL_MANAGER if ("infinity" in dex_id or len(cur_p_addr) == 66) else cur_p_addr
-            
-            raw_b = get_native_or_token_balance(b_id, target_owner)
-            raw_q = get_native_or_token_balance(q_id, target_owner)
-            val_b = (raw_b / 1e18) * token_price
-            val_q = (raw_q / 1e18) * quote_price
-            onchain_usd = val_b + val_q
+            # 核心物理单池独立解算：使用精度自适应与 Singleton 智能路由算法
+            dec_b = get_decimals(b_id)
+            dec_q = get_decimals(q_id)
+            is_singleton = ("infinity" in dex_id or "uniswap-v4" in dex_id or len(cur_p_addr) == 66)
+
+            if is_singleton:
+                vault_addr = INFINITY_VAULTS.get("bsc", "0x238a358808379702088667322f80ac48bad5e6c4")
+                target_token = b_id if b_id not in LEGAL_QUOTE_ASSETS else q_id
+                target_decimals = dec_b if b_id not in LEGAL_QUOTE_ASSETS else dec_q
+                target_price = token_price if b_id not in LEGAL_QUOTE_ASSETS else quote_price
+                
+                raw_bal = get_native_or_token_balance(target_token, vault_addr)
+                val_target_usd = (raw_bal / (10 ** target_decimals)) * target_price
+                onchain_usd = val_target_usd * 2.0  # 双边估算法
+            else:
+                raw_b = get_native_or_token_balance(b_id, cur_p_addr)
+                raw_q = get_native_or_token_balance(q_id, cur_p_addr)
+                val_b = (raw_b / (10 ** dec_b)) * token_price
+                val_q = (raw_q / (10 ** dec_q)) * quote_price
+                onchain_usd = val_b + val_q
 
             # 核心诱多防误杀断言：维 3 链上实测托管本金必须小等于 $10,000 美元
             if onchain_usd < ONCHAIN_FAKE_LIMIT:
