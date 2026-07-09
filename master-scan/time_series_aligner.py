@@ -1,4 +1,4 @@
-"""
+﻿"""
 AI-SUM V5 — 时序对齐引擎
 - 对每个代币的最近 N 个快照构建 SnapshotDiff 对象
 - 计算地址名册换手、吸筹变化、持仓集中度变化、买卖行为变化
@@ -316,10 +316,13 @@ def build_time_series(
         latest_snapshot=snap_times[-1],
     )
 
-    # 加载最近 N+1 个快照的详情（逐对计算相邻 diff）
+    # 延迟加载快照详情（仅在缓存未命中需要计算 diff 时加载，避免无用的数据库查询和 dict 内存分配）
     snap_details: dict[str, list[dict]] = {}
-    for t in recent:
-        snap_details[t] = db_loader.load_snapshot_detail(conn, chain, addr, t)
+
+    def get_snap_detail(t: str) -> list[dict]:
+        if t not in snap_details:
+            snap_details[t] = db_loader.load_snapshot_detail(conn, chain, addr, t)
+        return snap_details[t]
 
     for i in range(1, len(recent)):
         t_old = recent[i - 1]
@@ -339,8 +342,8 @@ def build_time_series(
             # list 字段 JSON 存的是 list，直接用
         else:
             diff = compute_snapshot_diff(
-                holders_new=snap_details[t_new],
-                holders_old=snap_details[t_old],
+                holders_new=get_snap_detail(t_new),
+                holders_old=get_snap_detail(t_old),
                 t_new=t_new,
                 t_old=t_old,
                 chain=chain,
