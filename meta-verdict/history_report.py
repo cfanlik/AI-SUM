@@ -1385,6 +1385,21 @@ def whale_behavior_alert(src, sumdb):
         dormant_count = 0
         total_stable_snaps = 0
 
+        # 优化：批量一次性拉出该代币这 6 个快照中的所有持仓
+        snap_times = [s[0] for s in snaps[:6]]
+        placeholders = ",".join(["?"] * len(snap_times))
+        
+        hist_rows = src.execute(
+            f"SELECT wallet_address, snapshot_time, hold_amount FROM bubblemap_holders "
+            f"WHERE token_address = ? AND snapshot_time IN ({placeholders}) AND is_accumulating = 1",
+            [addr] + snap_times
+        ).fetchall()
+        
+        # 构筑内存字典 wallet_address -> snapshot_time -> hold_amount
+        hist_map = defaultdict(dict)
+        for h_row in hist_rows:
+            hist_map[h_row["wallet_address"]][h_row["snapshot_time"]] = h_row["hold_amount"]
+
         for row in cur_rows:
             waddr = row["wallet_address"]
             cur_hold = row["hold_amount"] or 0
@@ -1392,18 +1407,15 @@ def whale_behavior_alert(src, sumdb):
             # ── 回溯连续稳定快照数 ──
             stable_count = 0
             prev_hold_check = cur_hold
+            
+            # 直接在内存中提取，消除上万次重复数据库 SELECT 查询
+            w_history = hist_map.get(waddr, {})
             for i in range(1, min(len(snaps), 6)):
                 snap_i = snaps[i][0]
-                hist = src.execute(
-                    "SELECT hold_amount FROM bubblemap_holders "
-                    "WHERE token_address = ? AND snapshot_time = ? "
-                    "AND wallet_address = ? AND is_accumulating = 1",
-                    (addr, snap_i, waddr)
-                ).fetchone()
-                if not hist or not hist["hold_amount"]:
+                hist_hold = w_history.get(snap_i)
+                if hist_hold is None or hist_hold <= 0:
                     break
-                hist_hold = hist["hold_amount"]
-                if hist_hold > 0 and abs(prev_hold_check - hist_hold) / hist_hold < STABLE_THRESHOLD:
+                if abs(prev_hold_check - hist_hold) / hist_hold < STABLE_THRESHOLD:
                     stable_count += 1
                     prev_hold_check = hist_hold
                 else:
