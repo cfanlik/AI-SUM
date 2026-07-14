@@ -47,6 +47,28 @@ class MetaResult:
     stage: str = ""   # ACCUMULATING / CONTROLLED / DISTRIBUTING / WATCHLIST / NEUTRAL
 
 
+def get_prev_consec_acc(conn: sqlite3.Connection, chain: str, token_address: str) -> int:
+    """查询该代币在上一轮运行前的连续 ACC 轮次"""
+    if conn is None:
+        return 0
+    try:
+        cursor = conn.execute("""
+            SELECT meta_verdict FROM meta_snapshots
+            WHERE chain = ? AND token_address = ?
+            ORDER BY scan_time DESC LIMIT 30
+        """, (chain, token_address.lower()))
+        rows = cursor.fetchall()
+        consec = 0
+        for r in rows:
+            if r[0] == "ACC":
+                consec += 1
+            else:
+                break
+        return consec
+    except Exception:
+        return 0
+
+
 def arbitrate(data: TokenEngineData, hop2_pct: float = 0.0, conn: sqlite3.Connection = None, scan_time: str = None) -> MetaResult:
     """5 引擎加权积分仲裁"""
     r = MetaResult(
@@ -67,13 +89,56 @@ def arbitrate(data: TokenEngineData, hop2_pct: float = 0.0, conn: sqlite3.Connec
         cb_signals=data.cb_signals,
     )
 
+    # ── Volume & LP Guard 绝对流动性门控 (一刀切退化死币) ──
+    volume_24h = 100000.0
+    reserve_usd = 100000.0
+    try:
+        with sqlite3.connect(config.SRC_DB_PATH) as src_conn:
+            src_conn.row_factory = sqlite3.Row
+            row = src_conn.execute(
+                "SELECT volume_24h, reserve_usd FROM gecko_market_data "
+                "WHERE token_address=? ORDER BY scan_time DESC LIMIT 1",
+                (data.token_address,)
+            ).fetchone()
+            if row:
+                volume_24h = row["volume_24h"] if row["volume_24h"] is not None else 0.0
+                reserve_usd = row["reserve_usd"] if row["reserve_usd"] is not None else 0.0
+    except Exception:
+        pass
+
+    is_liquidity_dead = (volume_24h < 1000.0 or reserve_usd < 10000.0)
+    if is_liquidity_dead:
+        r.meta_score = 0.0
+        r.meta_score_smooth = 0.0
+        r.meta_verdict = "NEUTRAL"
+        r.stage = "NEUTRAL"
+        return r
+
+    # ── consec_acc 持续期强校验 (降级单轮/偶发 DIAMOND 噪音) ──
+    prev_consec = get_prev_consec_acc(conn, data.chain, data.token_address)
+
     # ── master-scan 积分 ──
     master_map = {
         "DIAMOND": config.MASTER_DIAMOND,
         "RED":     config.MASTER_RED,
         "YELLOW":  config.MASTER_YELLOW,
     }
-    r.master_score = master_map.get(data.master_signal, 0)
+    
+    # ── 假出货豁免 (套牢盘 RED 信号降级为 YELLOW) ──
+    pnl = None
+    if data.cb_vwap and data.cb_vwap > 0:
+        pnl = (data.cb_gecko_price - data.cb_vwap) / data.cb_vwap * 100
+        
+    is_underwater_resilient = (pnl is not None and pnl < -30.0)
+    
+    if r.master_signal == "RED" and is_underwater_resilient:
+        r.master_signal = "YELLOW"
+
+    if r.master_signal == "DIAMOND" and prev_consec < 5:
+        # 单轮或偶发 DIAMOND 降级为 YELLOW 积分
+        r.master_score = config.MASTER_YELLOW
+    else:
+        r.master_score = master_map.get(r.master_signal, 0)
 
     # ── opus-scan 积分（正向吸筹 / 负向出货）──
     r.opus_score = round(data.opus_acc_conf * config.OPUS_ACC_SCALE
@@ -96,13 +161,17 @@ def arbitrate(data: TokenEngineData, hop2_pct: float = 0.0, conn: sqlite3.Connec
     # ── cost-basis-scan 积分 ──
     r.cb_score = config.CB_SCORE.get(data.cb_verdict, 0)
 
-    # ── hop2 积分贡献 (v5 闭环重构) ──
-    if hop2_pct >= 0.30:
-        r.hop2_score = 1.50
-    elif hop2_pct >= 0.15:
-        r.hop2_score = 0.80
-    else:
+    # ── hop2 积分贡献与成本价格联动 (大户大捷期清零吸筹) ──
+    if pnl is not None and pnl >= 50.0:
+        # 已暴涨 50% 以上，进入分发区，清空 hop2 贡献分
         r.hop2_score = 0.0
+    else:
+        if hop2_pct >= 0.30:
+            r.hop2_score = 1.50
+        elif hop2_pct >= 0.15:
+            r.hop2_score = 0.80
+        else:
+            r.hop2_score = 0.0
 
     # ── master/unified DIAMOND 信号去重（仅 DIAMOND 同源去重）──
     if r.master_signal == "DIAMOND" and r.unified_signal == "DIAMOND":
