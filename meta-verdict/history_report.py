@@ -1028,32 +1028,54 @@ def evaluate_whale_divergence(price_chg_24h, top10_delta_24h):
     return 0
 
 
-def load_double_track_metrics(src):
+def load_double_track_metrics(src, addresses=None):
     """从 select.db 批量读取最新快照的浓度、大盘分、精英分"""
-    rows = src.execute("""
-        WITH latest AS (
-            SELECT token_address, MAX(snapshot_time) as mx
-            FROM bubblemap_holders GROUP BY token_address
-        )
-        SELECT bh.token_address,
-            SUM(CASE WHEN bh.is_cex=0 AND bh.is_dex=0 AND bh.is_contract=0 THEN 1 ELSE 0 END) as real_user_count,
-            SUM(CASE WHEN bh.is_accumulating=1 THEN 1 ELSE 0 END) as acc_count,
-            AVG(CASE WHEN bh.is_accumulating=1 THEN bh.acc_score ELSE NULL END) as micro_score,
-            AVG(CASE WHEN bh.is_cex=0 AND bh.is_dex=0 AND bh.is_contract=0
-                      THEN bh.acc_score ELSE NULL END) as macro_score
-        FROM bubblemap_holders bh
-        JOIN latest l ON bh.token_address=l.token_address AND bh.snapshot_time=l.mx
-        GROUP BY bh.token_address
-    """).fetchall()
     result = {}
-    for r in rows:
-        real = r["real_user_count"] or 0
-        acc = r["acc_count"] or 0
-        result[r["token_address"].lower()] = {
-            "concentration": round(acc / max(real, 1) * 100, 1),
-            "macro_score": round(r["macro_score"] or 0, 1),
-            "micro_score": round(r["micro_score"] or 0, 1),
-        }
+    if not addresses:
+        try:
+            # 兜底拉取所有有数据的代币地址
+            rows = src.execute("SELECT DISTINCT token_address FROM bubblemap_holders").fetchall()
+            addresses = [r[0] for r in rows if r[0]]
+        except Exception:
+            return {}
+
+    for addr in addresses:
+        if not addr:
+            continue
+        try:
+            # 1. 查找该代币最新快照时间
+            mx_row = src.execute(
+                "SELECT MAX(snapshot_time) as mx FROM bubblemap_holders WHERE token_address=?",
+                (addr,)
+            ).fetchone()
+            if not mx_row or not mx_row[0]:
+                continue
+            mx = mx_row[0]
+
+            # 2. 查询最新快照下的统计信息 (有复合索引极速)
+            rows = src.execute("""
+                SELECT 
+                    SUM(CASE WHEN is_cex=0 AND is_dex=0 AND is_contract=0 THEN 1 ELSE 0 END) as real_user_count,
+                    SUM(CASE WHEN is_accumulating=1 THEN 1 ELSE 0 END) as acc_count,
+                    AVG(CASE WHEN is_accumulating=1 THEN acc_score ELSE NULL END) as micro_score,
+                    AVG(CASE WHEN is_cex=0 AND is_dex=0 AND is_contract=0
+                              THEN acc_score ELSE NULL END) as macro_score
+                FROM bubblemap_holders
+                WHERE token_address=? AND snapshot_time=?
+            """, (addr, mx)).fetchone()
+
+            if rows:
+                real = rows[0] or 0
+                acc = rows[1] or 0
+                macro = rows[3] or 0.0
+                micro = rows[2] or 0.0
+                result[addr.lower()] = {
+                    "concentration": round(acc / max(real, 1) * 100, 1),
+                    "macro_score": round(macro, 1),
+                    "micro_score": round(micro, 1),
+                }
+        except Exception:
+            pass
     return result
 
 
@@ -1780,7 +1802,23 @@ def main():
     # 双轨制与浓度指标动态加载
     print("  [加载双轨指标] 获取最新浓度与大盘/精英分...")
     try:
-        dt_map = load_double_track_metrics(src)
+        # 收集需要写入历史记录的代币地址列表以优化查询性能
+        target_addrs = list(set(
+            [r["addr"] for r in bt_data if r.get("addr")] +
+            [r["addr"] for r in mig_data if r.get("addr")]
+        ))
+        try:
+            meta_rows = sumdb.execute(
+                "SELECT token_address FROM meta_snapshots "
+                "WHERE scan_time=(SELECT MAX(scan_time) FROM meta_snapshots) "
+                "AND meta_verdict IN ('ACC','DIST')"
+            ).fetchall()
+            target_addrs += [r["token_address"] for r in meta_rows if r["token_address"]]
+        except Exception:
+            pass
+        target_addrs = list(set([a for a in target_addrs if a]))
+
+        dt_map = load_double_track_metrics(src, target_addrs)
         print(f"        成功加载 {len(dt_map)} 个代币的双轨制指标")
     except Exception as e:
         print(f"        双轨指标加载失败: {e}")
