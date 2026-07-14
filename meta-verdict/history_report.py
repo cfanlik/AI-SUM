@@ -113,15 +113,27 @@ def backtest_watchlist(src, sumdb):
             skipped_today += 1
             continue
 
-        # 入场价
+        # 入场价 (带链式时间最接近兜底价格)
         p0 = src.execute(
             "SELECT price_usd FROM gecko_market_data "
             "WHERE token_address=? AND scan_time>=? AND price_usd>0 "
             "ORDER BY scan_time LIMIT 1", (addr, sig_date)
         ).fetchone()
+        
         if not p0 or p0[0] <= 0:
-            continue
-        entry = p0[0]
+            # 链式时序最接近兜底价格 (找离信号时间绝对差最小的非 0 价格)
+            p0_fb = src.execute(
+                "SELECT price_usd FROM gecko_market_data "
+                "WHERE token_address=? AND price_usd>0 "
+                "ORDER BY ABS(strftime('%s', scan_time) - strftime('%s', ?)) LIMIT 1",
+                (addr, sig_date)
+            ).fetchone()
+            if p0_fb and p0_fb[0] > 0:
+                entry = p0_fb[0]
+            else:
+                continue
+        else:
+            entry = p0[0]
 
         # 1d 后价格
         d1 = (sd + timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
@@ -175,6 +187,35 @@ def backtest_watchlist(src, sumdb):
 
         days_held = (datetime.now() - sd).days
 
+        # 动态 168h 滚动收益计算
+        d_roll = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+        p_roll = src.execute(
+            "SELECT price_usd FROM gecko_market_data "
+            "WHERE token_address=? AND scan_time>=? AND price_usd>0 "
+            "ORDER BY scan_time LIMIT 1", (addr, d_roll)
+        ).fetchone()
+        
+        rolling_7d_ret = None
+        if p_roll and pnow:
+            rolling_7d_ret = (pnow[0] - p_roll[0]) / p_roll[0] * 100
+        else:
+            # fallback 到 entry (信号发出尚不足 7d)
+            if entry > 0 and pnow:
+                rolling_7d_ret = (pnow[0] - entry) / entry * 100
+
+        # Peak Return (7 天窗口内最高价格触及率)
+        peak_return = None
+        p_peaks = src.execute(
+            "SELECT price_usd FROM gecko_market_data "
+            "WHERE token_address=? AND scan_time>=? AND scan_time<=? AND price_usd>0",
+            (addr, sig_date, d7)
+        ).fetchall()
+        if p_peaks and entry > 0:
+            max_p = max(p[0] for p in p_peaks)
+            peak_return = (max_p - entry) / entry * 100
+        elif entry > 0 and pnow:
+            peak_return = max(0.0, (pnow[0] - entry) / entry * 100)
+
         r = {
             "symbol": sym, "signal": t["signal_level"],
             "date": sig_date[:10], "entry": entry,
@@ -187,8 +228,26 @@ def backtest_watchlist(src, sumdb):
             "days_held": days_held,
             "addr": addr,
             "mdd": mdd,
+            "rolling_7d_ret": rolling_7d_ret,
+            "peak_return": peak_return,
         }
         results.append(r)
+
+    # 计算 Market_Beta (有有效滚动收益代币的中位数涨跌)
+    rollings = [r["rolling_7d_ret"] for r in results if r["rolling_7d_ret"] is not None]
+    market_beta = 0.0
+    if rollings:
+        try:
+            import statistics
+            market_beta = statistics.median(rollings)
+        except Exception:
+            pass
+
+    for r in results:
+        if r["rolling_7d_ret"] is not None:
+            r["alpha_ret"] = r["rolling_7d_ret"] - market_beta
+        else:
+            r["alpha_ret"] = None
 
     # 汇总
     lines = ["## 📊 信号回测（首次信号时间 × 收益验证）", ""]
@@ -219,17 +278,31 @@ def backtest_watchlist(src, sumdb):
         mdds = [r["mdd"] for r in grp if r["mdd"] is not None]
         lines.append(f"| {sig} | {len(grp)} | {_wr(r1)} | {_wr(r3)} | {_wr(r7)} | {_wr(rnow)} | {_avg(rnow)} | {_med(rnow)} | {_med(mdds)} |")
 
+    # 新增：滚动 168h 区间回测汇总渲染 (双轴重构)
+    lines += ["", "### 动态滚动 168h 回测汇总", "",
+              f"> 滚动大盘基准中位数收益 (Meme Market Beta): **{market_beta:+.1f}%**",
+              "",
+              "| 滚动信号 | 样本 | 滚动胜率 | 滚动均收 | 滚动中位 | 超额胜率 (Alpha WR) | 平均超额 (Avg Alpha) |",
+              "|----------|------|----------|----------|----------|-------------------|-------------------|"]
+    for sig in ["DIAMOND", "RED", "YELLOW"]:
+        grp = [r for r in results if r["signal"] == sig]
+        if not grp:
+            continue
+        r_roll = [r["rolling_7d_ret"] for r in grp if r["rolling_7d_ret"] is not None]
+        r_alpha = [r["alpha_ret"] for r in grp if r["alpha_ret"] is not None]
+        lines.append(f"| {sig} | {len(grp)} | {_wr(r_roll)} | {_avg(r_roll)} | {_med(r_roll)} | {_wr(r_alpha)} | {_avg(r_alpha)} |")
+
     # 明细(DIAMOND+RED)
     detail = [r for r in results if r["signal"] in ("DIAMOND", "RED")]
     detail.sort(key=lambda r: r["ret_now"] or 0, reverse=True)
     if detail:
         lines += ["", "### 明细（DIAMOND + RED）", "",
-                  "| 代币 | 信号 | 首次信号日 | 持有天数 | 入场价 | 7d收益 | 14d收益 | 当前收益 |",
-                  "|------|------|----------|---------|--------|--------|---------|---------|"]
+                  "| 代币 | 信号 | 首次信号日 | 持有天数 | 入场价 | 7d收益 | 14d收益 | 当前收益 | 滚动 7d 收益 |",
+                  "|------|------|----------|---------|--------|--------|---------|---------|-------------|"]
         for r in detail[:20]:
             def fmt(v): return f"{v:+.1f}%" if v is not None else "—"
             sig_emoji = "💎" if r["signal"] == "DIAMOND" else "🔴"
-            lines.append(f"| {r['symbol']} | {sig_emoji} | {r['date']} | {r['days_held']}d | ${format_price(r['entry'])} | {fmt(r['ret_7d'])} | {fmt(r['ret_14d'])} | {fmt(r['ret_now'])} |")
+            lines.append(f"| {r['symbol']} | {sig_emoji} | {r['date']} | {r['days_held']}d | ${format_price(r['entry'])} | {fmt(r['ret_7d'])} | {fmt(r['ret_14d'])} | {fmt(r['ret_now'])} | {fmt(r['rolling_7d_ret'])} |")
 
     lines.append("")
     return "\n".join(lines), results
@@ -1014,6 +1087,14 @@ def save_token_history(sumdb, bt_data, mig_data, ts_data, liq_data=None, dt_map=
         except Exception:
             pass
 
+    # V7: 新增时序对齐与超额收益重构字段
+    for col, typedef in [("rolling_7d_ret", "REAL"), ("alpha_ret", "REAL"),
+                          ("peak_return", "REAL"), ("resilience_index", "REAL")]:
+        try:
+            sumdb.execute(f"ALTER TABLE token_history ADD COLUMN {col} {typedef}")
+        except Exception:
+            pass
+
     # 索引化
     mig_map = {r["addr"]: r for r in mig_data if r.get("addr")}
     ts_map = {r["symbol"]: r for r in ts_data}
@@ -1026,6 +1107,12 @@ def save_token_history(sumdb, bt_data, mig_data, ts_data, liq_data=None, dt_map=
     def _insert(addr, sym, bt, mig, ts, liq, dt=None):
         nonlocal count
         try:
+            rolling = bt.get("rolling_7d_ret") if bt else None
+            ret_72h = mig.get("retention_72h") if mig else None
+            resilience = None
+            if rolling is not None and ret_72h is not None:
+                resilience = rolling / max((1.0 - ret_72h / 100.0), 0.01)
+
             sumdb.execute("""
                 INSERT OR REPLACE INTO token_history
                 (computed_date, token_address, token_symbol, signal_first_seen,
@@ -1035,8 +1122,9 @@ def save_token_history(sumdb, bt_data, mig_data, ts_data, liq_data=None, dt_map=
                  score_slope, score_sigma, consec_acc,
                  volume_24h, reserve_usd, buy_tx_pct, turnover_ratio, mdd,
                  retention_24h, retention_72h, top10_delta_24h, top10_delta_72h,
-                 pnl_ratio, bs_ratio_24h, whale_divergence, concentration, macro_score, micro_score)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 pnl_ratio, bs_ratio_24h, whale_divergence, concentration, macro_score, micro_score,
+                 rolling_7d_ret, alpha_ret, peak_return, resilience_index)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 today, addr, sym, bt.get("date") if bt else None,
                 bt.get("signal", "NONE") if bt else "NONE",
@@ -1060,6 +1148,10 @@ def save_token_history(sumdb, bt_data, mig_data, ts_data, liq_data=None, dt_map=
                 dt.get("concentration") if dt else None,
                 dt.get("macro_score") if dt else None,
                 dt.get("micro_score") if dt else None,
+                rolling,
+                bt.get("alpha_ret") if bt else None,
+                bt.get("peak_return") if bt else None,
+                resilience,
             ))
             count += 1
             written_addrs.add(addr)
