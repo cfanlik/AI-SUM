@@ -1764,6 +1764,114 @@ def hop2_analysis(src, sumdb):
     return md
 
 
+def deviation_audit(sumdb):
+    """168小时信号偏离度审计 (Deviation Audit)"""
+    try:
+        # 1. 提取最近 7 天的 token_history 去重最新的一期记录
+        rows = sumdb.execute("""
+            WITH latest_hist AS (
+                SELECT *, ROW_NUMBER() OVER (PARTITION BY token_symbol ORDER BY computed_date DESC) as rn
+                FROM token_history
+                WHERE computed_date >= date('now', '-7 days') AND computed_date <= date('now')
+            )
+            SELECT * FROM latest_hist WHERE rn = 1
+        """).fetchall()
+    except Exception:
+        return ""
+
+    if not rows:
+        return ""
+
+    records = []
+    for r in rows:
+        d = dict(r)
+        # 偏离度优先使用 rolling_7d_ret，如果没有则降级使用 price_7d_ret 或 price_now_ret
+        ret = d.get("rolling_7d_ret")
+        if ret is None:
+            ret = d.get("price_7d_ret")
+        if ret is None:
+            ret = d.get("price_now_ret")
+        d["sort_ret"] = ret
+        records.append(d)
+
+    # 过滤无效收益的个案
+    records = [r for r in records if r["sort_ret"] is not None]
+    if not records:
+        return ""
+
+    # 偏离值计算: 看涨信号(DIAMOND/YELLOW)下跌越多越偏离; 看跌信号(RED)上涨越多越偏离
+    # 完美命中: 看涨信号上涨越多越好; 避险成功: 看跌信号下跌越多越好
+    bull_bad = [r for r in records if r["signal_level"] in ("DIAMOND", "YELLOW") and r["sort_ret"] < 0]
+    bull_bad.sort(key=lambda x: x["sort_ret"])  # 按收益从低到高 (大跌)
+
+    bear_bad = [r for r in records if r["signal_level"] == "RED" and r["sort_ret"] > 0]
+    bear_bad.sort(key=lambda x: x["sort_ret"], reverse=True)  # 按收益从高到低 (逆势大涨)
+
+    bull_good = [r for r in records if r["signal_level"] in ("DIAMOND", "YELLOW") and r["sort_ret"] > 0]
+    bull_good.sort(key=lambda x: x["sort_ret"], reverse=True)  # 按收益从高到低 (暴涨)
+
+    bear_good = [r for r in records if r["signal_level"] == "RED" and r["sort_ret"] < 0]
+    bear_good.sort(key=lambda x: x["sort_ret"])  # 按收益从低到高 (暴跌)
+
+    lines = ["## 🔍 168小时信号偏离度审计 (Deviation Audit)", "",
+             "> 偏离度定义：看涨信号后续大跌，或看跌信号逆势暴涨。通过对严重偏离的个案进行多维度透视以纠偏评分阀值。", ""]
+
+    headers = "| 代币 | 信号 | 7d/当前收益 | 最大回撤 | 24h交易量 | DEX LP | 换手率 | 吸筹浓度 | 连续吸筹 | 庄浮盈率 |"
+    divider = "|------|------|------------|----------|-----------|--------|--------|---------|---------|---------|"
+
+    def _fmt(val, is_pct=False, is_usd=False):
+        if val is None:
+            return "—"
+        if is_pct:
+            return f"{val:+.1f}%" if val > 0 else f"{val:.1f}%"
+        if is_usd:
+            return f"${val/1e3:.1f}K" if val >= 1000 else f"${val:.1f}"
+        return f"{val:.1f}"
+
+    def _fmt_row(r):
+        sig_emoji = "💎" if r["signal_level"] == "DIAMOND" else ("🔴" if r["signal_level"] == "RED" else "🟡")
+        ret_str = _fmt(r["sort_ret"], is_pct=True)
+        mdd_str = f"{r['mdd']:.1f}%" if r.get("mdd") is not None else "—"
+        vol_str = _fmt(r.get("volume_24h"), is_usd=True)
+        lp_str = _fmt(r.get("reserve_usd"), is_usd=True)
+        turnover = f"{r['turnover_ratio']:.2f}%" if r.get("turnover_ratio") is not None else "—"
+        conc = f"{r['concentration']:.1f}%" if r.get("concentration") is not None else "—"
+        consec = str(int(r['consec_acc'])) if r.get('consec_acc') is not None else "—"
+        pnl = f"{r['pnl_ratio']:.1f}%" if r.get('pnl_ratio') is not None else "—"
+        return f"| **{r['token_symbol']}** | {sig_emoji} {r['signal_level']} | {ret_str} | {mdd_str} | {vol_str} | {lp_str} | {turnover} | {conc} | {consec} | {pnl} |"
+
+    # A: 严重看涨误判
+    lines += ["### 🚨 Top 10 严重看涨误判 (DIAMOND/YELLOW 但暴跌/大跌)", "", headers, divider]
+    for r in bull_bad[:10]:
+        lines.append(_fmt_row(r))
+    if not bull_bad:
+        lines.append("| — | — | — | — | — | — | — | — | — | — |")
+
+    # B: 严重看跌误判
+    lines += ["", "### 🚨 Top 10 严重看跌误判 (RED 但逆势暴涨)", "", headers, divider]
+    for r in bear_bad[:10]:
+        lines.append(_fmt_row(r))
+    if not bear_bad:
+        lines.append("| — | — | — | — | — | — | — | — | — | — |")
+
+    # C: 完美命中看涨
+    lines += ["", "### ✅ Top 10 完美命中看涨 (DIAMOND/YELLOW 成功捕获暴涨)", "", headers, divider]
+    for r in bull_good[:10]:
+        lines.append(_fmt_row(r))
+    if not bull_good:
+        lines.append("| — | — | — | — | — | — | — | — | — | — |")
+
+    # D: 完美避险看跌
+    lines += ["", "### 🛡️ Top 10 完美避险看跌 (RED 成功预警暴跌)", "", headers, divider]
+    for r in bear_good[:10]:
+        lines.append(_fmt_row(r))
+    if not bear_good:
+        lines.append("| — | — | — | — | — | — | — | — | — | — |")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
 def main():
     import time
     t0 = time.time()
@@ -1864,6 +1972,13 @@ def main():
         parts.append(hop2_md)
     if profile_md:
         parts.append(profile_md)
+
+    # 模块 7.5: 信号偏离度审计
+    print("  [7.5/7] 信号偏离度审计...")
+    deviation_md = deviation_audit(sumdb)
+    if deviation_md:
+        parts.append(deviation_md)
+        print("          偏离度审计完成")
 
     # 模块 8: 合约信号总览 (v6)
     print("  [8] 合约信号总览...")
