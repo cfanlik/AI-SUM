@@ -1563,6 +1563,14 @@ def hop2_analysis(src, sumdb):
         sym = t["token_symbol"] or "?"
         sig = t["signal_level"]
 
+        # 快速查出最新快照时间
+        mx_row = src.execute(
+            "SELECT MAX(snapshot_time) as mx FROM bubblemap_holders WHERE token_address=?", (addr,)
+        ).fetchone()
+        if not mx_row or not mx_row[0]:
+            continue
+        mx = mx_row[0]
+
         row = src.execute("""
             SELECT
                 COUNT(*)                                                              AS total_holders,
@@ -1587,10 +1595,8 @@ def hop2_analysis(src, sumdb):
                 AVG(CASE WHEN is_accumulating = 1 THEN dex_ratio_hop2 END)            AS hop2_avg
             FROM bubblemap_holders
             WHERE token_address = ?
-              AND batch_id = (
-                  SELECT MAX(batch_id) FROM bubblemap_holders WHERE token_address = ?
-              )
-        """, [addr, addr]).fetchone()
+              AND snapshot_time = ?
+        """, [addr, mx]).fetchone()
 
         if not row or (row["total_holders"] or 0) == 0:
             continue
