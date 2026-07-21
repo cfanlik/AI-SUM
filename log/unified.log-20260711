@@ -1,0 +1,43 @@
+
+[unified-scan] 全库扫描启动
+  源库: /opt/select-coin/data/select.db
+  模式: 联网(Gecko Pool)
+  代币总数: 187
+  进度: 50/187
+  进度: 100/187
+  进度: 150/187
+
+======================================================================
+  unified-scan 统一雷达报 — 2026-07-10 00:32
+  扫描: 187 | 有信号: 11 | 耗时: 725.6s
+  💎 DIAMOND: 9 | 🐋 WHALE_DUMP: 1 | 🔴 SLOW_DISTRIBUTION: 1
+======================================================================
+
+  💎 DIAMOND (9 个)
+  代币       链      ACC% DIST% STRUCT%  DEX真金    CEX      LP($)    V/L 信号
+  -----------------------------------------------------------------
+  TAG      bsc    30.8   0.0    56.2  92.7%  -7.7% A1(DIAMOND), S1(极端集中), S2(M/L=150.6x)
+  GWEI     bsc    30.8   0.0    31.2  89.7%  -0.2% A1(DIAMOND), S1(极端集中)
+  NES      bsc    30.8   0.0    56.2  92.1%  +2.9% A1(DIAMOND), S1(极端集中), S2(M/L=170.4x), S4(V/L=35.39)
+  UAI      bsc    30.8  26.7    25.0  87.6%  -0.7% A1(DIAMOND), D2(出货者), S2(M/L=419.2x)
+  AIA      bsc    30.8  26.7     0.0  86.6%  +4.1% A1(DIAMOND), D2(出货者)
+  AIOT     bsc    30.8   0.0     0.0  85.2%  +3.3% A1(DIAMOND)
+  GUA      bsc    30.8   0.0     0.0  87.8%  -1.7% A1(DIAMOND)
+  EVAA     bsc    30.8  33.3    25.0  95.0%  +9.6% A1(DIAMOND), D1(CEX流入), S2(M/L=214.2x), S4(V/L=22.34)
+  SQD      bsc    30.8  26.7     0.0  96.5%  +3.4% A1(DIAMOND), D2(出货者)
+
+  🐋 WHALE_DUMP (1 个)
+  代币       链      ACC% DIST% STRUCT%  DEX真金    CEX      LP($)    V/L 信号
+  -----------------------------------------------------------------
+  NAORIS   bsc     0.0  40.0    56.2   0.0% -23.5% D3(被动漂移), S1(极端集中), S2(M/L=107.2x)
+
+  🔴 SLOW_DISTRIBUTION (1 个)
+  代币       链      ACC% DIST% STRUCT%  DEX真金    CEX      LP($)    V/L 信号
+  -----------------------------------------------------------------
+  ARX      bsc     0.0  60.0     0.0  79.1% +18.8% D1(CEX流入), D2(出货者)
+
+  报告已保存: /opt/AI-SUM/report/unified/unified_20260710_0032.md
+
+  持久化完成: unified_results + daily_summary
+[unified] 已保存 11 条结果到 select-sum.db
+  新增预警: NES(DIAMOND)

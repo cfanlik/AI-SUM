@@ -1,0 +1,6 @@
+2026-07-10 00:50:12,555 [INFO] meta-verdict: 收集到 197 个有信号代币（至少 1 个引擎命中）
+2026-07-10 00:57:42,849 [INFO] meta-verdict: [HOP2] hop2_tracking 写入 190/197 条
+2026-07-10 00:57:42,849 [INFO] meta-verdict: hop2_tracking 动态采集完成: 190 条
+2026-07-10 00:57:44,134 [INFO] meta-verdict: 趋势对比: vs 2026-07-09 12:50:01 | 新进0 退出90 ↑3 ↓2 →102 跃变0
+2026-07-10 00:57:44,138 [WARNING] meta-verdict: 生命周期跃迁: CAP ⚡ ACCUMULATING→DISTRIBUTING
+2026-07-10 00:57:44,140 [INFO] meta-verdict: 生命周期表已更新 107 条记录
