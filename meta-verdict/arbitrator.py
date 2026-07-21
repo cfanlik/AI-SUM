@@ -69,6 +69,32 @@ def get_prev_consec_acc(conn: sqlite3.Connection, chain: str, token_address: str
         return 0
 
 
+
+def _check_oscillation_suppression(conn: sqlite3.Connection, chain: str, token_address: str) -> bool:
+    """检查 72h 内是否有 >= 3 次判定翻转，若存在且近期属于 ACC 阶段则抑制一票否决"""
+    if conn is None:
+        return False
+    try:
+        cursor = conn.execute("""
+            SELECT meta_verdict, stage FROM meta_snapshots
+            WHERE chain = ? AND token_address = ? AND scan_time >= datetime('now', '-3 days')
+            ORDER BY scan_time DESC
+        """, (chain, token_address.lower()))
+        rows = cursor.fetchall()
+        if len(rows) < 4:
+            return False
+        
+        flips = 0
+        for i in range(1, len(rows)):
+            if rows[i][0] != rows[i-1][0]:
+                flips += 1
+        
+        has_acc_stage = any("ACC" in (r[1] or "") for r in rows[:6])
+        return flips >= 3 and has_acc_stage
+    except Exception:
+        return False
+
+
 def arbitrate(data: TokenEngineData, hop2_pct: float = 0.0, conn: sqlite3.Connection = None, scan_time: str = None) -> MetaResult:
     """5 引擎加权积分仲裁"""
     r = MetaResult(

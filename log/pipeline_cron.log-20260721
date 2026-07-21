@@ -1,0 +1,24 @@
+=== 开始执行 AI-SUM 串行流水线 ===
+工作目录: /opt/AI-SUM
+日志文件: /opt/AI-SUM/log/pipeline.log
+-> 正在执行: master-scan ... 成功 (1276.3s)
+-> 正在执行: opus-scan ... 成功 (470.2s)
+-> 正在执行: unified-scan ... 成功 (923.3s)
+-> 正在执行: bigcoin ... 成功 (1142.5s)
+-> 正在执行: cost-basis-scan ... 成功 (22.1s)
+-> 正在执行: meta-verdict ... 成功 (456.6s)
+-> 正在执行: history-report ... 成功 (20.6s)
+
+✓ 流水线全部执行成功！总耗时: 4311.6s
+=== 开始执行 AI-SUM 串行流水线 ===
+工作目录: /opt/AI-SUM
+日志文件: /opt/AI-SUM/log/pipeline.log
+-> 正在执行: master-scan ... 成功 (1299.4s)
+-> 正在执行: opus-scan ... 成功 (439.2s)
+-> 正在执行: unified-scan ... 成功 (913.5s)
+-> 正在执行: bigcoin ... 成功 (1398.3s)
+-> 正在执行: cost-basis-scan ... 成功 (23.7s)
+-> 正在执行: meta-verdict ... 成功 (471.8s)
+-> 正在执行: history-report ... 成功 (14.0s)
+
+✓ 流水线全部执行成功！总耗时: 4559.9s
