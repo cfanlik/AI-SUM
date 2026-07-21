@@ -61,7 +61,7 @@ class AnomalyReportGenerator:
         return filepath
 
     def generate_impulse_surge_report(self, surge_results):
-        """Top 10 精简排版版：《异常关注 - 60天 4阶PnL动量矩阵突发拉伸诊断专报》"""
+        """Top 10 单一精炼主表版：《异常关注 - 60天 4阶PnL动量矩阵突发拉伸诊断专报》"""
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         file_timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         filepath = os.path.join(self.output_dir, f"impulse_surge_{file_timestamp}.md")
@@ -69,28 +69,29 @@ class AnomalyReportGenerator:
         # 仅精简提取前 10 个最强爆发标的，物理消灭噪音
         triggered_tokens = [r for r in surge_results if r.is_triggered][:10]
 
-        content = f"# 🚀 异常关注：60天 4阶PnL动量矩阵《突发拉伸》诊断专报\n\n"
-        content += f"> 生成时间: {now_str} | 扫描 60d 全库数据 | 精准输出 Top 10 强爆发标的 (已剔除信息噪音)\n\n"
+        content = f"# 🚀 AI-SUM 60天 4阶PnL动量矩阵《突发拉伸》风控专报\n\n"
+        content += f"> 生成时间: {now_str} | 扫描 60d 全库数据 | 精准输出 Top 10 强爆发标的 (无噪音单表版)\n\n"
 
-        content += "## 一、 符合指标 Top 10 强爆发标的与 4 阶 PnL 动量矩阵表\n\n"
-        
-        # 带有 HTML span title 浮动提示的表头列名
-        content += "| <span title=\"爆发排名顺序，按 PnL 7d 增长斜率降序排列\">排名</span> "
-        content += "| <span title=\"点击代币符号可于右侧详情抽屉查看 60 天持仓与 PnL 梯度变化折线图\">代币符号 (点击看图表)</span> "
-        content += "| <span title=\"代币所属物理区块链网络 (如 bsc, eth)\">网络</span> "
-        content += "| <span title=\"代币当前最新 PnL 盈亏比例 (%)\">PnL_now</span> "
-        content += "| <span title=\"近 7 天内 PnL 累计增长率变化斜率\">7d斜率 ($S_{7d}$)</span> "
-        content += "| <span title=\"近 15 天内 PnL 累计增长率变化斜率\">15d斜率 ($S_{15d}$)</span> "
-        content += "| <span title=\"近 30 天内 PnL 累计增长率变化斜率\">30d斜率 ($S_{30d}$)</span> "
-        content += "| <span title=\"近 60 天内 PnL 累计增长率变化斜率\">60d斜率 ($S_{60d}$)</span> "
-        content += "| <span title=\"结合 4 阶斜率矩阵判定的多动量拉伸形态分类\">多阶矩阵形态</span> "
-        content += "| <span title=\"S1-S5 五维拉伸与风控震荡防护综合诊断结论\">物理诊断结论</span> |\n"
-        
-        content += "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n"
+        # 顶部集中声明 Tips 引用块 (彻底解决表头源码裸露)
+        content += "> **物理指标 Tips 与断言说明**：\n"
+        content += "> - **PnL_now**: 代币最新 PnL 盈亏比率 (%)。\n"
+        content += "> - **4阶 PnL 斜率矩阵 ($S_{7d}/S_{15d}/S_{30d}/S_{60d}$)**: 7天/15天/30天/60天内 PnL 累计增长斜率，用于识别凹向加速主升浪与拦截坑底死猫跳反弹。\n"
+        content += "> - **7d 爆发脉冲强度**: 7d 内 PnL 累计增长斜率及可视化字符对比条（`[██████████]`）。\n"
+        content += "> - **72h 判定振荡防护状态**: S5 维 72h 内判定翻转次数与抖动拦截激活状态。\n"
+        content += "> - **多阶矩阵形态**: 结合 4 阶斜率确定的动量形态（`🚀 凹向加速主升浪`、`🔥 高位强平台拉伸`、`📈 普通震荡拉升`）。\n"
+        content += "> - **综合诊断归因**: S1(流动性突降)、S2(4阶PnL动量)、S3(巨鲸净流入)、S4(成交量脉冲)、S5(72h振荡防护) 综合触发原因。\n\n"
+
+        # 全局唯一 Top 10 精炼主表 (表头 100% 纯净无 HTML 属性标签)
+        content += "| 排名 | 代币名称<br>(Symbol) | 网络 | 当前 PnL | 4 阶 PnL 斜率矩阵<br>(S7d / S15d / S30d / S60d) | 7d 爆发脉冲强度 | 72h 判定振荡防护状态 | 多阶矩阵形态 | 综合诊断归因 |\n"
+        content += "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n"
+
+        max_s7 = max(abs(t.slope_7d) for t in triggered_tokens) if triggered_tokens else 1.0
 
         for idx, r in enumerate(triggered_tokens, 1):
             reasons_str = "<br>".join(r.trigger_reasons)
             
+            pnl_matrix_str = f"**`{r.slope_7d:.1f}`** / **`{r.slope_15d:.1f}`** / **`{r.slope_30d:.1f}`** / **`{r.slope_60d:.1f}`**"
+
             pat_tag = f"`{r.pattern}`"
             if r.pattern == "ACCELERATING_SURGE":
                 pat_tag = "**🚀 凹向加速主升浪**"
@@ -99,38 +100,14 @@ class AnomalyReportGenerator:
             elif r.pattern == "GENERAL_SURGE":
                 pat_tag = "**📈 普通震荡拉升**"
 
-            content += f"| **No.{idx}** | `{r.token_symbol}` | `{r.chain}` | `{r.pnl_now:.1f}` | `{r.slope_7d:.1f}` | `{r.slope_15d:.1f}` | `{r.slope_30d:.1f}` | `{r.slope_60d:.1f}` | {pat_tag} | {reasons_str} |\n"
+            # 字符脉冲对比条
+            bar_len = min(10, max(1, int((abs(r.slope_7d) / max(100.0, max_s7)) * 10)))
+            bar_str = "`[" + "█" * bar_len + "░" * (10 - bar_len) + f"] {r.slope_7d:.1f}`"
 
-        content += "\n## 二、 全量突发拉伸代币 5 维触发分布统计\n\n"
-        all_triggered = [r for r in surge_results if r.is_triggered]
-        s1_cnt = sum(1 for r in all_triggered if any("S1" in res for res in r.trigger_reasons))
-        s2_cnt = sum(1 for r in all_triggered if any("S2" in res for res in r.trigger_reasons))
-        s3_cnt = sum(1 for r in all_triggered if any("S3" in res for res in r.trigger_reasons))
-        s4_cnt = sum(1 for r in all_triggered if any("S4" in res for res in r.trigger_reasons))
-        s5_cnt = sum(1 for r in all_triggered if any("S5" in res for res in r.trigger_reasons))
+            # 72h 振荡防护状态
+            prot_str = f"**[已激活]** {r.oscillation_cnt}次翻转拦截" if r.oscillation_cnt >= 3 else f"[未激活] {r.oscillation_cnt}次翻转"
 
-        content += "| <span title=\"五维判断维度标识\">维度标识</span> | <span title=\"五维检测核心名称\">检测维度名称</span> | <span title=\"全库触发该维度的代币数量\">全库触发标的数</span> | <span title=\"该维度的物理解释说明\">维度判定物理含义</span> |\n"
-        content += "| :--- | :--- | :--- | :--- |\n"
-        content += f"| **S1** | 流动性结构突变 | {s1_cnt} 个 | reserve_usd 相比 14d 均值骤降 >75% |\n"
-        content += f"| **S2** | 4 阶 PnL 动量爆发 | {s2_cnt} 个 | 7d PnL 增长斜率 S7d > 50.0 |\n"
-        content += f"| **S3** | 巨鲸净流入爆发 | {s3_cnt} 个 | 7d 巨鲸净流入交易次数 > 5 次 |\n"
-        content += f"| **S4** | 成交量脉冲倍率 | {s4_cnt} 个 | 3d 均量 / 14d 均量 > 2.0 倍 |\n"
-        content += f"| **S5** | 判定振荡抑制 | {s5_cnt} 个 | 72h 内 verdict 翻转次数 >= 3 次 |\n"
-
-        # 前 10 大爆发标的原生字符对比度展示 (100% 可读，绝不写死包含```mermaid)
-        if triggered_tokens:
-            content += "\n## 三、 前 10 大突发爆发标的脉冲强度与振荡防护 (100% 原生 Markdown 排版)\n\n"
-            content += "| <span title=\"爆发排名顺序\">排名</span> | <span title=\"代币符号\">代币符号</span> | <span title=\"网络\">网络</span> | <span title=\"当前PnL\">当前 PnL</span> | <span title=\"7d PnL 增长脉冲字符对比条\">7d 爆发脉冲强度 (原生字符对比)</span> | <span title=\"72h 判定振荡防护拦截状态\">72h 判定振荡防护状态</span> | <span title=\"综合诊断结论\">核心诊断结论</span> |\n"
-            content += "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n"
-            
-            max_s7 = max(abs(t.slope_7d) for t in triggered_tokens) if triggered_tokens else 1.0
-            for idx, t in enumerate(triggered_tokens, 1):
-                bar_len = min(10, max(1, int((abs(t.slope_7d) / max(100.0, max_s7)) * 10)))
-                bar_str = "[" + "█" * bar_len + "░" * (10 - bar_len) + "]"
-                
-                prot_str = f"**[已激活]** {t.oscillation_cnt}次翻转拦截" if t.oscillation_cnt >= 3 else f"[未激活] {t.oscillation_cnt}次翻转"
-                
-                content += f"| **No.{idx}** | `{t.token_symbol}` | `{t.chain}` | `{t.pnl_now:.1f}` | `{bar_str} {t.slope_7d:.1f}` | {prot_str} | S1-S5 多维综合触发 |\n"
+            content += f"| **No.{idx}** | `{r.token_symbol}` | `{r.chain}` | `{r.pnl_now:.1f}` | {pnl_matrix_str} | {bar_str} | {prot_str} | {pat_tag} | {reasons_str} |\n"
 
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
