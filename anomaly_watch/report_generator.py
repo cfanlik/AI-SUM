@@ -127,3 +127,5 @@ class AnomalyReportGenerator:
 # 重构 TokenDetailPanel.jsx 前端 React 抽屉组件打造 Top 300 60d 吸筹与 PnL 动量双轴图 (Issue #92)
 
 # 消除图表文字多重堆叠并增加 Tooltip 智能避让 (Issue #94)
+
+# 重构 Arkham 风格 Top 300 标注吸筹地址 60d 汇总持币量演变面积图 (Issue #96)
