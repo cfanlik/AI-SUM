@@ -1,6 +1,6 @@
 """
-突发拉伸 (Impulse Surge) 独立分析模块
-基于 60 天最长保留周期，通过 S1-S5 维边界条件检测突发阶梯式增仓与拉升
+突发拉伸 (Impulse Surge) 独立分析模块 (全量代币通用版)
+基于 60 天最长保留周期，通过 S1-S5 维边界条件全量检测全库代币，不针对/包含任何特例硬编码。
 """
 import sqlite3, os, logging
 from dataclasses import dataclass
@@ -38,7 +38,7 @@ class ImpulseSurgeAnalyzer:
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
 
-        # 1. 查询所有有效 token
+        # 1. 提取数据库内所有代币
         cur.execute("SELECT DISTINCT token_address, token_symbol, chain FROM token_history WHERE computed_date >= date('now', '-60 days')")
         tokens = cur.fetchall()
 
@@ -140,7 +140,8 @@ class ImpulseSurgeAnalyzer:
 
             is_triggered = (s1_hit and s2_hit) or (s2_hit and s3_hit and s4_hit) or s5_hit
 
-            if is_triggered or t_sym.upper() == "BANK":
+            # 全量代币通用筛选: 绝无单代币硬编码
+            if is_triggered:
                 results.append(ImpulseSurgeResult(
                     token_address=t_addr,
                     token_symbol=t_sym,
@@ -159,5 +160,7 @@ class ImpulseSurgeAnalyzer:
                 ))
 
         conn.close()
+        # 按 PnL 斜率与触发条件数量降序排序
+        results.sort(key=lambda x: (len(x.trigger_reasons), x.pnl_slope_7d), reverse=True)
         return results
 

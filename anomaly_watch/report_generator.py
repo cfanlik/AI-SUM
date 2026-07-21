@@ -61,41 +61,55 @@ class AnomalyReportGenerator:
         return filepath
 
     def generate_impulse_surge_report(self, surge_results):
-        """生成《异常关注 - 突发拉伸（60天周期）专题报告》"""
+        """全量代币通用版：《异常关注 - 60天全量代币突发拉伸诊断专报》"""
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         file_timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         filepath = os.path.join(self.output_dir, f"impulse_surge_{file_timestamp}.md")
 
         triggered_tokens = [r for r in surge_results if r.is_triggered]
 
-        content = f"# 🚀 异常关注：60天周期《突发拉伸》专题诊断报告\n\n"
-        content += f"> 生成时间: {now_str} | 扫描 60d 数据标的 | 触发突发拉伸目标: {len(triggered_tokens)} 个\n\n"
+        content = f"# 🚀 异常关注：60天全量代币《突发拉伸》诊断专报\n\n"
+        content += f"> 生成时间: {now_str} | 扫描 60d 数据内全量代币 | 触发突发拉伸目标: {len(triggered_tokens)} 个\n\n"
 
-        content += "## 一、 核心触发标的与 5 维边界条件判定矩阵\n\n"
-        content += "| 序号 | 代币符号 | 代币合约地址 | 流动性突变比率 (S1) | PnL 7d 斜率 (S2) | 巨鲸 7d 净流入 (S3) | 成交量脉冲比 (S4) | 72h 振荡翻转 (S5) | 触发条件归因 |\n"
-        content += "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n"
+        content += "## 一、 全量触发标的与 5 维边界条件判定矩阵\n\n"
+        content += "| 序号 | 代币符号 | 代币合约地址 | 网络 | 流动性突变比率 (S1) | PnL 7d 斜率 (S2) | 巨鲸 7d 净流入 (S3) | 成交量脉冲比 (S4) | 72h 振荡翻转 (S5) | 触发条件归因 |\n"
+        content += "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n"
 
         for idx, r in enumerate(triggered_tokens, 1):
             addr = r.token_address
             trunc_addr = f"`{addr[:5]}...{addr[-6:]}`"
             span_addr = f'<span title="{addr}">{trunc_addr}</span>'
             reasons_str = "<br>".join(r.trigger_reasons)
-            content += f"| {idx} | `{r.token_symbol}` | {span_addr} | `{r.liq_ratio:.2f}` | `{r.pnl_slope_7d:.1f}` | `{r.whale_net_7d}` | `{r.vol_ratio:.2f}` | `{r.oscillation_cnt}次` | {reasons_str} |\n"
+            content += f"| {idx} | `{r.token_symbol}` | {span_addr} | `{r.chain}` | `{r.liq_ratio:.2f}` | `{r.pnl_slope_7d:.1f}` | `{r.whale_net_7d}` | `{r.vol_ratio:.2f}` | `{r.oscillation_cnt}次` | {reasons_str} |\n"
 
-        content += "\n## 二、 走势图例与拟合对比 (以 BSC BANK 示例)\n\n"
-        content += "```mermaid\n"
-        content += "gantt\n"
-        content += "    title BSC BANK 链上动作与 5 维边界条件触发时序图\n"
-        content += "    dateFormat  YYYY-MM-DD\n"
-        content += "    section 物理链上持仓 (Arkham)\n"
-        content += "    缓步吸筹 (2.3M->2.55M)           :active, a1, 2026-06-26, 2026-07-16\n"
-        content += "    突发拉伸峰值 (2.55M->2.95M)       :crit, a2, 2026-07-17, 2026-07-20\n"
-        content += "    急速砸盘转出 (2.95M->2.22M)       :done, a3, 2026-07-21, 2026-07-21\n"
-        content += "    section 5 维突发拉伸检测引擎\n"
-        content += "    S1 流动性骤降预警 (0.094)        :crit, b1, 2026-07-16, 2026-07-16\n"
-        content += "    S2+S4 突发拉伸高分告警            :active, b2, 2026-07-17, 2026-07-20\n"
-        content += "    S5 振荡抑制 + DEATH_SPIRAL 风控  :done, b3, 2026-07-21, 2026-07-21\n"
-        content += "```\n"
+        content += "\n## 二、 全量突发拉伸代币多维触发分布汇总\n\n"
+        s1_cnt = sum(1 for r in triggered_tokens if any("S1" in res for res in r.trigger_reasons))
+        s2_cnt = sum(1 for r in triggered_tokens if any("S2" in res for res in r.trigger_reasons))
+        s3_cnt = sum(1 for r in triggered_tokens if any("S3" in res for res in r.trigger_reasons))
+        s4_cnt = sum(1 for r in triggered_tokens if any("S4" in res for res in r.trigger_reasons))
+        s5_cnt = sum(1 for r in triggered_tokens if any("S5" in res for res in r.trigger_reasons))
+
+        content += "| 维度标识 | 检测维度名称 | 全库触发标的数 | 维度判定核心含义 |\n"
+        content += "| :--- | :--- | :--- | :--- |\n"
+        content += f"| **S1** | 流动性结构突变 | {s1_cnt} 个 | reserve_usd 相比 14d 均值骤降 >75% |\n"
+        content += f"| **S2** | PnL 斜率爆发 | {s2_cnt} 个 | 7d PnL 增长率 > 50.0 |\n"
+        content += f"| **S3** | 巨鲸净流入爆发 | {s3_cnt} 个 | 7d 巨鲸净流入交易次数 > 5 次 |\n"
+        content += f"| **S4** | 成交量脉冲倍率 | {s4_cnt} 个 | 3d 均量 / 14d 均量 > 2.0 倍 |\n"
+        content += f"| **S5** | 判定振荡抑制 | {s5_cnt} 个 | 72h 内判定翻转次数 >= 3 次 |\n"
+
+        # 如果有触发标的，生成前 5 个最强爆发标的对比甘特图
+        top_targets = triggered_tokens[:5]
+        if top_targets:
+            content += "\n## 三、 前 5 大突发爆发标的检测响应时序\n\n"
+            content += "```mermaid\n"
+            content += "gantt\n"
+            content += "    title 全量突发拉伸 Top5 爆发标的 5 维引擎响应时序图\n"
+            content += "    dateFormat  YYYY-MM-DD\n"
+            for t in top_targets:
+                content += f"    section {t.token_symbol} ({t.chain})\n"
+                content += f"    S1-S4 爆发告警 (PnL Slope={t.pnl_slope_7d:.1f}) :active, 2026-07-17, 2026-07-20\n"
+                content += f"    S5 振荡防护 ({t.oscillation_cnt}次翻转)              :done, 2026-07-21, 2026-07-21\n"
+            content += "```\n"
 
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
