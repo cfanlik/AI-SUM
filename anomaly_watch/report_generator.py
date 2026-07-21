@@ -1,4 +1,4 @@
-import os
+import os, math
 from datetime import datetime
 
 class AnomalyReportGenerator:
@@ -8,6 +8,7 @@ class AnomalyReportGenerator:
             os.makedirs(self.output_dir, exist_ok=True)
 
     def generate_report(self, token_results):
+        """原有的专报 A：保持绝对独立存在（《AI-SUM 伪流动性陷阱与四大物理维度风控专报》）"""
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         file_timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         filepath = os.path.join(self.output_dir, f"anomaly_{file_timestamp}.md")
@@ -60,37 +61,47 @@ class AnomalyReportGenerator:
 
         return filepath
 
-    def generate_impulse_surge_report(self, surge_results):
-        """Top 10 单一精炼主表版：《异常关注 - 60天 4阶PnL动量矩阵突发拉伸诊断专报》"""
+    def generate_periodic_impulse_surge_report(self, surge_results):
+        """独立新增专报 B：《周期性突发吸筹风控专报》 (单一 Top 10 主表，100分制归一化，带正负号 PnL)"""
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         file_timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-        filepath = os.path.join(self.output_dir, f"impulse_surge_{file_timestamp}.md")
+        filepath = os.path.join(self.output_dir, f"periodic_impulse_surge_{file_timestamp}.md")
 
-        # 仅精简提取前 10 个最强爆发标的，物理消灭噪音
         triggered_tokens = [r for r in surge_results if r.is_triggered][:10]
 
-        content = f"# 🚀 AI-SUM 60天 4阶PnL动量矩阵《突发拉伸》风控专报\n\n"
-        content += f"> 生成时间: {now_str} | 扫描 60d 全库数据 | 精准输出 Top 10 强爆发标的 (无噪音单表版)\n\n"
+        def normalize_100_cap(slope):
+            if slope is None or slope <= 0:
+                return 0.0
+            score = 100.0 * (1.0 - math.exp(-slope / 100.0))
+            return min(100.0, max(0.0, score))
 
-        # 顶部集中声明 Tips 引用块 (彻底解决表头源码裸露)
-        content += "> **物理指标 Tips 与断言说明**：\n"
-        content += "> - **PnL_now**: 代币最新 PnL 盈亏比率 (%)。\n"
-        content += "> - **4阶 PnL 斜率矩阵 ($S_{7d}/S_{15d}/S_{30d}/S_{60d}$)**: 7天/15天/30天/60天内 PnL 累计增长斜率，用于识别凹向加速主升浪与拦截坑底死猫跳反弹。\n"
-        content += "> - **7d 爆发脉冲强度**: 7d 内 PnL 累计增长斜率及可视化字符对比条（`[██████████]`）。\n"
+        content = f"# 🚀 周期性突发吸筹风控专报\n\n"
+        content += f"> 生成时间: {now_str} | 扫描 60d 全库数据 | 精准输出 Top 10 周期性突发吸筹强标的 (无噪音单表版)\n\n"
+
+        content += "> **物理指标 Tips 说明**：\n"
+        content += "> - **当前 PnL**: 建仓至今持仓累计浮动盈亏率 (例如 `+243.9%` 代表净收益率为 243.9%)。\n"
+        content += "> - **PnL (S7d/S15d/S30d/S60d)**: 7天/15天/30天/60天内 PnL 累计增长斜率的 **100 分满分制归一化得分 (0.0~100.0分封顶)**。\n"
         content += "> - **72h 判定振荡防护状态**: S5 维 72h 内判定翻转次数与抖动拦截激活状态。\n"
         content += "> - **多阶矩阵形态**: 结合 4 阶斜率确定的动量形态（`🚀 凹向加速主升浪`、`🔥 高位强平台拉伸`、`📈 普通震荡拉升`）。\n"
         content += "> - **综合诊断归因**: S1(流动性突降)、S2(4阶PnL动量)、S3(巨鲸净流入)、S4(成交量脉冲)、S5(72h振荡防护) 综合触发原因。\n\n"
 
-        # 全局唯一 Top 10 精炼主表 (表头 100% 纯净无 HTML 属性标签)
-        content += "| 排名 | 代币名称<br>(Symbol) | 网络 | 当前 PnL | 4 阶 PnL 斜率矩阵<br>(S7d / S15d / S30d / S60d) | 7d 爆发脉冲强度 | 72h 判定振荡防护状态 | 多阶矩阵形态 | 综合诊断归因 |\n"
-        content += "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n"
-
-        max_s7 = max(abs(t.slope_7d) for t in triggered_tokens) if triggered_tokens else 1.0
+        # 8 列极简单表，表头第 2 列纯写为“代币名称”
+        content += "| 排名 | 代币名称 | 网络 | 当前 PnL | PnL (S7d/S15d/S30d/S60d)<br>(0~100分满分制) | 72h 判定振荡防护状态 | 多阶矩阵形态 | 综合诊断归因 |\n"
+        content += "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n"
 
         for idx, r in enumerate(triggered_tokens, 1):
             reasons_str = "<br>".join(r.trigger_reasons)
             
-            pnl_matrix_str = f"**`{r.slope_7d:.1f}`** / **`{r.slope_15d:.1f}`** / **`{r.slope_30d:.1f}`** / **`{r.slope_60d:.1f}`**"
+            s7 = normalize_100_cap(r.slope_7d)
+            s15 = normalize_100_cap(r.slope_15d)
+            s30 = normalize_100_cap(r.slope_30d)
+            s60 = normalize_100_cap(r.slope_60d)
+
+            pnl_cap_matrix = f"**`{s7:.1f}`** / **`{s15:.1f}`** / **`{s30:.1f}`** / **`{s60:.1f}`**"
+
+            # 格式化当前 PnL (带显式正负号与 %)
+            pnl_val = r.pnl_now or 0.0
+            pnl_str = f"**`+{pnl_val:.1f}%`**" if pnl_val > 0 else f"**`{pnl_val:.1f}%`**"
 
             pat_tag = f"`{r.pattern}`"
             if r.pattern == "ACCELERATING_SURGE":
@@ -100,14 +111,10 @@ class AnomalyReportGenerator:
             elif r.pattern == "GENERAL_SURGE":
                 pat_tag = "**📈 普通震荡拉升**"
 
-            # 字符脉冲对比条
-            bar_len = min(10, max(1, int((abs(r.slope_7d) / max(100.0, max_s7)) * 10)))
-            bar_str = "`[" + "█" * bar_len + "░" * (10 - bar_len) + f"] {r.slope_7d:.1f}`"
-
-            # 72h 振荡防护状态
             prot_str = f"**[已激活]** {r.oscillation_cnt}次翻转拦截" if r.oscillation_cnt >= 3 else f"[未激活] {r.oscillation_cnt}次翻转"
 
-            content += f"| **No.{idx}** | `{r.token_symbol}` | `{r.chain}` | `{r.pnl_now:.1f}` | {pnl_matrix_str} | {bar_str} | {prot_str} | {pat_tag} | {reasons_str} |\n"
+            # 代币名称单元格写为标准纯大写字符 `r.token_symbol`，打通右侧抽屉 60 天吸筹图表
+            content += f"| **No.{idx}** | `{r.token_symbol}` | `{r.chain}` | {pnl_str} | {pnl_cap_matrix} | {prot_str} | {pat_tag} | {reasons_str} |\n"
 
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
