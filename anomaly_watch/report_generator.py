@@ -65,7 +65,7 @@ class AnomalyReportGenerator:
         """独立新增专报 B：《周期性突发吸筹风控专报》 (代币名称纯写去反引号，打通右侧抽屉 X轴日期、Y轴PnL斜率/Top300吸筹折线图)"""
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         file_timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-        filepath = os.path.join(self.output_dir, f"periodic_impulse_surge_{file_timestamp}.md")
+        filepath = os.path.join(self.output_dir, f"anomaly_periodic_impulse_surge_{file_timestamp}.md")
 
         triggered_tokens = [r for r in surge_results if r.is_triggered][:10]
 
