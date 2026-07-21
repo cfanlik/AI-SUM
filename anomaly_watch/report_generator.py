@@ -62,7 +62,7 @@ class AnomalyReportGenerator:
         return filepath
 
     def generate_periodic_impulse_surge_report(self, surge_results):
-        """独立新增专报 B：《周期性突发吸筹风控专报》 (代币名称纯写去反引号，打通右侧 60d 吸筹图表)"""
+        """独立新增专报 B：《周期性突发吸筹风控专报》 (代币名称纯写去反引号，打通右侧抽屉 X轴日期、Y轴PnL斜率/Top300吸筹折线图)"""
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         file_timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         filepath = os.path.join(self.output_dir, f"periodic_impulse_surge_{file_timestamp}.md")
@@ -112,7 +112,7 @@ class AnomalyReportGenerator:
 
             prot_str = f"**[已激活]** {r.oscillation_cnt}次翻转拦截" if r.oscillation_cnt >= 3 else f"[未激活] {r.oscillation_cnt}次翻转"
 
-            # 关键 Bug 修复点: 代币名称单元格写为纯大写字母 r.token_symbol (绝无反引号)，彻底解决 API 参数错配导致的“无数据”问题
+            # 代币名称单元格为纯大写字母 r.token_symbol (绝无反引号)，彻底打通右侧抽屉 X轴日期、Y轴 PnL斜率/Top300吸筹图表
             content += f"| **No.{idx}** | {r.token_symbol} | `{r.chain}` | {pnl_str} | {pnl_cap_matrix} | {prot_str} | {pat_tag} | {reasons_str} |\n"
 
         with open(filepath, "w", encoding="utf-8") as f:
