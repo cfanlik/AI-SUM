@@ -1,6 +1,6 @@
 """
-突发拉伸 (Impulse Surge) 独立分析模块 (全量代币通用版)
-基于 60 天最长保留周期，通过 S1-S5 维边界条件全量检测全库代币，不针对/包含任何特例硬编码。
+突发拉伸 (Impulse Surge) 独立分析模块 (4阶 PnL 动量矩阵全量版)
+基于 60 天最长保留周期，计算 S_7d, S_15d, S_30d, S_60d 4 阶 PnL 斜率，识别真突发拉伸并拦截死猫跳反弹
 """
 import sqlite3, os, logging
 from dataclasses import dataclass
@@ -17,11 +17,14 @@ class ImpulseSurgeResult:
     reserve_14d_avg: float
     liq_ratio: float
     pnl_now: float
-    pnl_7d: float
-    pnl_slope_7d: float
+    slope_7d: float
+    slope_15d: float
+    slope_30d: float
+    slope_60d: float
     whale_net_7d: int
     vol_ratio: float
     oscillation_cnt: int
+    pattern: str  # ACCELERATING_SURGE / STABLE_HIGH_SURGE / DEAD_CAT_BOUNCE / GENERAL_SURGE
     is_triggered: bool
     trigger_reasons: List[str]
 
@@ -38,7 +41,7 @@ class ImpulseSurgeAnalyzer:
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
 
-        # 1. 提取数据库内所有代币
+        # 1. 提取全库所有代币
         cur.execute("SELECT DISTINCT token_address, token_symbol, chain FROM token_history WHERE computed_date >= date('now', '-60 days')")
         tokens = cur.fetchall()
 
@@ -70,7 +73,7 @@ class ImpulseSurgeAnalyzer:
             if s1_hit:
                 reasons.append(f"S1: 流动性突降 (Ratio={liq_ratio:.2f})")
 
-            # --- S2: PnL 斜率爆发 ---
+            # --- 4 阶 PnL 斜率矩阵计算 (7d, 15d, 30d, 60d) ---
             cur.execute("""
                 WITH ranked AS (
                     SELECT pnl_ratio, computed_date,
@@ -80,15 +83,26 @@ class ImpulseSurgeAnalyzer:
                 )
                 SELECT 
                     (SELECT pnl_ratio FROM ranked WHERE rn = 1) as pnl_now,
-                    (SELECT pnl_ratio FROM ranked WHERE rn = 8) as pnl_7d
+                    (SELECT pnl_ratio FROM ranked WHERE rn = 8) as pnl_7d,
+                    (SELECT pnl_ratio FROM ranked WHERE rn = 16) as pnl_15d,
+                    (SELECT pnl_ratio FROM ranked WHERE rn = 31) as pnl_30d,
+                    (SELECT pnl_ratio FROM ranked WHERE rn = 61) as pnl_60d
             """, (t_addr,))
             pnl_row = cur.fetchone()
             pnl_now = pnl_row['pnl_now'] if pnl_row and pnl_row['pnl_now'] is not None else 0.0
             pnl_7d = pnl_row['pnl_7d'] if pnl_row and pnl_row['pnl_7d'] is not None else 0.0
-            pnl_slope = pnl_now - pnl_7d
-            s2_hit = (pnl_slope > 50.0)
+            pnl_15d = pnl_row['pnl_15d'] if pnl_row and pnl_row['pnl_15d'] is not None else pnl_7d
+            pnl_30d = pnl_row['pnl_30d'] if pnl_row and pnl_row['pnl_30d'] is not None else pnl_15d
+            pnl_60d = pnl_row['pnl_60d'] if pnl_row and pnl_row['pnl_60d'] is not None else pnl_30d
+
+            slope_7d = pnl_now - pnl_7d
+            slope_15d = pnl_now - pnl_15d
+            slope_30d = pnl_now - pnl_30d
+            slope_60d = pnl_now - pnl_60d
+
+            s2_hit = (slope_7d > 50.0)
             if s2_hit:
-                reasons.append(f"S2: PnL斜率爆发 (Slope={pnl_slope:.1f})")
+                reasons.append(f"S2: 4阶PnL动量 (S7d={slope_7d:.1f}, S15d={slope_15d:.1f})")
 
             # --- S3: 巨鲸净流入 ---
             cur.execute("""
@@ -138,9 +152,22 @@ class ImpulseSurgeAnalyzer:
             if s5_hit:
                 reasons.append(f"S5: 判定振荡抑制 (Flip={osc_cnt}次)")
 
-            is_triggered = (s1_hit and s2_hit) or (s2_hit and s3_hit and s4_hit) or s5_hit
+            # 形态分类判定 (判定死猫跳与强主升浪)
+            pattern = "GENERAL_SURGE"
+            is_dead_cat = (slope_7d > 30.0 and (slope_30d < 0 or slope_60d < -100.0) and pnl_now < 0)
+            
+            if is_dead_cat:
+                pattern = "DEAD_CAT_BOUNCE"
+                is_triggered = False # 坑底死猫跳反弹强拦截，不打入突发拉伸强告警
+            else:
+                if slope_7d > 50.0 and slope_15d > 30.0 and slope_30d > 0:
+                    if slope_7d > slope_15d and slope_15d > slope_30d:
+                        pattern = "ACCELERATING_SURGE" # 凹向加速主升浪
+                    else:
+                        pattern = "STABLE_HIGH_SURGE"  # 高位稳态拉升
+                
+                is_triggered = (s1_hit and s2_hit) or (s2_hit and s3_hit and s4_hit) or s5_hit
 
-            # 全量代币通用筛选: 绝无单代币硬编码
             if is_triggered:
                 results.append(ImpulseSurgeResult(
                     token_address=t_addr,
@@ -150,17 +177,20 @@ class ImpulseSurgeAnalyzer:
                     reserve_14d_avg=r_avg,
                     liq_ratio=liq_ratio,
                     pnl_now=pnl_now,
-                    pnl_7d=pnl_7d,
-                    pnl_slope_7d=pnl_slope,
+                    slope_7d=slope_7d,
+                    slope_15d=slope_15d,
+                    slope_30d=slope_30d,
+                    slope_60d=slope_60d,
                     whale_net_7d=whale_net,
                     vol_ratio=vol_ratio,
                     oscillation_cnt=osc_cnt,
+                    pattern=pattern,
                     is_triggered=is_triggered,
                     trigger_reasons=reasons
                 ))
 
         conn.close()
-        # 按 PnL 斜率与触发条件数量降序排序
-        results.sort(key=lambda x: (len(x.trigger_reasons), x.pnl_slope_7d), reverse=True)
+        # 按 (触发条件数, 7d斜率) 降序排序
+        results.sort(key=lambda x: (len(x.trigger_reasons), x.slope_7d), reverse=True)
         return results
 
