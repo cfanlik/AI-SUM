@@ -121,3 +121,5 @@ class AnomalyReportGenerator:
         return filepath
 
 # 升级 X 轴 5 天间隔刻度 (tick_dates) 与 Hover Tooltip 真实单天明细支撑 (Issue #86)
+
+# 重构 TokenDetailPanel.jsx 组件挂载 60d 折线图并完成 npx vite build 编译 (Issue #90)
