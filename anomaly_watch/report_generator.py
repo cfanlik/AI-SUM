@@ -62,7 +62,7 @@ class AnomalyReportGenerator:
         return filepath
 
     def generate_periodic_impulse_surge_report(self, surge_results):
-        """独立新增专报 B：《周期性突发吸筹风控专报》 (单一 Top 10 主表，100分制归一化，带正负号 PnL)"""
+        """独立新增专报 B：《周期性突发吸筹风控专报》 (代币名称纯写去反引号，打通右侧 60d 吸筹图表)"""
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         file_timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         filepath = os.path.join(self.output_dir, f"periodic_impulse_surge_{file_timestamp}.md")
@@ -85,8 +85,8 @@ class AnomalyReportGenerator:
         content += "> - **多阶矩阵形态**: 结合 4 阶斜率确定的动量形态（`🚀 凹向加速主升浪`、`🔥 高位强平台拉伸`、`📈 普通震荡拉升`）。\n"
         content += "> - **综合诊断归因**: S1(流动性突降)、S2(4阶PnL动量)、S3(巨鲸净流入)、S4(成交量脉冲)、S5(72h振荡防护) 综合触发原因。\n\n"
 
-        # 8 列极简单表，表头第 2 列纯写为“代币名称”
-        content += "| 排名 | 代币名称 | 网络 | 当前 PnL | PnL (S7d/S15d/S30d/S60d)<br>(0~100分满分制) | 72h 判定振荡防护状态 | 多阶矩阵形态 | 综合诊断归因 |\n"
+        # 8 列极简单表，表头第 5 列纯写为“PnL (S7d/S15d/S30d/S60d)”
+        content += "| 排名 | 代币名称 | 网络 | 当前 PnL | PnL (S7d/S15d/S30d/S60d) | 72h 判定振荡防护状态 | 多阶矩阵形态 | 综合诊断归因 |\n"
         content += "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n"
 
         for idx, r in enumerate(triggered_tokens, 1):
@@ -99,7 +99,6 @@ class AnomalyReportGenerator:
 
             pnl_cap_matrix = f"**`{s7:.1f}`** / **`{s15:.1f}`** / **`{s30:.1f}`** / **`{s60:.1f}`**"
 
-            # 格式化当前 PnL (带显式正负号与 %)
             pnl_val = r.pnl_now or 0.0
             pnl_str = f"**`+{pnl_val:.1f}%`**" if pnl_val > 0 else f"**`{pnl_val:.1f}%`**"
 
@@ -113,8 +112,8 @@ class AnomalyReportGenerator:
 
             prot_str = f"**[已激活]** {r.oscillation_cnt}次翻转拦截" if r.oscillation_cnt >= 3 else f"[未激活] {r.oscillation_cnt}次翻转"
 
-            # 代币名称单元格写为标准纯大写字符 `r.token_symbol`，打通右侧抽屉 60 天吸筹图表
-            content += f"| **No.{idx}** | `{r.token_symbol}` | `{r.chain}` | {pnl_str} | {pnl_cap_matrix} | {prot_str} | {pat_tag} | {reasons_str} |\n"
+            # 关键 Bug 修复点: 代币名称单元格写为纯大写字母 r.token_symbol (绝无反引号)，彻底解决 API 参数错配导致的“无数据”问题
+            content += f"| **No.{idx}** | {r.token_symbol} | `{r.chain}` | {pnl_str} | {pnl_cap_matrix} | {prot_str} | {pat_tag} | {reasons_str} |\n"
 
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
