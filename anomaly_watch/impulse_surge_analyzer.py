@@ -29,7 +29,7 @@ class ImpulseSurgeAnalyzer:
     def __init__(self, db_path: str = "/opt/AI-SUM/select-sum.db"):
         self.db_path = db_path
 
-    def analyze() -> List[ImpulseSurgeResult]:
+    def analyze(self) -> List[ImpulseSurgeResult]:
         if not os.path.exists(self.db_path):
             logger.error(f"Database not found: {self.db_path}")
             return []
