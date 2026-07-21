@@ -119,3 +119,5 @@ class AnomalyReportGenerator:
             f.write(content)
 
         return filepath
+
+# 升级 X 轴 5 天间隔刻度 (tick_dates) 与 Hover Tooltip 真实单天明细支撑 (Issue #86)
