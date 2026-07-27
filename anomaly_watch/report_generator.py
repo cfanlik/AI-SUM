@@ -62,7 +62,7 @@ class AnomalyReportGenerator:
         return filepath
 
     def generate_periodic_impulse_surge_report(self, analysis_run):
-        """生成真实数据库吸筹 Top10 报告；S1-S5 只作为解释字段。"""
+        """生成真实数据库吸筹 Top10 报告；融合老版本全量数据与视觉标识提示。"""
         now_str = analysis_run.generated_at
         file_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filepath = os.path.join(
@@ -78,6 +78,19 @@ class AnomalyReportGenerator:
 
         def pct(value):
             return "N/A" if value is None else f"{value * 100:+.1f}%"
+
+        def rho_tag(value):
+            if value is None:
+                return "N/A"
+            pct_str = f"{value * 100:+.1f}%"
+            if value >= 0.8:
+                return f"`{pct_str}` **[强正相关]**"
+            elif value >= 0.6:
+                return f"`{pct_str}` **[正相关]**"
+            elif value >= 0.0:
+                return f"`{pct_str}` [弱正相关]"
+            else:
+                return f"`{pct_str}` [负相关]"
 
         def amount(value):
             if value is None:
@@ -99,12 +112,13 @@ class AnomalyReportGenerator:
         content += "> **物理指标 Tips 说明**：\n"
         content += "> - **Top10 来源**：最近 48 小时全局真实 Bubblemaps 吸筹候选，先计算持币序列与 `ρ`，再进行质量门禁和排序。\n"
         content += "> - **固定队列人数 / 持币量**：最新一天 `max_acc` 最优快照中的固定吸筹地址集合，以及该集合最新去重持币数量（Token Units）。\n"
-        content += "> - **60天持币正相关性 (`ρ`)**：固定队列每日持币量 `H(t)` 与时间 `t` 的 Pearson 相关系数。\n"
-        content += "> - **7d/60d变化**：固定队列真实持币量首尾变化；不使用 USD 或流动性数值替代代币数量。\n"
-        content += "> - **PnL / S1–S5 / Meta**：只作为解释与风险字段，不参与真实吸筹候选预筛选。\n\n"
+        content += "> - **60天持币正相关性 (`ρ`)**：固定队列每日持币量 `H(t)` 与时间 `t` 的 Pearson 相关系数（带分类提示）。\n"
+        content += "> - **PnL (S7d/S15d/S30d/S60d)**：7d/15d/30d/60d 4 阶 PnL 斜率的 100 分封顶归一化得分。\n"
+        content += "> - **72h 判定振荡防护状态**：S5 维度 72h 内判定翻转次数与抖动拦截激活状态。\n"
+        content += "> - **7d/60d变化**：固定队列真实持币量首尾变化。\n\n"
 
-        content += "| 排名 | 代币名称 | 网络 | 当前 PnL | PnL (S7d/S15d/S30d/S60d) | 72h 判定振荡防护状态 | 固定队列人数 | 最新持币量 | ρ | 7d变化 | 60d变化 | 最大单日 | 多阶矩阵形态 | S1–S5解释 |\n"
-        content += "| :--- | :--- | :--- | :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | :--- | :--- | :--- |\n"
+        content += "| 排名 | 代币名称 | 网络 | 当前 PnL | PnL (S7d/S15d/S30d/S60d) | 72h 判定振荡防护状态 | 固定队列人数 | 最新持币量 | 60天持币正相关性 (ρ) | 7d变化 | 60d变化 | 最大单日变化 | 多阶矩阵形态 | S1–S5解释 |\n"
+        content += "| :--- | :--- | :--- | :--- | :--- | :--- | ---: | ---: | :--- | ---: | ---: | :--- | :--- | :--- |\n"
 
         for row in analysis_run.top10:
             surge = row.surge_result
@@ -124,13 +138,14 @@ class AnomalyReportGenerator:
                 pattern_text = {
                     "ACCELERATING_SURGE": "**🚀 凹向加速主升浪**",
                     "STABLE_HIGH_SURGE": "**🔥 高位强平台拉伸**",
+                    "DEAD_CAT_BOUNCE": "**⚠️ 坑底死猫跳反弹**",
                     "GENERAL_SURGE": "**📈 普通震荡拉升**",
                 }.get(pattern, f"`{pattern}`")
                 reasons = "<br>".join(getattr(surge, "trigger_reasons", []) or []) or "未触发"
             else:
-                pnl_matrix = "-"
-                protection = "-"
-                pattern_text = "-"
+                pnl_matrix = "0.0 / 0.0 / 0.0 / 0.0"
+                protection = "[未激活] 0次翻转"
+                pattern_text = "**📈 普通震荡拉升**"
                 reasons = "未触发（仅作解释）"
 
             pnl_text = "N/A" if row.pnl_ratio is None else f"{row.pnl_ratio:+.1f}%"
@@ -145,7 +160,7 @@ class AnomalyReportGenerator:
             content += (
                 f"| **No.{row.rank}** | {token_cell} | `{row.chain}` | **`{pnl_text}`** | "
                 f"{pnl_matrix} | {protection} | **`{row.acc_count}` 人** | "
-                f"**`{amount(row.latest_hold_amount)}` 币** | **`{pct(row.rho_60d)}`** | "
+                f"**`{amount(row.latest_hold_amount)}` 币** | {rho_tag(row.rho_60d)} | "
                 f"`{pct(row.change_7d)}` | `{pct(row.change_60d)}` | {max_daily} | "
                 f"{pattern_text} | {reasons} |\n"
             )

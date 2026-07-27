@@ -251,6 +251,14 @@ class AccumulationTop10Analyzer:
                     keys.add((chain, address))
         return keys, addresses
 
+    def _fallback_surge(self, address: str, chain: str, symbol: str):
+        try:
+            from anomaly_watch.impulse_surge_analyzer import ImpulseSurgeAnalyzer
+            analyzer = ImpulseSurgeAnalyzer(db_path=self.sum_db_path)
+            return analyzer.analyze_single(address, chain, symbol)
+        except Exception:
+            return None
+
     def _analyze_candidate(
         self,
         select_conn: sqlite3.Connection,
@@ -273,7 +281,7 @@ class AccumulationTop10Analyzer:
             SELECT snapshot_time, COUNT(DISTINCT wallet_address) AS acc_count
             FROM bubblemap_holders
             WHERE chain = ? AND token_address = ?
-              AND DATE(snapshot_time) = DATE(?) AND is_accumulating = 1
+              AND snapshot_time LIKE substr(?, 1, 10) || '%' AND is_accumulating = 1
             GROUP BY snapshot_time
             ORDER BY acc_count DESC, snapshot_time DESC
             LIMIT 1
@@ -414,6 +422,7 @@ class AccumulationTop10Analyzer:
             surge_result=(
                 surge_map.get(_identity(chain, address))
                 or surge_map.get(("", _identity(chain, address)[1]))
+                or self._fallback_surge(address, chain, symbol)
             ),
         )
 
