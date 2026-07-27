@@ -61,13 +61,14 @@ class AnomalyReportGenerator:
 
         return filepath
 
-    def generate_periodic_impulse_surge_report(self, surge_results):
-        """独立新增专报 B：《周期性突发吸筹风控专报》 (代币名称纯写去反引号，打通右侧抽屉 X轴日期、Y轴PnL斜率/Top300吸筹折线图)"""
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        file_timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-        filepath = os.path.join(self.output_dir, f"anomaly_periodic_impulse_surge_{file_timestamp}.md")
-
-        triggered_tokens = [r for r in surge_results if r.is_triggered][:10]
+    def generate_periodic_impulse_surge_report(self, analysis_run):
+        """生成真实数据库吸筹 Top10 报告；S1-S5 只作为解释字段。"""
+        now_str = analysis_run.generated_at
+        file_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filepath = os.path.join(
+            self.output_dir,
+            f"anomaly_periodic_impulse_surge_{file_timestamp}.md",
+        )
 
         def normalize_100_cap(slope):
             if slope is None or slope <= 0:
@@ -75,59 +76,90 @@ class AnomalyReportGenerator:
             score = 100.0 * (1.0 - math.exp(-slope / 100.0))
             return min(100.0, max(0.0, score))
 
-        content = f"# 🚀 周期性突发吸筹风控专报\n\n"
-        content += f"> 生成时间: {now_str} | 扫描 60d 全库数据 | 精准输出 Top 10 周期性突发吸筹强标的 (无噪音单表版)\n\n"
+        def pct(value):
+            return "N/A" if value is None else f"{value * 100:+.1f}%"
 
+        def amount(value):
+            if value is None:
+                return "N/A"
+            if abs(value) >= 1e8:
+                return f"{value / 1e8:.2f}亿"
+            if abs(value) >= 1e6:
+                return f"{value / 1e6:.2f}M"
+            if abs(value) >= 1e3:
+                return f"{value / 1e3:.1f}K"
+            return f"{value:.0f}"
+
+        content = "# 🚀 周期性突发吸筹风控专报\n\n"
+        content += (
+            f"> 生成时间: {now_str} | run_id: `{analysis_run.run_id}` | "
+            f"全库候选 {analysis_run.candidate_count} 个 | 质量门禁通过 "
+            f"{analysis_run.quality_pass_count} 个 | 输出真实吸筹 Top {len(analysis_run.top10)}\n\n"
+        )
         content += "> **物理指标 Tips 说明**：\n"
-        content += "> - **当前 PnL**: 建仓至今持仓累计浮动盈亏率 (例如 `+243.9%` 代表净收益率为 243.9%)。\n"
-        content += "- **PnL (S7d/S15d/S30d/S60d)**: 7天/15天/30天/60天内 PnL 累计增长斜率的 **100 分满分制归一化得分 (0.0~100.0分封顶)**。\n"
-        content += "> - **72h 判定振荡防护状态**: S5 维 72h 内判定翻转次数与抖动拦截激活状态。\n"
-        content += "> - **多阶矩阵形态**: 结合 4 阶斜率确定的动量形态（`🚀 凹向加速主升浪`、`🔥 高位强平台拉伸`、`📈 普通震荡拉升`）。\n"
-        content += "> - **综合诊断归因**: S1(流动性突降)、S2(4阶PnL动量)、S3(巨鲸净流入)、S4(成交量脉冲)、S5(72h振荡防护) 综合触发原因。\n\n"
+        content += "> - **Top10 来源**：最近 48 小时全局真实 Bubblemaps 吸筹候选，先计算持币序列与 `ρ`，再进行质量门禁和排序。\n"
+        content += "> - **固定队列人数 / 持币量**：最新一天 `max_acc` 最优快照中的固定吸筹地址集合，以及该集合最新去重持币数量（Token Units）。\n"
+        content += "> - **60天持币正相关性 (`ρ`)**：固定队列每日持币量 `H(t)` 与时间 `t` 的 Pearson 相关系数。\n"
+        content += "> - **7d/60d变化**：固定队列真实持币量首尾变化；不使用 USD 或流动性数值替代代币数量。\n"
+        content += "> - **PnL / S1–S5 / Meta**：只作为解释与风险字段，不参与真实吸筹候选预筛选。\n\n"
 
-        # 8 列极简单表，表头第 5 列纯写为“PnL (S7d/S15d/S30d/S60d)”
-        content += "| 排名 | 代币名称 | 网络 | 当前 PnL | PnL (S7d/S15d/S30d/S60d) | 72h 判定振荡防护状态 | 多阶矩阵形态 | 综合诊断归因 |\n"
-        content += "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n"
+        content += "| 排名 | 代币名称 | 网络 | 当前 PnL | PnL (S7d/S15d/S30d/S60d) | 72h 判定振荡防护状态 | 固定队列人数 | 最新持币量 | ρ | 7d变化 | 60d变化 | 最大单日 | 多阶矩阵形态 | S1–S5解释 |\n"
+        content += "| :--- | :--- | :--- | :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | :--- | :--- | :--- |\n"
 
-        for idx, r in enumerate(triggered_tokens, 1):
-            reasons_str = "<br>".join(r.trigger_reasons)
-            
-            s7 = normalize_100_cap(r.slope_7d)
-            s15 = normalize_100_cap(r.slope_15d)
-            s30 = normalize_100_cap(r.slope_30d)
-            s60 = normalize_100_cap(r.slope_60d)
+        for row in analysis_run.top10:
+            surge = row.surge_result
+            if surge is not None:
+                slopes = [
+                    normalize_100_cap(getattr(surge, name, None))
+                    for name in ("slope_7d", "slope_15d", "slope_30d", "slope_60d")
+                ]
+                pnl_matrix = " / ".join(f"**`{value:.1f}`**" for value in slopes)
+                oscillation = int(getattr(surge, "oscillation_cnt", 0) or 0)
+                protection = (
+                    f"**[已激活]** {oscillation}次翻转拦截"
+                    if oscillation >= 3
+                    else f"[未激活] {oscillation}次翻转"
+                )
+                pattern = getattr(surge, "pattern", "GENERAL_SURGE")
+                pattern_text = {
+                    "ACCELERATING_SURGE": "**🚀 凹向加速主升浪**",
+                    "STABLE_HIGH_SURGE": "**🔥 高位强平台拉伸**",
+                    "GENERAL_SURGE": "**📈 普通震荡拉升**",
+                }.get(pattern, f"`{pattern}`")
+                reasons = "<br>".join(getattr(surge, "trigger_reasons", []) or []) or "未触发"
+            else:
+                pnl_matrix = "-"
+                protection = "-"
+                pattern_text = "-"
+                reasons = "未触发（仅作解释）"
 
-            pnl_cap_matrix = f"**`{s7:.1f}`** / **`{s15:.1f}`** / **`{s30:.1f}`** / **`{s60:.1f}`**"
+            pnl_text = "N/A" if row.pnl_ratio is None else f"{row.pnl_ratio:+.1f}%"
+            max_daily = pct(row.max_daily_change)
+            if row.max_daily_change_date:
+                max_daily += f" ({row.max_daily_change_date})"
+            token_cell = (
+                f'<span data-run-id="{analysis_run.run_id}" '
+                f'data-chain="{row.chain}" '
+                f'data-token-address="{row.token_address}">{row.token_symbol}</span>'
+            )
+            content += (
+                f"| **No.{row.rank}** | {token_cell} | `{row.chain}` | **`{pnl_text}`** | "
+                f"{pnl_matrix} | {protection} | **`{row.acc_count}` 人** | "
+                f"**`{amount(row.latest_hold_amount)}` 币** | **`{pct(row.rho_60d)}`** | "
+                f"`{pct(row.change_7d)}` | `{pct(row.change_60d)}` | {max_daily} | "
+                f"{pattern_text} | {reasons} |\n"
+            )
 
-            pnl_val = r.pnl_now or 0.0
-            pnl_str = f"**`+{pnl_val:.1f}%`**" if pnl_val > 0 else f"**`{pnl_val:.1f}%`**"
+        if analysis_run.risk_rows:
+            content += "\n## 数据质量/风险附表\n\n"
+            content += "| 代币 | 网络 | ρ | 固定队列人数 | 未入榜原因 |\n"
+            content += "| :--- | :--- | ---: | ---: | :--- |\n"
+            for row in analysis_run.risk_rows:
+                content += (
+                    f"| {row.token_symbol} | `{row.chain}` | `{pct(row.rho_60d)}` | "
+                    f"{row.acc_count} | `{','.join(row.risk_flags)}` |\n"
+                )
 
-            pat_tag = f"`{r.pattern}`"
-            if r.pattern == "ACCELERATING_SURGE":
-                pat_tag = "**🚀 凹向加速主升浪**"
-            elif r.pattern == "STABLE_HIGH_SURGE":
-                pat_tag = "**🔥 高位强平台拉伸**"
-            elif r.pattern == "GENERAL_SURGE":
-                pat_tag = "**📈 普通震荡拉升**"
-
-            prot_str = f"**[已激活]** {r.oscillation_cnt}次翻转拦截" if r.oscillation_cnt >= 3 else f"[未激活] {r.oscillation_cnt}次翻转"
-
-            # 代币名称单元格为纯大写字母 r.token_symbol (绝无反引号)，彻底打通右侧抽屉 X轴日期、Y轴 PnL斜率/Top300吸筹图表
-            content += f"| **No.{idx}** | {r.token_symbol} | `{r.chain}` | {pnl_str} | {pnl_cap_matrix} | {prot_str} | {pat_tag} | {reasons_str} |\n"
-
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(content)
-
+        with open(filepath, "w", encoding="utf-8") as handle:
+            handle.write(content)
         return filepath
-
-# 升级 X 轴 5 天间隔刻度 (tick_dates) 与 Hover Tooltip 真实单天明细支撑 (Issue #86)
-
-# 重构 TokenDetailPanel.jsx 组件挂载 60d 折线图并完成 npx vite build 编译 (Issue #90)
-
-# 重构 TokenDetailPanel.jsx 前端 React 抽屉组件打造 Top 300 60d 吸筹与 PnL 动量双轴图 (Issue #92)
-
-# 消除图表文字多重堆叠并增加 Tooltip 智能避让 (Issue #94)
-
-# 重构 Arkham 风格 Top 300 标注吸筹地址 60d 汇总持币量演变面积图 (Issue #96)
-
-# 100% 物理真实代币原始持币数量 (Issue #98)
