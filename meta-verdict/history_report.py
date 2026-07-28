@@ -1117,10 +1117,25 @@ def save_token_history(sumdb, bt_data, mig_data, ts_data, liq_data=None, dt_map=
         except Exception:
             pass
 
-    # 索引化
+    # 索引化 (V5.1 补全跨库全量行情 mapping)
     mig_map = {r["addr"]: r for r in mig_data if r.get("addr")}
     ts_map = {r["symbol"]: r for r in ts_data}
     liq_map = {r["symbol"]: r for r in (liq_data or [])}
+    
+    # 动态加载 select.db 原生库全量代币行情兜底
+    gecko_fallback_map = {}
+    try:
+        import sqlite3
+        conn_sel = sqlite3.connect("file:/opt/select-coin/data/select.db?mode=ro", uri=True, timeout=10)
+        conn_sel.row_factory = sqlite3.Row
+        g_rows = conn_sel.execute("SELECT LOWER(token_address) as addr, reserve_usd, volume_24h FROM gecko_market_data WHERE scan_time >= datetime('now', '-3 days') ORDER BY scan_time DESC").fetchall()
+        for g in g_rows:
+            a = g["addr"]
+            if a and a not in gecko_fallback_map:
+                gecko_fallback_map[a] = {"reserve_usd": float(g["reserve_usd"] or 0), "volume_24h": float(g["volume_24h"] or 0)}
+        conn_sel.close()
+    except Exception as e:
+        pass
 
     count = 0
     written_addrs = set()

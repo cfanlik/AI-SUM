@@ -396,6 +396,28 @@ class AccumulationTop10Analyzer:
         if not market or float(market["reserve_usd"] or 0) <= 0 or float(market["volume_24h"] or 0) <= 0:
             flags.append("NO_LIVE_MARKET")
 
+        # 跨库回溯 select.db 的 gecko_market_data 原原生表 (动态消除落盘污染引发的误杀)
+        gecko_live = select_conn.execute(
+            """
+            SELECT reserve_usd, volume_24h
+            FROM gecko_market_data
+            WHERE LOWER(token_address) = ?
+              AND scan_time >= datetime('now', '-7 days')
+            ORDER BY scan_time DESC
+            LIMIT 1
+            """,
+            (identity_address,),
+        ).fetchone()
+
+        if gecko_live:
+            g_res = float(gecko_live["reserve_usd"] or 0)
+            g_vol = float(gecko_live["volume_24h"] or 0)
+            if g_res > 10000 and g_vol > 0:
+                flags = [f for f in flags if f not in ("HISTORY_MARKET_MISSING", "NO_TOKEN_HISTORY")]
+            elif g_vol <= 0:
+                if "NO_LIVE_MARKET" not in flags:
+                    flags.append("NO_LIVE_MARKET")
+
         if (identity_chain, identity_address) in fake_keys or identity_address in fake_addresses:
             flags.append("FAKE_LIQ_ALERT")
 
