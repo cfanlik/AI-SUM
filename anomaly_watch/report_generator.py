@@ -136,8 +136,9 @@ class AnomalyReportGenerator:
                 )
                 pattern = getattr(surge, "pattern", "GENERAL_SURGE")
                 pattern_text = {
-                    "ACCELERATING_SURGE": "**🚀 凹向加速主升浪**",
+                    "ACCELERATING_SURGE": "**🚀 凹向爆发加速浪**",
                     "STABLE_HIGH_SURGE": "**🔥 高位强平台拉伸**",
+                    "RISING_ACCUMULATION": "**⚡ 温和主升蓄势**",
                     "DEAD_CAT_BOUNCE": "**⚠️ 坑底死猫跳反弹**",
                     "GENERAL_SURGE": "**📈 普通震荡拉升**",
                 }.get(pattern, f"`{pattern}`")
