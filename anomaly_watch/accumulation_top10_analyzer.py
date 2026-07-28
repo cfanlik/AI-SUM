@@ -124,7 +124,7 @@ class AccumulationTop10Analyzer:
         persist: bool = True,
         run_id: Optional[str] = None,
         candidate_offset: int = 0,
-        candidate_limit: Optional[int] = None,
+        candidate_limit: Optional[int] = 15,
     ) -> AccumulationAnalysisRun:
         if not os.path.isfile(self.select_db_path):
             raise FileNotFoundError(self.select_db_path)
@@ -143,7 +143,8 @@ class AccumulationTop10Analyzer:
                 FROM token_names
                 WHERE bm_last_snapshot >= datetime('now', ?)
                   AND bm_acc_count > 0
-                ORDER BY LOWER(chain), LOWER(token_address)
+                ORDER BY bm_acc_count DESC
+                LIMIT 40
                 """,
                 (f"-{self.freshness_hours} hours",),
             ).fetchall()
@@ -363,10 +364,24 @@ class AccumulationTop10Analyzer:
             """,
             (identity_address, identity_chain, identity_chain),
         ).fetchone()
+
+        max_history_market = sum_conn.execute(
+            """
+            SELECT MAX(volume_24h) as max_vol, MAX(reserve_usd) as max_res
+            FROM token_history
+            WHERE LOWER(token_address) = ?
+              AND computed_date >= date('now', '-7 days')
+            """,
+            (identity_address,),
+        ).fetchone()
+
         if not history:
             flags.append("NO_TOKEN_HISTORY")
-        elif float(history["volume_24h"] or 0) <= 0 or float(history["reserve_usd"] or 0) <= 0:
-            flags.append("HISTORY_MARKET_MISSING")
+        else:
+            vol_check = max(float(history["volume_24h"] or 0), float(max_history_market["max_vol"] or 0) if max_history_market else 0)
+            res_check = max(float(history["reserve_usd"] or 0), float(max_history_market["max_res"] or 0) if max_history_market else 0)
+            if vol_check <= 0 or res_check <= 0:
+                flags.append("HISTORY_MARKET_MISSING")
 
         market = select_conn.execute(
             """
