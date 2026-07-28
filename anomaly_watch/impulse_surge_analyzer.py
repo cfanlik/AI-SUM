@@ -134,19 +134,21 @@ class ImpulseSurgeAnalyzer:
         if s5_hit:
             reasons.append(f"S5: 判定振荡抑制 (Flip={osc_cnt}次)")
 
-        # 形态分类判定 (判定死猫跳与强主升浪)
+        # 形态分类判定 (基于历史数据全量统计的 5 阶动量梯度重构)
         pattern = "GENERAL_SURGE"
-        is_dead_cat = (slope_7d > 30.0 and (slope_30d < 0 or slope_60d < -100.0) and pnl_now < 0)
+        is_dead_cat = (slope_7d > 20.0 and (slope_30d < 0 or slope_60d < -100.0) and pnl_now < 0)
         
         if is_dead_cat:
             pattern = "DEAD_CAT_BOUNCE"
             is_triggered = False # 坑底死猫跳反弹强拦截，不打入突发拉伸强告警
         else:
-            if slope_7d > 50.0 and slope_15d > 30.0 and slope_30d > 0:
+            if slope_7d > 30.0 and slope_15d > 15.0 and slope_30d > 0:
                 if slope_7d > slope_15d and slope_15d > slope_30d:
-                    pattern = "ACCELERATING_SURGE" # 凹向加速主升浪
+                    pattern = "ACCELERATING_SURGE" # 🚀 凹向爆发加速浪
                 else:
-                    pattern = "STABLE_HIGH_SURGE"  # 高位稳态拉升
+                    pattern = "STABLE_HIGH_SURGE"  # 🔥 高位强平台拉伸
+            elif slope_7d > 10.0 and slope_15d > 5.0 and slope_30d > 0:
+                pattern = "RISING_ACCUMULATION"    # ⚡ 温和主升蓄势
             
             is_triggered = (s1_hit and s2_hit) or (s2_hit and s3_hit and s4_hit) or s5_hit
 
