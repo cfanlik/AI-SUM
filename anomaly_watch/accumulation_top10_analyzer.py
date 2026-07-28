@@ -180,9 +180,16 @@ class AccumulationTop10Analyzer:
             row for row in results
             if row.quality_status == "PASS" and row.rho_60d is not None
         ]
+        def _pattern_bonus(row):
+            p = getattr(getattr(row, "surge_result", None), "pattern", "")
+            if p == "ACCELERATING_SURGE": return 0.03
+            if p == "RISING_ACCUMULATION": return 0.015
+            if p == "STABLE_HIGH_SURGE": return 0.005
+            return 0.0
+
         quality_rows.sort(
             key=lambda row: (
-                row.rho_60d,
+                (row.rho_60d or 0) + _pattern_bonus(row),
                 row.change_7d if row.change_7d is not None else float("-inf"),
                 row.acc_count,
             ),
@@ -396,24 +403,30 @@ class AccumulationTop10Analyzer:
         if not market or float(market["reserve_usd"] or 0) <= 0 or float(market["volume_24h"] or 0) <= 0:
             flags.append("NO_LIVE_MARKET")
 
-        # 跨库回溯 select.db 的 gecko_market_data 原原生表 (动态消除落盘污染引发的误杀)
+        # 跨库回溯 select.db 的 gecko_market_data 原原生表 (缺陷B: 增加 chain 过滤; 缺陷D: 区分解封 NO_TOKEN_HISTORY 标记为 PARTIAL_HISTORY)
         gecko_live = select_conn.execute(
             """
             SELECT reserve_usd, volume_24h
             FROM gecko_market_data
             WHERE LOWER(token_address) = ?
+              AND (LOWER(chain) = ? OR chain IS NULL OR chain = '')
               AND scan_time >= datetime('now', '-7 days')
             ORDER BY scan_time DESC
             LIMIT 1
             """,
-            (identity_address,),
+            (identity_address, identity_chain),
         ).fetchone()
 
         if gecko_live:
             g_res = float(gecko_live["reserve_usd"] or 0)
             g_vol = float(gecko_live["volume_24h"] or 0)
             if g_res > 10000 and g_vol > 0:
-                flags = [f for f in flags if f not in ("HISTORY_MARKET_MISSING", "NO_TOKEN_HISTORY")]
+                # 仅解除 HISTORY_MARKET_MISSING
+                flags = [f for f in flags if f != "HISTORY_MARKET_MISSING"]
+                # 对缺 token_history 的代币打上 PARTIAL_HISTORY 标记，保证数据完整性透明
+                if "NO_TOKEN_HISTORY" in flags:
+                    flags.remove("NO_TOKEN_HISTORY")
+                    flags.append("PARTIAL_HISTORY")
             elif g_vol <= 0:
                 if "NO_LIVE_MARKET" not in flags:
                     flags.append("NO_LIVE_MARKET")
