@@ -5,6 +5,8 @@ from anomaly_watch.anomaly_analyzer import AnomalyAnalyzer
 from anomaly_watch.impulse_surge_analyzer import ImpulseSurgeAnalyzer
 from anomaly_watch.accumulation_top10_analyzer import AccumulationTop10Analyzer
 from anomaly_watch.report_generator import AnomalyReportGenerator
+from anomaly_watch.dex_penetration_analyzer import run_penetration_analysis
+from anomaly_watch.pump_fit_engine import run_pump_fit_analysis
 
 def main():
     # 1. 运行伪流动性检测
@@ -16,13 +18,22 @@ def main():
     surge_results = surge_analyzer.analyze()
 
     # 3. 全库真实吸筹候选先计算持币证据，再质量门禁并排序 Top10。
-    # S1-S5 与伪流动性结果只作为解释/风险输入，不改变各自原有公式。
     accumulation_analyzer = AccumulationTop10Analyzer()
     accumulation_run = accumulation_analyzer.analyze(
         surge_results=surge_results,
         fake_liq_results=anomaly_results,
         persist=True,
     )
+
+    # 4. 运行 DEX 庄家资金穿透分析 (含 BUG-1~4 防错算法)
+    print("Executing DEX Penetration Analysis...")
+    pen_results = run_penetration_analysis()
+    print(f"PENETRATION_ANALYSIS_COMPLETED: Analyzed {len(pen_results)} tokens")
+
+    # 5. 运行拉升前兆共振拟合引擎 (3 维拟合降噪)
+    print("Executing Pump Resonance Fit Analysis...")
+    res_results = run_pump_fit_analysis()
+    print(f"PUMP_RESONANCE_COMPLETED: Analyzed {len(res_results)} tokens")
 
     generator = AnomalyReportGenerator()
 
