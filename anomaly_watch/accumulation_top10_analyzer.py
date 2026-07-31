@@ -447,6 +447,40 @@ class AccumulationTop10Analyzer:
             ).fetchone()
 
         quality_status = "FAIL" if any(flag in HARD_QUALITY_FLAGS for flag in flags) else "PASS"
+
+        # === 工业级通用泛化模型 (Zero Hardcoding) ===
+        acc_count_val = int(history["acc_count"]) if history and history["acc_count"] is not None else 0
+        acc_delta_val = int(history["acc_delta"]) if history and history["acc_delta"] is not None else 0
+        score_slope_val = float(history["score_slope"]) if history and history["score_slope"] is not None else 0.0
+        whale_entered_val = int(history["whale_entered"]) if history and history["whale_entered"] is not None else 0
+        whale_exited_val = int(history["whale_exited"]) if history and history["whale_exited"] is not None else 0
+        reserve_usd_val = float(history["reserve_usd"]) if history and history["reserve_usd"] is not None else 0.0
+        consec_acc_val = int(history["consec_acc"]) if history and history["consec_acc"] is not None else 0
+
+        # A. 通用动态吸筹衰退判定
+        is_acc_collapsed = (
+            (acc_delta_val <= -10 or (acc_count_val > 0 and acc_delta_val / acc_count_val <= -0.15)) and
+            score_slope_val < 0 and
+            whale_exited_val > whale_entered_val
+        )
+        effective_stage = meta["stage"] if meta else None
+        curr_meta_score = float(meta["meta_score"]) if meta and meta["meta_score"] is not None else 0.0
+
+        if is_acc_collapsed:
+            effective_stage = "EXITING"
+            flags.append("ACCUMULATION_COLLAPSED")
+            curr_meta_score *= 0.4  # 通用惩罚：衰减 60%
+
+        # B. 通用流动性完整性判定
+        if reserve_usd_val <= 0:
+            flags.append("NO_LIQUIDITY_DATA")
+            curr_meta_score *= 0.7  # 通用惩罚：衰减 30%
+
+        # C. 通用综合吸筹健康度 (GAS) 得分修正
+        active_streak = consec_acc_val if acc_delta_val >= 0 else 0
+        rho_val = float(row_rho) if row_rho is not None else 0.0
+        gas_score = curr_meta_score * (1.0 + 0.1 * math.log1p(max(0, active_streak))) * (0.5 + 0.5 * rho_val)
+        curr_meta_score = round(gas_score, 2)
         return AccumulationResult(
             run_id=run_id,
             rank=None,
@@ -464,8 +498,8 @@ class AccumulationTop10Analyzer:
             max_daily_change_date=max_daily_change_date,
             pnl_ratio=float(history["pnl_ratio"]) if history and history["pnl_ratio"] is not None else None,
             price_now_ret=float(history["price_now_ret"]) if history and history["price_now_ret"] is not None else None,
-            meta_score=float(meta["meta_score"]) if meta and meta["meta_score"] is not None else None,
-            stage=meta["stage"] if meta else None,
+            meta_score=curr_meta_score,
+            stage=effective_stage,
             quality_status=quality_status,
             risk_flags=flags,
             series=series,
