@@ -361,7 +361,7 @@ class AccumulationTop10Analyzer:
         identity_chain, identity_address = _identity(chain, address)
         history = sum_conn.execute(
             """
-            SELECT computed_date, pnl_ratio, price_now_ret, volume_24h, reserve_usd
+            SELECT computed_date, pnl_ratio, price_now_ret, volume_24h, reserve_usd, acc_count, acc_delta, score_slope, whale_entered, whale_exited, consec_acc, acc_count, acc_delta, score_slope, whale_entered, whale_exited, consec_acc
             FROM token_history
             WHERE LOWER(token_address) = ?
               AND (COALESCE(chain, '') = '' OR LOWER(chain) = ?)
@@ -449,13 +449,14 @@ class AccumulationTop10Analyzer:
         quality_status = "FAIL" if any(flag in HARD_QUALITY_FLAGS for flag in flags) else "PASS"
 
         # === 工业级通用泛化模型 (Zero Hardcoding) ===
-        acc_count_val = int(history["acc_count"]) if history and history["acc_count"] is not None else 0
-        acc_delta_val = int(history["acc_delta"]) if history and history["acc_delta"] is not None else 0
-        score_slope_val = float(history["score_slope"]) if history and history["score_slope"] is not None else 0.0
-        whale_entered_val = int(history["whale_entered"]) if history and history["whale_entered"] is not None else 0
-        whale_exited_val = int(history["whale_exited"]) if history and history["whale_exited"] is not None else 0
-        reserve_usd_val = float(history["reserve_usd"]) if history and history["reserve_usd"] is not None else 0.0
-        consec_acc_val = int(history["consec_acc"]) if history and history["consec_acc"] is not None else 0
+        h_dict = dict(history) if history else {}
+        acc_count_val = int(h_dict.get("acc_count") or 0)
+        acc_delta_val = int(h_dict.get("acc_delta") or 0)
+        score_slope_val = float(h_dict.get("score_slope") or 0.0)
+        whale_entered_val = int(h_dict.get("whale_entered") or 0)
+        whale_exited_val = int(h_dict.get("whale_exited") or 0)
+        reserve_usd_val = float(h_dict.get("reserve_usd") or 0.0)
+        consec_acc_val = int(h_dict.get("consec_acc") or 0)
 
         # A. 通用动态吸筹衰退判定
         is_acc_collapsed = (
@@ -478,7 +479,7 @@ class AccumulationTop10Analyzer:
 
         # C. 通用综合吸筹健康度 (GAS) 得分修正
         active_streak = consec_acc_val if acc_delta_val >= 0 else 0
-        rho_val = float(row_rho) if row_rho is not None else 0.0
+        rho_val = float(rho) if rho is not None else 0.0
         gas_score = curr_meta_score * (1.0 + 0.1 * math.log1p(max(0, active_streak))) * (0.5 + 0.5 * rho_val)
         curr_meta_score = round(gas_score, 2)
         return AccumulationResult(
