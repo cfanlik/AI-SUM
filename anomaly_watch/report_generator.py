@@ -71,7 +71,9 @@ class AnomalyReportGenerator:
         )
 
         def normalize_100_cap(slope):
-            if slope is None or slope <= 0:
+            if slope is None:
+                return None
+            if slope <= 0:
                 return 0.0
             score = 100.0 * (1.0 - math.exp(-slope / 100.0))
             return min(100.0, max(0.0, score))
@@ -127,7 +129,7 @@ class AnomalyReportGenerator:
                     normalize_100_cap(getattr(surge, name, None))
                     for name in ("slope_7d", "slope_15d", "slope_30d", "slope_60d")
                 ]
-                pnl_matrix = " / ".join(f"**`{value:.1f}`**" for value in slopes)
+                pnl_matrix = " / ".join("**`N/A`**" if value is None else f"**`{value:.1f}`**" for value in slopes)
                 oscillation = int(getattr(surge, "oscillation_cnt", 0) or 0)
                 protection = (
                     f"**[已激活]** {oscillation}次翻转拦截"
@@ -150,6 +152,8 @@ class AnomalyReportGenerator:
                 reasons = "未触发（仅作解释）"
 
             pnl_text = "N/A" if row.pnl_ratio is None else f"{row.pnl_ratio:+.1f}%"
+            if "PARTIAL_HISTORY" in (getattr(row, "risk_flags", []) or []):
+                pnl_text += " ⚠️" 
             max_daily = pct(row.max_daily_change)
             if row.max_daily_change_date:
                 max_daily += f" ({row.max_daily_change_date})"
