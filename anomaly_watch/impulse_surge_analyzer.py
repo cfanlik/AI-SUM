@@ -203,7 +203,7 @@ class ImpulseSurgeAnalyzer:
 
         conn.close()
         # 按 (是否触发告警, 触发条件数, 7d斜率) 降序排序
-        results.sort(key=lambda x: (x.is_triggered, len(x.trigger_reasons), x.slope_7d), reverse=True)
+        results.sort(key=lambda x: (x.is_triggered, len(x.trigger_reasons), x.slope_7d if x.slope_7d is not None else float('-inf')), reverse=True)
         return results
 
     def analyze_single(self, token_address: str, chain: str = "bsc", token_symbol: str = "UNKNOWN") -> Optional[ImpulseSurgeResult]:
