@@ -16,11 +16,11 @@ class ImpulseSurgeResult:
     reserve_now: float
     reserve_14d_avg: float
     liq_ratio: float
-    pnl_now: float
-    slope_7d: float
-    slope_15d: float
-    slope_30d: float
-    slope_60d: float
+    pnl_now: Optional[float]
+    slope_7d: Optional[float]
+    slope_15d: Optional[float]
+    slope_30d: Optional[float]
+    slope_60d: Optional[float]
     whale_net_7d: int
     vol_ratio: float
     oscillation_cnt: int
@@ -71,18 +71,21 @@ class ImpulseSurgeAnalyzer:
                 (SELECT pnl_ratio FROM ranked WHERE rn = 61) as pnl_60d
         """, (t_addr,))
         pnl_row = cur.fetchone()
-        pnl_now = pnl_row['pnl_now'] if pnl_row and pnl_row['pnl_now'] is not None else 0.0
-        pnl_7d = pnl_row['pnl_7d'] if pnl_row and pnl_row['pnl_7d'] is not None else 0.0
-        pnl_15d = pnl_row['pnl_15d'] if pnl_row and pnl_row['pnl_15d'] is not None else pnl_7d
-        pnl_30d = pnl_row['pnl_30d'] if pnl_row and pnl_row['pnl_30d'] is not None else pnl_15d
-        pnl_60d = pnl_row['pnl_60d'] if pnl_row and pnl_row['pnl_60d'] is not None else pnl_30d
+        pnl_now = pnl_row['pnl_now'] if pnl_row and pnl_row['pnl_now'] is not None else None
+        pnl_7d = pnl_row['pnl_7d'] if pnl_row and pnl_row['pnl_7d'] is not None else None
+        pnl_15d = pnl_row['pnl_15d'] if pnl_row and pnl_row['pnl_15d'] is not None else None
+        pnl_30d = pnl_row['pnl_30d'] if pnl_row and pnl_row['pnl_30d'] is not None else None
+        pnl_60d = pnl_row['pnl_60d'] if pnl_row and pnl_row['pnl_60d'] is not None else None
 
-        slope_7d = pnl_now - pnl_7d
-        slope_15d = pnl_now - pnl_15d
-        slope_30d = pnl_now - pnl_30d
-        slope_60d = pnl_now - pnl_60d
+        def _slope(now, ref):
+            return (now - ref) if (now is not None and ref is not None) else None
 
-        s2_hit = (slope_7d > 50.0)
+        slope_7d = _slope(pnl_now, pnl_7d)
+        slope_15d = _slope(pnl_now, pnl_15d)
+        slope_30d = _slope(pnl_now, pnl_30d)
+        slope_60d = _slope(pnl_now, pnl_60d)
+
+        s2_hit = (slope_7d is not None and slope_7d > 50.0)
         if s2_hit:
             reasons.append(f"S2: 4阶PnL动量 (S7d={slope_7d:.1f}, S15d={slope_15d:.1f})")
 
@@ -136,18 +139,21 @@ class ImpulseSurgeAnalyzer:
 
         # 形态分类判定 (基于历史数据全量统计与相对二阶加速度解耦重构)
         pattern = "GENERAL_SURGE"
-        is_dead_cat = (slope_7d > 20.0 and (slope_30d < 0 or slope_60d < -100.0) and pnl_now < 0)
+        is_dead_cat = (
+            slope_7d is not None and slope_7d > 20.0 and pnl_now is not None and pnl_now < 0 and
+            ((slope_30d is not None and slope_30d < 0) or (slope_60d is not None and slope_60d < -100.0))
+        )
         
         if is_dead_cat:
             pattern = "DEAD_CAT_BOUNCE"
             is_triggered = False # 坑底死猫跳反弹强拦截，不打入突发拉伸强告警
         else:
-            if slope_7d > 30.0 and slope_15d > 10.0 and slope_30d > 0:
+            if slope_7d is not None and slope_7d > 30.0 and slope_15d is not None and slope_15d > 10.0 and slope_30d is not None and slope_30d > 0:
                 if (slope_7d > slope_15d * 0.75) or (slope_7d > 50.0):
                     pattern = "ACCELERATING_SURGE" # 🚀 凹向爆发加速浪
                 else:
                     pattern = "STABLE_HIGH_SURGE"  # 🔥 高位强平台拉伸
-            elif slope_7d > 10.0 and slope_15d > 5.0 and slope_30d > 0:
+            elif slope_7d is not None and slope_7d > 10.0 and slope_15d is not None and slope_15d > 5.0 and slope_30d is not None and slope_30d > 0:
                 pattern = "RISING_ACCUMULATION"    # ⚡ 温和主升蓄势
             
             is_triggered = (s1_hit and s2_hit) or (s2_hit and s3_hit and s4_hit) or s5_hit
