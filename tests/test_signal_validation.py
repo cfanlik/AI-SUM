@@ -2,9 +2,14 @@ from __future__ import annotations
 import unittest
 import sqlite3
 import os
+import sys
 import hashlib
 from pathlib import Path
 from signal_validation.pipeline import execute_validation_pipeline
+
+# 动态加载 meta-verdict 目录下的 history_report 报告生成器 (P6)
+sys.path.insert(0, '/opt/AI-SUM/meta-verdict')
+from history_report import l3_gate_status
 
 class TestSignalValidation(unittest.TestCase):
     def setUp(self):
@@ -62,7 +67,13 @@ class TestSignalValidation(unittest.TestCase):
         self.assertIn('insufficient_oos_sample', report_content, "拒绝原因应该包含 insufficient_oos_sample")
         self.assertIn('api_call_absent_or_failed', report_content, "API 校验未通过应该正确报告")
         
-        print("单元测试 PASS: P0-P4 正式单元校验全部成功！")
+        # 7. 交叉验证 history_report 报告生成器的集成 (P6)
+        l3_report_text = l3_gate_status(self.out_db)
+        self.assertIn("DENIED", l3_report_text, "报告中的 L3 决策应该显示 DENIED")
+        self.assertIn("insufficient_oos_sample", l3_report_text, "报告中应包含拒绝原因编码")
+        self.assertIn("Informal Candidate", l3_report_text, "报告中应指示降级身份为非正式候选")
+        
+        print("单元测试 PASS: P0-P6 集成测试与报告联动断言 100% 通过！")
 
 if __name__ == '__main__':
     unittest.main()
