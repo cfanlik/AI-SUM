@@ -19,9 +19,20 @@ def init_db(db_path: str = '/opt/AI-SUM/data/signal-validation.db'):
             chain_confidence TEXT NOT NULL,
             identity_pass INTEGER NOT NULL, -- 1=PASS, 0=DENIED
             reason_code TEXT NOT NULL,
-            candidate_pools TEXT
+            candidate_pools TEXT,
+            identity_conflict INTEGER DEFAULT 0,
+            conflict_time TEXT
         )
     ''')
+    
+    try:
+        c.execute('ALTER TABLE asset_identity ADD COLUMN identity_conflict INTEGER DEFAULT 0')
+    except sqlite3.OperationalError:
+        pass
+    try:
+        c.execute('ALTER TABLE asset_identity ADD COLUMN conflict_time TEXT')
+    except sqlite3.OperationalError:
+        pass
     
     # 2. 自然日特征快照表 (P0-P2)
     c.execute('''
@@ -58,7 +69,7 @@ def init_db(db_path: str = '/opt/AI-SUM/data/signal-validation.db'):
         CREATE TABLE IF NOT EXISTS signal_decision_result (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             chain TEXT NOT NULL,
-            token_address NOT NULL,
+            token_address TEXT NOT NULL,
             pool_address TEXT NOT NULL,
             symbol TEXT,
             a_time TEXT NOT NULL,
@@ -77,6 +88,11 @@ def init_db(db_path: str = '/opt/AI-SUM/data/signal-validation.db'):
         )
     ''')
     
+    try:
+        c.execute("ALTER TABLE signal_decision_result ADD COLUMN outcome_incomplete TEXT NOT NULL DEFAULT 'PASS'")
+    except sqlite3.OperationalError:
+        pass
+        
     # 5. API 风控核验审计日志表 (C6)
     c.execute('''
         CREATE TABLE IF NOT EXISTS api_audit_log (
@@ -110,4 +126,4 @@ def init_db(db_path: str = '/opt/AI-SUM/data/signal-validation.db'):
     
     conn.commit()
     conn.close()
-    print(f"数据库 {db_path} 结构（含 C1-C8 扩展）初始化完毕。")
+    print(f"数据库 {db_path} 结构（含 C1-C8 迁移兼容）初始化完毕。")

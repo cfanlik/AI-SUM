@@ -1,6 +1,7 @@
 from __future__ import annotations
 import sqlite3
 import math
+import bisect
 from collections import defaultdict
 from datetime import datetime, timedelta
 
@@ -31,6 +32,8 @@ def evaluate_single_asset_path(
     candidate_pools: list[str],
     a_time: datetime,
     daily_snapshots: list[dict],
+    identity_conflict: bool,
+    conflict_time: datetime | None,
     v2_mul: float,
     v3_mul: float,
     breakout: float,
@@ -61,6 +64,10 @@ def evaluate_single_asset_path(
     for i in range(split_idx, len(pts)):
         ts, p, lp, v, dex_id, curr_pool = pts[i]
         
+        # 判定天数上限：A后30天
+        if ts > a_time + timedelta(days=30):
+            break
+            
         window = pts[i-7:i]
         if len(window) < 7:
             continue
@@ -68,19 +75,19 @@ def evaluate_single_asset_path(
         bl = med([x[2] for x in window])
         bv = med([x[3] for x in window])
         
+        # I 硬拦截 1: LP 下降 40%
         lp_invalid = (lp <= bl * 0.60)
         
-        identity_conflict = False
-        if curr_pool != frozen_pool and curr_pool in candidate_pools:
-            identity_conflict = True
-            
-        if lp_invalid or identity_conflict:
+        # I 硬拦截 2: 连续 2 天的主池漂移冲突 (C2)
+        drift_invalid = (identity_conflict and conflict_time and ts >= conflict_time)
+        
+        if lp_invalid or drift_invalid:
             label = 'I_invalidated'
             bt = ts
             reason_list = []
             if lp_invalid:
                 reason_list.append('LP 相对前 7 日中位下降>=40%')
-            if identity_conflict:
+            if drift_invalid:
                 reason_list.append('主池漂移 identity_conflict')
             reason = " + ".join(reason_list)
             label_end_time = ts
@@ -98,28 +105,42 @@ def evaluate_single_asset_path(
             
     r1d, r3d, r7d = None, None, None
     mdd_7d = None
+    outcome_incomplete = 'PASS'
     soft_risk = 'PASS'
     
     if label == 'B_triggered' and bt is not None:
         times = [x[0] for x in pts]
-        idx_entry = bisect_right_time(times, bt)
+        idx_entry = bisect.bisect_right([t.timestamp() for t in times], bt.timestamp())
         if idx_entry < len(pts):
             entry_time = pts[idx_entry][0]
             entry_p = pts[idx_entry][1]
             
+            # C3: 结果期覆盖度解耦审计 [entry_time, entry_time + 7d] (至少 7 天且最大缺口 <= 1d)
             obs_pts = [x for x in pts if entry_time <= x[0] <= entry_time + timedelta(days=7)]
-            if obs_pts:
-                p1d_snaps = [x for x in obs_pts if x[0] >= entry_time + timedelta(days=1)]
-                p3d_snaps = [x for x in obs_pts if x[0] >= entry_time + timedelta(days=3)]
-                p7d_snaps = [x for x in obs_pts if x[0] >= entry_time + timedelta(days=7)]
-                
-                r1d = round((p1d_snaps[0][1]/entry_p - 1)*100, 2) if p1d_snaps else None
-                r3d = round((p3d_snaps[0][1]/entry_p - 1)*100, 2) if p3d_snaps else None
-                r7d = round((p7d_snaps[0][1]/entry_p - 1)*100, 2) if p7d_snaps else None
+            obs_dates = sorted(list(set(x[0].date() for x in obs_pts)))
+            
+            outcome_gap_days = 0
+            if len(obs_dates) >= 2:
+                for idx_d in range(len(obs_dates)-1):
+                    gap = (obs_dates[idx_d+1] - obs_dates[idx_d]).days - 1
+                    if gap > outcome_gap_days:
+                        outcome_gap_days = gap
+                        
+            if len(obs_dates) >= 7 and outcome_gap_days <= 1:
+                # C5: 扣除滑点费用估算 0.5% 计算净收益
+                fee_deduct = 0.005 # 0.5%
+                r1d = round((obs_pts[0][1]/entry_p - 1 - fee_deduct)*100, 2) if len(obs_pts) > 1 else None
+                r3d = round((obs_pts[min(2, len(obs_pts)-1)][1]/entry_p - 1 - fee_deduct)*100, 2) if len(obs_pts) > 2 else None
+                r7d = round((obs_pts[-1][1]/entry_p - 1 - fee_deduct)*100, 2) if len(obs_pts) > 6 else None
                 
                 min_p = min(x[1] for x in obs_pts)
                 mdd_7d = round((min_p/entry_p - 1)*100, 2)
+            else:
+                outcome_incomplete = 'outcome_incomplete'
+        else:
+            outcome_incomplete = 'outcome_incomplete'
                 
+        # 巨鲸快照无未来泄漏代理审计 (F6)
         conn = sqlite3.connect(f'file:{select_db_path}?mode=ro', uri=True)
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
@@ -165,10 +186,6 @@ def evaluate_single_asset_path(
         'r3d': r3d,
         'r7d': r7d,
         'mdd_7d': mdd_7d,
-        'soft_risk': soft_risk
+        'outcome_incomplete': outcome_incomplete,
+        'soft_risk': soft_risk if label == 'B_triggered' else 'PASS'
     }
-
-def bisect_right_time(times: list[datetime], target: datetime) -> int:
-    import bisect
-    ts_floats = [t.timestamp() for t in times]
-    return bisect.bisect_right(ts_floats, target.timestamp())
