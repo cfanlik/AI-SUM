@@ -2099,8 +2099,7 @@ def futures_analysis(src, sumdb):
     return "\n".join(lines)
 
 
-if __name__ == "__main__":
-    main()
+
 
 
 def l3_gate_status(out_db_path="/opt/AI-SUM/data/signal-validation.db") -> str:
@@ -2148,3 +2147,7 @@ def l3_gate_status(out_db_path="/opt/AI-SUM/data/signal-validation.db") -> str:
         return "\n".join(lines)
     except Exception as e:
         return f"## 🛡️ 模块 0: Launch Path 验证系统\n\n> ⚠ 门禁数据库读取异常: {e}，准入状态: **DENIED**\n"
+
+
+if __name__ == "__main__":
+    main()
