@@ -58,7 +58,7 @@ def init_db(db_path: str = '/opt/AI-SUM/data/signal-validation.db'):
         CREATE TABLE IF NOT EXISTS signal_decision_result (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             chain TEXT NOT NULL,
-            token_address TEXT NOT NULL,
+            token_address NOT NULL,
             pool_address TEXT NOT NULL,
             symbol TEXT,
             a_time TEXT NOT NULL,
@@ -70,12 +70,44 @@ def init_db(db_path: str = '/opt/AI-SUM/data/signal-validation.db'):
             r3d REAL,
             r7d REAL,
             mdd_7d REAL,
+            outcome_incomplete TEXT NOT NULL DEFAULT 'PASS',
             soft_risk TEXT NOT NULL, -- PASS / Top10_hold_net_variation_alert
             split_type TEXT NOT NULL, -- Train / Time_Holdout
             overlap_check TEXT NOT NULL -- PASS / OVERLAP_VIOLATION
         )
     ''')
     
+    # 5. API 风控核验审计日志表 (C6)
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS api_audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            as_of_utc TEXT NOT NULL,
+            source_name TEXT NOT NULL,
+            request_url TEXT NOT NULL,
+            status_code INTEGER NOT NULL,
+            price REAL,
+            delay REAL,
+            deviation REAL,
+            error_code TEXT
+        )
+    ''')
+    
+    # 6. 可审计 Run Manifest 运行清单表 (C7)
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS run_manifest (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            git_commit TEXT NOT NULL,
+            schema_version TEXT NOT NULL,
+            config_hash TEXT NOT NULL,
+            grid_name TEXT NOT NULL,
+            status TEXT NOT NULL,
+            train_eligible_count INTEGER NOT NULL,
+            source_db_mtime TEXT NOT NULL,
+            output_table_hash TEXT NOT NULL,
+            run_time TEXT NOT NULL
+        )
+    ''')
+    
     conn.commit()
     conn.close()
-    print(f"数据库 {db_path} 结构（含 P3-P4 扩展）初始化完毕。")
+    print(f"数据库 {db_path} 结构（含 C1-C8 扩展）初始化完毕。")
