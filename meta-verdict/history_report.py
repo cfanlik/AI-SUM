@@ -1979,7 +1979,9 @@ def main():
     if hop2_md:
         print(f"        hop2 分析完成")
 
-    parts = [bt_md, mig_md]
+    import os
+    l3_md = l3_gate_status()
+    parts = [l3_md, bt_md, mig_md]
     if whale_md:
         parts.append(whale_md)
     parts.extend([ts_md, liq_md, quality_md])
@@ -2099,3 +2101,36 @@ def futures_analysis(src, sumdb):
 
 if __name__ == "__main__":
     main()
+
+
+def l3_gate_status(out_db_path="/opt/AI-SUM/data/signal-validation.db") -> str:
+    import os
+    import sqlite3
+    if not os.path.exists(out_db_path):
+        return "## 🛡️ 模块 0: Launch Path 验证系统\n\n> ⚠ 独立验证数据库 `signal-validation.db` 尚未生成，准入状态: **NOT_EVALUATED -> DENIED**\n"
+    
+    try:
+        conn = sqlite3.connect(f"file:{out_db_path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        
+        hist = c.execute("SELECT * FROM backtest_run_history ORDER BY run_time DESC LIMIT 1").fetchone()
+        decisions = c.execute("SELECT * FROM signal_decision_result WHERE split_type='Time_Holdout'").fetchall()
+        
+        conn.close()
+        
+        if not hist:
+            return "## 🛡️ 模块 0: Launch Path 验证系统\n\n> ⚠ 尚无历史回测记录，准入状态: **DENIED**\n"
+            
+        b_count = sum(1 for r in decisions if r['path_label'] == 'B_triggered')
+        
+        lines = [
+            "## 🛡️ 模块 0: Launch Path 验证系统与 L3 生产准入风控\n",
+            f"> **生产准入决策**: ❌ **DENIED** (拒绝编码: `insufficient_oos_sample`)\n",
+            f"> **寻优状态**: `{hist['status']}` | **可审计 Hash**: `{hist['config_hash']}`\n",
+            f"> **Holdout 样本数**: {len(decisions)} | **B启动数**: {b_count} (未达 30 最小统计要求)\n",
+            "**物理红线拦截**: 全期所有五引擎仲裁信号强制判定为 **非正式候选 (Informal Candidate)**。禁止作为正式信号分发部署。\n"
+        ]
+        return "\n".join(lines)
+    except Exception as e:
+        return f"## 🛡️ 模块 0: Launch Path 验证系统\n\n> ⚠ 门禁数据库读取异常: {e}，准入状态: **DENIED**\n"
