@@ -90,7 +90,8 @@ def run_penetration_analysis(sum_db_path: str = "/opt/AI-SUM/select-sum.db",
             ORDER BY scan_time DESC LIMIT 1
         """, (t_addr,)).fetchone()
         price_usd = price_row["price_usd"] if price_row else 0.0
-        reserve_usd = price_row["reserve_usd"] if price_row else 0.0\n        pool_address = price_row["pool_address"] if price_row else None
+        reserve_usd = price_row["reserve_usd"] if price_row else 0.0
+        pool_address = price_row["pool_address"] if price_row else None
 
         # BUG-2 物理防错计算：swap_in_value * price_usd (全表 Token Units 折算 + LP Cap)
         # BUG-5 物理防错计算：读取 gmgn_buy_cost_usd 与 gmgn_buy_amount 计算真实单币买入成本单价
