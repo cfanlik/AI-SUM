@@ -33,8 +33,8 @@ def ensure_penetration_table(sum_conn: sqlite3.Connection):
             boss_entity_count INTEGER,     -- 独立实体数
             boss_avg_control REAL,         -- 控盘均分
             boss_collision_count INTEGER,  -- BUG-3 排噪后碰撞庄家地址数
-            avg_cost_usd REAL,             -- BUG-5 修正后的单币买入成本单价
-            unrealized_pnl_pct REAL,       -- BUG-5 修正后的庄家真实浮盈率
+            avg_cost_usd REAL,             -- 样本买入记录推算的单币成本价
+            unrealized_pnl_pct REAL,       -- 样本成本推算浮盈率，不代表庄家真实收益
             inbound_top_source TEXT,       -- 上游最大资金来源地址
             price_usd REAL,
             reserve_usd REAL,
@@ -94,7 +94,7 @@ def run_penetration_analysis(sum_db_path: str = "/opt/AI-SUM/select-sum.db",
         pool_address = price_row["pool_address"] if price_row else None
 
         # BUG-2 物理防错计算：swap_in_value * price_usd (全表 Token Units 折算 + LP Cap)
-        # BUG-5 物理防错计算：读取 gmgn_buy_cost_usd 与 gmgn_buy_amount 计算真实单币买入成本单价
+        # BUG-5 物理防错计算：读取 gmgn_buy_cost_usd 与 gmgn_buy_amount 推算样本单币成本，不识别庄家身份
         flow_row = src_conn.execute("""
             SELECT SUM(swap_in_value) as raw_units,
                    SUM(gmgn_buy_cost_usd) as total_cost_usd,
@@ -184,7 +184,7 @@ def export_penetration_markdown(results: List[Dict[str, Any]], scan_time: str):
     lines.append("> ⚠ `swap_in_value` 是观察到的池→holder目标代币流入，不等于净买入、庄家注资或正式信号。\n")
     lines.append("---")
     lines.append("\n## 🎯 一、 观察到的池→holder流入排行 (Top 10)")
-    lines.append("\n| 排名 | 代币 | 链 | 现价 | 观察流入USD | 资金池深度 (LP) | 流入/LP比率 | 样本成本单价 | 庄家真实浮盈率 | 异常建仓诊断 |")
+    lines.append("\n| 排名 | 代币 | 链 | 现价 | 观察流入USD | 资金池深度 (LP) | 流入/LP比率 | 样本成本单价 | 样本成本推算浮盈率 | 流入观察诊断 |")
     lines.append("| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
 
     idx = 1
