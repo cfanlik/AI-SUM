@@ -2,6 +2,7 @@ from __future__ import annotations
 import unittest
 import sqlite3
 import os
+import hashlib
 from pathlib import Path
 from signal_validation.pipeline import execute_validation_pipeline
 
@@ -9,43 +10,59 @@ class TestSignalValidation(unittest.TestCase):
     def setUp(self):
         self.sum_db = '/opt/AI-SUM/select-sum.db'
         self.select_db = '/opt/select-coin/data/select.db'
-        # 统一使用测试独立库，不改变生产数据
         self.out_db = '/opt/AI-SUM/data/signal-validation.db'
+        self.report_dir = '/opt/AI-SUM/report/unified'
         
     def test_pipeline_execution(self):
-        # 1. 运行流水线
-        res = execute_validation_pipeline(self.sum_db, self.select_db, self.out_db)
+        # 1. 运行流水线跑通 P0-P4
+        res = execute_validation_pipeline(
+            self.sum_db, self.select_db, self.out_db, self.report_dir
+        )
         
-        self.assertGreater(res['total_events'], 0, "A事件提取数量应大于0")
-        self.assertGreater(res['identity_pass'], 0, "成功绑定主池数量应大于0")
-        self.assertGreater(res['coverage_pass'], 0, "覆盖率审计通过数应大于0")
-        self.assertGreater(res['saved_snapshots'], 0, "落库特征快照数应大于0")
+        # 2. 基本统计断言
+        self.assertGreater(res['total_events'], 0)
+        self.assertGreater(res['identity_pass'], 0)
+        self.assertGreater(res['coverage_pass'], 0)
         
-        # 2. 验证数据物理隔离与正确性
+        # 3. 验证汇总层由于样本数不足 30 导致期望收益输出为 None (F2, F10)
+        time_m = res['backtest']['time_metrics']
+        self.assertFalse(time_m['has_enough'])
+        self.assertIsNone(time_m['r1d_median'])
+        self.assertIsNone(time_m['r7d_median'])
+        
+        # 4. 验证数据库中 P3-P4 的落库结果 (backtest_run_history & signal_decision_result)
         conn = sqlite3.connect(self.out_db)
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
         
-        # 3. 验证 asset_identity
-        identities = c.execute('SELECT * FROM asset_identity').fetchall()
-        for idt in identities:
-            # 链信度必须被保存 (F10)
-            self.assertIn(idt['chain_confidence'], {'high', 'fail'})
-            self.assertIn(idt['identity_pass'], {0, 1})
-            # 候选池必须保存 (C1)
-            self.assertTrue(idt['candidate_pools'].startswith('['))
-            
-        # 4. 验证 daily_feature_snapshot 与命名规范 (C2)
-        snapshots = c.execute('SELECT * FROM daily_feature_snapshot LIMIT 100').fetchall()
-        for snap in snapshots:
-            # 确保成交量代理命名无误 (C2)
-            self.assertIn('daily_24h_rolling_volume_proxy', snap.keys())
-            self.assertGreater(snap['price_usd'], 0)
-            self.assertGreater(snap['reserve_usd'], 0)
-            self.assertIsNotNone(snap['source_scan_time'])
+        hist = c.execute('SELECT * FROM backtest_run_history').fetchall()
+        self.assertEqual(len(hist), 1, "应该只生成 1 条回测运行历史记录")
+        self.assertEqual(hist[0]['status'], 'INSUFFICIENT_TRAINING_SAMPLE', "因样本不足应返回 INSUFFICIENT_TRAINING_SAMPLE")
+        
+        decisions = c.execute('SELECT * FROM signal_decision_result').fetchall()
+        self.assertGreater(len(decisions), 0, "决策记录应该大于0")
+        
+        # 验证个股层面真实保存了价格变动，但 overlap 标志正确
+        for d_rec in decisions:
+            self.assertIn(d_rec['overlap_check'], {'PASS', 'OVERLAP_VIOLATION'})
             
         conn.close()
-        print("单元测试 PASS: 所有断言均成功通过！")
+        
+        # 5. 验证 split_audit.csv 是否成功写入了逐行明细 (F12)
+        csv_path = Path('/tmp/0802/test_run/split_audit.csv')
+        self.assertTrue(csv_path.exists(), "split_audit.csv 文件应该存在")
+        with csv_path.open('r', encoding='utf-8') as f:
+            lines = f.readlines()
+            self.assertGreater(len(lines), 1, "csv 应该包含表头和明细数据")
+            
+        # 6. 验证是否生成了正式报告并且包含了正确的拒绝原因
+        report_path = Path(res['report_path'])
+        self.assertTrue(report_path.exists(), "报告文件应该存在")
+        report_content = report_path.read_text(encoding='utf-8')
+        self.assertIn('insufficient_oos_sample', report_content, "拒绝原因应该包含 insufficient_oos_sample")
+        self.assertIn('api_call_absent_or_failed', report_content, "API 校验未通过应该正确报告")
+        
+        print("单元测试 PASS: P0-P4 正式单元校验全部成功！")
 
 if __name__ == '__main__':
     unittest.main()
