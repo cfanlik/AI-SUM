@@ -85,7 +85,7 @@ def run_penetration_analysis(sum_db_path: str = "/opt/AI-SUM/select-sum.db",
 
         # 查现价与池子深度
         price_row = src_conn.execute("""
-            SELECT price_usd, reserve_usd FROM gecko_market_data
+            SELECT pool_address, price_usd, reserve_usd FROM gecko_market_data
             WHERE token_address = ? AND price_usd > 0
             ORDER BY scan_time DESC LIMIT 1
         """, (t_addr,)).fetchone()
