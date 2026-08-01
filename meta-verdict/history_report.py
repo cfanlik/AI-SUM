@@ -2117,18 +2117,32 @@ def l3_gate_status(out_db_path="/opt/AI-SUM/data/signal-validation.db") -> str:
         hist = c.execute("SELECT * FROM backtest_run_history ORDER BY run_time DESC LIMIT 1").fetchone()
         decisions = c.execute("SELECT * FROM signal_decision_result WHERE split_type='Time_Holdout'").fetchall()
         
+        # C8: 提取特征与漂移的独立细分个数
+        pool_missing = c.execute("SELECT COUNT(*) FROM asset_identity WHERE reason_code='pool_missing_before_a'").fetchone()[0]
+        coverage_fail = c.execute("SELECT COUNT(*) FROM asset_identity WHERE identity_pass=0 AND reason_code IN ('insufficient_post_history_coverage', 'history_gap_too_large')").fetchone()[0]
+        drift_conflict = c.execute("SELECT COUNT(*) FROM asset_identity WHERE identity_conflict=1").fetchone()[0]
+        
+        # 提取 manifest (C7)
+        manifest = c.execute("SELECT * FROM run_manifest ORDER BY run_time DESC LIMIT 1").fetchone()
+        
         conn.close()
         
         if not hist:
             return "## 🛡️ 模块 0: Launch Path 验证系统\n\n> ⚠ 尚无历史回测记录，准入状态: **DENIED**\n"
             
         b_count = sum(1 for r in decisions if r['path_label'] == 'B_triggered')
+        unique_ids = len(set((r['chain'], r['token_address'], r['pool_address']) for r in decisions if r['path_label'] == 'B_triggered'))
         
+        manifest_text = ""
+        if manifest:
+            manifest_text = f" | **可审计 Git**: `{manifest['git_commit']}` | **数据表 Hash**: `{manifest['output_table_hash']}`"
+            
         lines = [
             "## 🛡️ 模块 0: Launch Path 验证系统与 L3 生产准入风控\n",
             f"> **生产准入决策**: ❌ **DENIED** (拒绝编码: `insufficient_oos_sample`)\n",
-            f"> **寻优状态**: `{hist['status']}` | **可审计 Hash**: `{hist['config_hash']}`\n",
-            f"> **Holdout 样本数**: {len(decisions)} | **B启动数**: {b_count} (未达 30 最小统计要求)\n",
+            f"> **寻优状态**: `{hist['status']}` | **可审计 Hash**: `{hist['config_hash']}`{manifest_text}\n",
+            f"> **物理池绑定剔除**: {pool_missing} | **特征期覆盖度剔除**: {coverage_fail} | **主池漂移拦截**: {drift_conflict}\n",
+            f"> **Holdout 样本数**: {len(decisions)} | **B启动独立 Identity数**: {unique_ids} (未达 30 最小统计要求)\n",
             "**物理红线拦截**: 全期所有五引擎仲裁信号强制判定为 **非正式候选 (Informal Candidate)**。禁止作为正式信号分发部署。\n"
         ]
         return "\n".join(lines)
