@@ -409,6 +409,14 @@ def execute_validation_pipeline(
     compat_file.write_text('\n'.join(report_lines) + '\n', encoding='utf-8')
     print(f"L3 生产门禁兼容路径副本写入完毕: {compat_file}")
     
+    # 3. 顺便在 /tmp 目录下写出一份最新的报告
+    try:
+        tmp_report = Path('/tmp') / 'formal_signal_validation_report.md'
+        tmp_report.write_text('\n'.join(report_lines) + '\n', encoding='utf-8')
+        print(f"L3 生产门禁报告已同步写入 /tmp 目录: {tmp_report}")
+    except Exception as e:
+        print(f"警告: 写入 /tmp 报告失败: {e}")
+    
     conn.close()
     
     return {
