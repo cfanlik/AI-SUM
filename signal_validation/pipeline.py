@@ -397,25 +397,9 @@ def execute_validation_pipeline(
         
     out_dir = Path(report_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    
-    # 1. 统一命名格式的正式时间戳报告
-    timestamp_filename = f"unified_{datetime.now().strftime('%Y%m%d_%H%M')}.md"
-    report_file = out_dir / timestamp_filename
+    report_file = out_dir / 'formal_signal_validation_report.md'
     report_file.write_text('\n'.join(report_lines) + '\n', encoding='utf-8')
-    print(f"L3 生产门禁时间戳报告生成完毕: {report_file}")
-    
-    # 2. 兼容用固定路径最新副本
-    compat_file = out_dir / 'formal_signal_validation_report.md'
-    compat_file.write_text('\n'.join(report_lines) + '\n', encoding='utf-8')
-    print(f"L3 生产门禁兼容路径副本写入完毕: {compat_file}")
-    
-    # 3. 顺便在 /tmp 目录下写出一份最新的报告
-    try:
-        tmp_report = Path('/tmp') / 'formal_signal_validation_report.md'
-        tmp_report.write_text('\n'.join(report_lines) + '\n', encoding='utf-8')
-        print(f"L3 生产门禁报告已同步写入 /tmp 目录: {tmp_report}")
-    except Exception as e:
-        print(f"警告: 写入 /tmp 报告失败: {e}")
+    print(f"L3 生产门禁报告生成完毕: {report_file}")
     
     conn.close()
     
