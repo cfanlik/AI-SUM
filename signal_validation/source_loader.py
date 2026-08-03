@@ -143,6 +143,33 @@ class SourceLoader:
             self.conn.execute(f"ATTACH DATABASE 'file:{self.archive_db_path}?mode=ro' AS archive")
             self.archive_attached = True
             print("已成功动态只读挂载 select_archive.db (archive)")
+            
+        # 动态拼装 gecko_market_data 内存 TEMP VIEW，填补数据断带
+        cursor = self.conn.cursor()
+        patch_db_path = "/tmp/0803/patch_cache.db"
+        if os.path.exists(patch_db_path):
+            try:
+                attached_dbs = [row[1] for row in cursor.execute("PRAGMA database_list").fetchall()]
+                if 'patch_db' not in attached_dbs:
+                    cursor.execute(f"ATTACH DATABASE 'file:{patch_db_path}?mode=ro' AS patch_db")
+                    print("已成功动态挂载补水行情库 patch_db")
+                
+                # 确定主库的前缀
+                main_db_prefix = "main"
+                if 'select_coin_db' in attached_dbs:
+                    main_db_prefix = "select_coin_db"
+                
+                cursor.execute("DROP VIEW IF EXISTS temp.gecko_market_data")
+                cursor.execute(f"""
+                    CREATE TEMP VIEW temp.gecko_market_data AS
+                    SELECT * FROM {main_db_prefix}.gecko_market_data
+                    UNION ALL
+                    SELECT * FROM patch_db.gecko_market_data
+                """)
+                print("已成功在内存中拼装 temp.gecko_market_data 视图 (包含补水行情)")
+            except Exception as e:
+                print(f"警告: 拼装补水视图失败: {e}")
+                
         return self.conn
 
     def close(self):

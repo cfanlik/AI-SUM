@@ -119,7 +119,13 @@ def run_penetration_analysis(sum_db_path: str = "/opt/AI-SUM/select-sum.db",
         unit_cost = (total_cost_usd / total_buy_amount) if (total_cost_usd > 0 and total_buy_amount > 0) else None
         unrealized_pnl_pct = ((price_usd - unit_cost) / unit_cost * 100.0) if (price_usd > 0 and unit_cost and unit_cost > 0) else None
 
-        # associated_dispatched_usd 是代币级字段复制到 holder 行，\n        # 禁止按 entity 求和并展示为庄家注资；待实体证据表完成后再启用。\n        dispatched_usd = None\n        entity_cnt = None\n        avg_control = None\n        boss_hits = None\n\n        # 解析资金来源
+        # associated_dispatched_usd 是代币级字段复制到 holder 行，
+        # 禁止按 entity 求和并展示为庄家注资；待实体证据表完成后再启用。
+        dispatched_usd = None
+        entity_cnt = None
+        avg_control = None
+        boss_hits = None
+        # 解析资金来源
         top_inbound_source = None
         if flow_row and flow_row["sample_inbound"]:
             try:
