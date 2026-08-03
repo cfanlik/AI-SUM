@@ -136,7 +136,6 @@ class SourceLoader:
             
         self.conn = sqlite3.connect(f"file:{self.select_db_path}?mode=ro", uri=True)
         self.conn.row_factory = sqlite3.Row
-        self.conn.execute("PRAGMA query_only = ON")
         
         if os.path.exists(self.archive_db_path):
             # 以只读 URI 的方式 attach，100% 只读安全
@@ -170,6 +169,8 @@ class SourceLoader:
             except Exception as e:
                 print(f"警告: 拼装补水视图失败: {e}")
                 
+        # 拼装完毕后，最终锁死 query_only，确保全量只读拦截
+        self.conn.execute("PRAGMA query_only = ON")
         return self.conn
 
     def close(self):
