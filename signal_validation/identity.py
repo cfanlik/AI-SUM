@@ -1,7 +1,9 @@
 from __future__ import annotations
 import sqlite3
+import hashlib
 from collections import defaultdict
 from datetime import datetime, timedelta
+from signal_validation.source_loader import SourceLoader
 
 def d(x):
     return datetime.fromisoformat(str(x).replace('Z', '+00:00').replace('+00:00', ''))
@@ -9,7 +11,11 @@ def d(x):
 def audit_and_bind_identity(sum_db: str, select_db: str) -> list[dict]:
     s = sqlite3.connect(f'file:{sum_db}?mode=ro', uri=True)
     s.row_factory = sqlite3.Row
-    q = sqlite3.connect(f'file:{select_db}?mode=ro', uri=True)
+    
+    # 统一使用 SourceLoader 进行连接与 P0 审计
+    loader = SourceLoader(select_db)
+    loader.execute_audit_p0()
+    q = loader.connect()
     q.row_factory = sqlite3.Row
 
     # 1. 提取 A 原始事件
@@ -21,14 +27,12 @@ def audit_and_bind_identity(sum_db: str, select_db: str) -> list[dict]:
         'ORDER BY token_address, scan_time'
     ).fetchall()
     
-    # C1: 状态机去重键使用复合键 (chain, token_address)
     by = defaultdict(list)
     for r in meta:
         key = (r['chain'], str(r['token_address']).lower())
         by[key].append(r)
         
     a_events = []
-    # 冷却周期 7 天 (可配置)
     cooling_period = timedelta(days=7)
     
     for (chain, addr), rows in by.items():
@@ -76,7 +80,6 @@ def audit_and_bind_identity(sum_db: str, select_db: str) -> list[dict]:
         t_minus_24 = (c_at - timedelta(hours=24)).isoformat(sep=' ')
         t_str = c_at.isoformat(sep=' ')
         
-        # C2: GROUP BY pool_address 消除候选池中可能的重复，按 total_reserve 降序
         candidate_pools = q.execute('''
             SELECT pool_address, SUM(reserve_usd) as total_reserve
             FROM gecko_market_data
@@ -93,6 +96,14 @@ def audit_and_bind_identity(sum_db: str, select_db: str) -> list[dict]:
         ev['pool_address'] = candidate_pools[0]['pool_address']
         ev['candidate_pools'] = [p['pool_address'] for p in candidate_pools]
 
+    # D6: 基于 SHA-256 计算防漂移的稳定 event_id
+    for ev in a_events:
+        pool_str = ev['pool_address'] or 'N/A'
+        at_str = ev['at'].isoformat(sep=' ') if isinstance(ev['at'], datetime) else str(ev['at'])
+        raw_str = f"{ev['chain']}|{ev['address']}|{pool_str}|{at_str}|{ev['stage']}"
+        ev['event_id'] = hashlib.sha256(raw_str.encode('utf-8')).hexdigest()[:16]
+
     s.close()
-    q.close()
+    loader.close()
     return a_events
+

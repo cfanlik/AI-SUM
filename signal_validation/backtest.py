@@ -3,33 +3,37 @@ import csv
 import json
 import sqlite3
 import hashlib
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from collections import defaultdict
 from signal_validation.label import evaluate_single_asset_path, d, wilson_lower_bound
+from signal_validation.source_loader import SourceLoader
 
 def run_purged_walk_forward_backtest(
     sum_db: str,
     select_db: str,
     out_db: str,
-    split_audit_csv_path: str = '/tmp/0802/test_run/split_audit.csv'
+    split_audit_csv_path: str = '/tmp/0802/test_run/split_audit.csv',
+    git_commit: str = 'NOT_EVALUATED'
 ) -> dict:
     conn = sqlite3.connect(out_db)
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
     
-    # 动态执行 schema 迁移，补充主池漂移审计字段 (C8)
     try:
         c.execute('ALTER TABLE asset_identity ADD COLUMN identity_conflict INTEGER DEFAULT 0')
         c.execute('ALTER TABLE asset_identity ADD COLUMN conflict_time TEXT')
         conn.commit()
     except sqlite3.OperationalError:
-        # 已经存在则忽略
         pass
         
     identities = c.execute(
         'SELECT * FROM asset_identity WHERE identity_pass=1'
     ).fetchall()
+    
+    loader = SourceLoader(select_db)
+    loader.execute_audit_p0()
     
     events = []
     for idt in identities:
@@ -38,15 +42,19 @@ def run_purged_walk_forward_backtest(
             WHERE chain=? AND token_address=? AND pool_address=?
         ''', (idt['chain'], idt['token_address'], idt['pool_address'])).fetchall()
         
+        # 将 Row 转为 dict 以免 get 报错
+        idt_dict = dict(idt)
+        
         events.append({
-            'chain': idt['chain'],
-            'address': idt['token_address'],
-            'pool_address': idt['pool_address'],
-            'symbol': idt['token_symbol'],
-            'at': d(idt['a_time']),
-            'candidate_pools': json.loads(idt['candidate_pools'] or '[]'),
-            'identity_conflict': bool(idt['identity_conflict'] if 'identity_conflict' in idt.keys() else False),
-            'conflict_time': d(idt['conflict_time']) if ('conflict_time' in idt.keys() and idt['conflict_time']) else None,
+            'chain': idt_dict['chain'],
+            'address': idt_dict['token_address'],
+            'pool_address': idt_dict['pool_address'],
+            'symbol': idt_dict['token_symbol'],
+            'at': d(idt_dict['a_time']),
+            'event_id': idt_dict.get('event_id') or hashlib.sha256(f"{idt_dict['chain']}|{idt_dict['token_address']}|{idt_dict['pool_address']}|{idt_dict['a_time']}".encode()).hexdigest()[:16],
+            'candidate_pools': json.loads(idt_dict['candidate_pools'] or '[]'),
+            'identity_conflict': bool(idt_dict['identity_conflict'] if 'identity_conflict' in idt_dict else False),
+            'conflict_time': d(idt_dict['conflict_time']) if ('conflict_time' in idt_dict and idt_dict['conflict_time']) else None,
             'snapshots': [dict(s) for s in snaps]
         })
         
@@ -57,7 +65,6 @@ def run_purged_walk_forward_backtest(
         conn.close()
         return {}
         
-    # 时间留出法划分
     split_pct = 0.80
     split_idx = int(len(events) * split_pct)
     split_date = events[split_idx]['at']
@@ -66,7 +73,10 @@ def run_purged_walk_forward_backtest(
     holdout_events_raw = [ev for ev in events if ev['at'] >= split_date]
     
     embargo_limit = split_date - timedelta(days=37)
-    train_eligible_count = len([ev for ev in train_events_raw if ev['at'] < embargo_limit])
+    train_eligible_events = [ev for ev in train_events_raw if ev['at'] < embargo_limit]
+    train_eligible_count = len(train_eligible_events)
+    
+    eligible_identities = len(set((ev['chain'], ev['address'], ev['pool_address']) for ev in train_eligible_events))
     
     GRIDS = [
         {'name': 'Grid_1_Conservative', 'v2_mul': 2.0, 'v3_mul': 4.0, 'breakout': 1.05},
@@ -85,11 +95,10 @@ def run_purged_walk_forward_backtest(
             res = evaluate_single_asset_path(
                 ev['chain'], ev['address'], ev['pool_address'], ev['candidate_pools'],
                 ev['at'], ev['snapshots'], ev['identity_conflict'], ev['conflict_time'],
-                g['v2_mul'], g['v3_mul'], g['breakout'], select_db
+                g['v2_mul'], g['v3_mul'], g['breakout'], loader
             )
             records.append({**ev, **res})
             
-        # 37d 禁运净化 (C4, R7)
         purged_records = [r for r in records if d(r['label_end_time']) < embargo_limit]
         b_trig = [r for r in purged_records if r['path_label'] == 'B_triggered' and r['outcome_incomplete'] == 'PASS']
         
@@ -107,10 +116,9 @@ def run_purged_walk_forward_backtest(
             'triggered': triggered_count
         }
         
-        # C4: 样本量评估必须以独立 Identity 计数
-        unique_identities_train = len(set((r['chain'], r['address'], r['pool_address']) for r in b_trig))
+        unique_identities_train_b = len(set((r['chain'], r['address'], r['pool_address']) for r in b_trig))
         
-        if unique_identities_train >= 30:
+        if unique_identities_train_b >= 30:
             is_better = False
             if best_grid is None:
                 is_better = True
@@ -130,19 +138,26 @@ def run_purged_walk_forward_backtest(
                 best_grid = g
 
     status = 'SUCCESS'
-    if best_grid is None or train_eligible_count < 30:
+    if best_grid is None or eligible_identities < 30:
         status = 'INSUFFICIENT_TRAINING_SAMPLE'
-        best_grid = GRIDS[0]
+        best_grid = {'name': 'NOT_RUN', 'v2_mul': 0.0, 'v3_mul': 0.0, 'breakout': 0.0}
         
     print(f"训练网格选择完毕: {best_grid['name']} | 状态: {status}")
 
     holdout_records = []
     for ev in holdout_events_raw:
-        res = evaluate_single_asset_path(
-            ev['chain'], ev['address'], ev['pool_address'], ev['candidate_pools'],
-            ev['at'], ev['snapshots'], ev['identity_conflict'], ev['conflict_time'],
-            best_grid['v2_mul'], best_grid['v3_mul'], best_grid['breakout'], select_db
-        )
+        if best_grid['name'] == 'NOT_RUN':
+            res = {
+                'path_label': 'censored', 'path_time': None, 'label_end_time': ev['at'].isoformat(sep=' '),
+                'reason': 'INSUFFICIENT_TRAINING_SAMPLE', 'r1d': None, 'r3d': None, 'r7d': None, 'mdd_7d': None,
+                'outcome_incomplete': 'outcome_incomplete', 'soft_risk': 'PASS'
+            }
+        else:
+            res = evaluate_single_asset_path(
+                ev['chain'], ev['address'], ev['pool_address'], ev['candidate_pools'],
+                ev['at'], ev['snapshots'], ev['identity_conflict'], ev['conflict_time'],
+                best_grid['v2_mul'], best_grid['v3_mul'], best_grid['breakout'], loader
+            )
         holdout_records.append({**ev, **res, 'split_type': 'Time_Holdout'})
         
     train_identities = set((ev['chain'], ev['address'], ev['pool_address']) for ev in train_events_raw)
@@ -150,23 +165,29 @@ def run_purged_walk_forward_backtest(
     
     train_final_records = []
     for ev in train_events_raw:
-        res = evaluate_single_asset_path(
-            ev['chain'], ev['address'], ev['pool_address'], ev['candidate_pools'],
-            ev['at'], ev['snapshots'], ev['identity_conflict'], ev['conflict_time'],
-            best_grid['v2_mul'], best_grid['v3_mul'], best_grid['breakout'], select_db
-        )
+        if best_grid['name'] == 'NOT_RUN':
+            res = {
+                'path_label': 'censored', 'path_time': None, 'label_end_time': ev['at'].isoformat(sep=' '),
+                'reason': 'INSUFFICIENT_TRAINING_SAMPLE', 'r1d': None, 'r3d': None, 'r7d': None, 'mdd_7d': None,
+                'outcome_incomplete': 'outcome_incomplete', 'soft_risk': 'PASS'
+            }
+        else:
+            res = evaluate_single_asset_path(
+                ev['chain'], ev['address'], ev['pool_address'], ev['candidate_pools'],
+                ev['at'], ev['snapshots'], ev['identity_conflict'], ev['conflict_time'],
+                best_grid['v2_mul'], best_grid['v3_mul'], best_grid['breakout'], loader
+            )
         train_final_records.append({**ev, **res, 'split_type': 'Train'})
 
     def med_val(x):
         x = sorted(x)
         return x[len(x)//2] if len(x)%2 else (x[len(x)//2-1] + x[len(x)//2])/2
 
-    def compute_oos_metrics(recs):
+    def compute_oos_metrics(recs, is_holdout=False):
         b_trig = [r for r in recs if r['path_label'] == 'B_triggered' and r['outcome_incomplete'] == 'PASS']
         unique_ids = len(set((r['chain'], r['address'], r['pool_address']) for r in b_trig))
         
-        # C4: 统计门槛对独立 Identity 个数生效
-        has_enough = (unique_ids >= 30)
+        has_enough = (unique_ids >= 30) and (status == 'SUCCESS')
         
         r1d = [r['r1d'] for r in b_trig if r['r1d'] is not None]
         r7d = [r['r7d'] for r in b_trig if r['r7d'] is not None]
@@ -174,7 +195,6 @@ def run_purged_walk_forward_backtest(
         
         expectancy = sum(r7d)/len(r7d) if (r7d and has_enough) else None
         wilson = wilson_lower_bound(sum(1 for x in r1d if x > 0), len(r1d)) if (r1d and has_enough) else None
-        
         mdd_median = med_val(mdd) if (mdd and has_enough) else None
         
         mdd_worst_90 = None
@@ -193,15 +213,23 @@ def run_purged_walk_forward_backtest(
             'mdd_worst_90': mdd_worst_90
         }
 
-    time_metrics = compute_oos_metrics(holdout_records)
+    time_metrics = compute_oos_metrics(holdout_records, is_holdout=True)
     unseen_metrics = compute_oos_metrics(unseen_records)
     
-    h_input = hashlib.sha256()
-    h_input.update(best_grid['name'].encode())
-    h_input.update(status.encode())
-    config_hash = h_input.hexdigest()[:16]
+    if status == 'SUCCESS' and (not time_metrics['has_enough'] or not unseen_metrics['has_enough']):
+        status = 'INSUFFICIENT_OOS_SAMPLE'
     
-    # 写入 DB 决策结果
+    config_data = {
+        'grids': GRIDS,
+        'embargo_days': 37,
+        'split_pct': 0.80,
+        'min_train_samples': 30,
+        'best_grid_name': best_grid['name'],
+        'status': status
+    }
+    config_json = json.dumps(config_data, sort_keys=True)
+    config_hash = hashlib.sha256(config_json.encode('utf-8')).hexdigest()[:16]
+    
     c.execute('DELETE FROM backtest_run_history')
     c.execute('DELETE FROM signal_decision_result')
     
@@ -231,10 +259,15 @@ def run_purged_walk_forward_backtest(
             r['r1d'], r['r3d'], r['r7d'], r['mdd_7d'], r['outcome_incomplete'], r['soft_risk'], r['split_type'], overlap
         ))
         
-    # C7: 记录可审计 run_manifest
     out_table_str = "".join(sorted([r['address'] for r in holdout_records]))
     output_table_hash = hashlib.sha256(out_table_str.encode()).hexdigest()[:16]
     
+    try:
+        mtime_epoch = os.path.getmtime(select_db)
+        source_db_mtime = datetime.fromtimestamp(mtime_epoch).isoformat()
+    except Exception:
+        source_db_mtime = datetime.now().isoformat()
+        
     c.execute('DELETE FROM run_manifest')
     c.execute('''
         INSERT INTO run_manifest (
@@ -242,27 +275,36 @@ def run_purged_walk_forward_backtest(
             train_eligible_count, source_db_mtime, output_table_hash, run_time
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
-        'f05b192_patched_v6', 'v6.0', config_hash, best_grid['name'], status,
-        train_eligible_count, datetime.now().isoformat(), output_table_hash, datetime.now().isoformat()
+        git_commit, 'v6.0', config_hash, best_grid['name'], status,
+        train_eligible_count, source_db_mtime, output_table_hash, datetime.now().isoformat()
     ))
     
     conn.commit()
     conn.close()
+    loader.close()
     
-    # F12: 导出全量逐行明细 split_audit.csv
     csv_file = Path(split_audit_csv_path)
     csv_file.parent.mkdir(parents=True, exist_ok=True)
     with csv_file.open('w', newline='', encoding='utf-8') as f:
         w = csv.writer(f)
         w.writerow(['event_id', 'symbol', 'chain', 'token_address', 'pool_address', 'a_time', 'label_end_time', 'path_label', 'split_type', 'overlap_check'])
-        for idx, r in enumerate(all_final_recs):
+        for r in all_final_recs:
             split_type = r['split_type']
             overlap = 'PASS'
             if split_type == 'Time_Holdout' and d(r['label_end_time']) < split_date:
                 overlap = 'OVERLAP_VIOLATION'
-            w.writerow([f"E_{idx}", r['symbol'], r['chain'], r['address'], r['pool_address'], r['at'].isoformat(sep=' '), r['label_end_time'], r['path_label'], split_type, overlap])
+            w.writerow([r['event_id'], r['symbol'], r['chain'], r['address'], r['pool_address'], r['at'].isoformat(sep=' '), r['label_end_time'], r['path_label'], split_type, overlap])
             
     print(f"信号验证明细已成功导出至 {split_audit_csv_path}")
+    
+    train_b_trig = [r for r in train_final_records if r['path_label'] == 'B_triggered' and r['outcome_incomplete'] == 'PASS']
+    train_b_ids = len(set((r['chain'], r['address'], r['pool_address']) for r in train_b_trig))
+    
+    time_oos_b_trig = [r for r in holdout_records if r['path_label'] == 'B_triggered' and r['outcome_incomplete'] == 'PASS']
+    time_oos_b_ids = len(set((r['chain'], r['address'], r['pool_address']) for r in time_oos_b_trig))
+    
+    unseen_oos_b_trig = [r for r in unseen_records if r['path_label'] == 'B_triggered' and r['outcome_incomplete'] == 'PASS']
+    unseen_oos_b_ids = len(set((r['chain'], r['address'], r['pool_address']) for r in unseen_oos_b_trig))
     
     return {
         'config_hash': config_hash,
@@ -272,5 +314,12 @@ def run_purged_walk_forward_backtest(
         'time_metrics': time_metrics,
         'unseen_metrics': unseen_metrics,
         'train_results': train_results_map,
-        'total_written': len(all_final_recs)
+        'total_written': len(all_final_recs),
+        'independent_stats': {
+            'eligible_events_ids': eligible_identities,
+            'train_b_ids': train_b_ids,
+            'time_oos_b_ids': time_oos_b_ids,
+            'unseen_oos_b_ids': unseen_oos_b_ids
+        }
     }
+

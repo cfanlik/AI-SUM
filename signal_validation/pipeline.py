@@ -4,6 +4,8 @@ import sqlite3
 import hashlib
 import urllib.request
 import time
+import subprocess
+import os
 from pathlib import Path
 from datetime import datetime, timedelta
 from signal_validation.schema import init_db
@@ -113,6 +115,13 @@ def execute_validation_pipeline(
     report_dir: str = '/opt/AI-SUM/report/unified'
 ) -> dict:
     print("--- 开始 Launch Path 验证第一阶段 (P0-P2) ---")
+    
+    # 动态抓取运行时的 Git Commit HEAD (C7)
+    try:
+        git_commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd='/opt/AI-SUM').decode('utf-8').strip()
+    except Exception:
+        git_commit = 'NOT_EVALUATED'
+        
     init_db(out_db)
     
     conn = sqlite3.connect(out_db)
@@ -143,6 +152,7 @@ def execute_validation_pipeline(
         reason_code = ev['reason_code']
         candidate_pools_json = json.dumps(ev.get('candidate_pools', []))
         pool_address = ev.get('pool_address')
+        event_id = ev.get('event_id')
         
         snapshots = []
         identity_conflict_val = 0
@@ -150,8 +160,11 @@ def execute_validation_pipeline(
         
         if identity_pass and pool_address:
             identity_pass_count += 1
+            # 传入 select_db 的 SourceLoader 以防接缝与去重异常
+            from signal_validation.source_loader import SourceLoader
+            loader = SourceLoader(select_db)
             snapshots, coverage_pass, cov_reason, identity_conflict, conflict_time = resample_daily_features(
-                chain, addr, pool_address, ev.get('candidate_pools', []), at, select_db
+                chain, addr, pool_address, ev.get('candidate_pools', []), at, loader
             )
             
             identity_conflict_val = 1 if identity_conflict else 0
@@ -168,12 +181,12 @@ def execute_validation_pipeline(
             INSERT INTO asset_identity (
                 chain, token_address, pool_address, token_symbol, a_time, a_stage,
                 engine_hits, chain_source, chain_confidence, identity_pass, reason_code, candidate_pools,
-                identity_conflict, conflict_time
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                identity_conflict, conflict_time, event_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             chain, addr, pool_address, symbol, at.isoformat(sep=' '), stage,
             hits, chain, confidence, 1 if identity_pass else 0, reason_code, candidate_pools_json,
-            identity_conflict_val, conflict_time_str
+            identity_conflict_val, conflict_time_str, event_id
         ))
         
         if identity_pass and snapshots:
@@ -194,7 +207,8 @@ def execute_validation_pipeline(
     
     print(f"--- P0-P2 运行完毕，开始第二阶段 (P3-P4) 回测寻优 ---")
     
-    bt_res = run_purged_walk_forward_backtest(sum_db, select_db, out_db)
+    split_audit_path = '/tmp/0802/test_run/split_audit.csv'
+    bt_res = run_purged_walk_forward_backtest(sum_db, select_db, out_db, split_audit_path, git_commit=git_commit)
     
     api_pass = 'api_call_absent_or_failed'
     
@@ -206,14 +220,20 @@ def execute_validation_pipeline(
         "SELECT * FROM signal_decision_result WHERE path_label='B_triggered' AND split_type='Time_Holdout'"
     ).fetchall()
     
-    if b_triggered_holdout:
-        first_b = b_triggered_holdout[0]
+    # P5 Mock 排除规则：过滤 0xmock_ 开头的测试池地址
+    real_b_triggered = [r for r in b_triggered_holdout if r['pool_address'] and not r['pool_address'].startswith('0xmock')]
+    
+    if real_b_triggered:
+        first_b = real_b_triggered[0]
         api_chain = 'solana' if first_b['chain'] == 'sol' else first_b['chain']
         try:
             api_res = check_dual_api_real(api_chain, first_b['pool_address'], out_db)
             api_pass = 'PASS' if api_res else 'FAIL'
         except Exception:
             api_pass = 'FAIL'
+    else:
+        # 过滤后无真实候选池，api_pass 退化标记为 NOT_EVALUATED
+        api_pass = 'NOT_EVALUATED'
             
     time_metrics = bt_res['time_metrics']
     unseen_metrics = bt_res['unseen_metrics']
@@ -221,35 +241,48 @@ def execute_validation_pipeline(
     oos_pass = 'DENIED'
     oos_reason = 'insufficient_oos_sample'
     
-    if time_metrics['has_enough'] and unseen_metrics['has_enough']:
+    # 必须训练集与 OOS 均满足 N>=30 才能通过，且 api 必须为 PASS 且 git_commit 正常
+    if time_metrics['has_enough'] and unseen_metrics['has_enough'] and bt_res['status'] == 'SUCCESS':
         net_ret_pass = (time_metrics['expectancy'] > 0.005 and unseen_metrics['expectancy'] > 0.005)
         wilson_pass = (time_metrics['wilson_lower'] > 0.50 and unseen_metrics['wilson_lower'] > 0.50)
         mdd_pass = (time_metrics['mdd_median'] >= -15.0 and time_metrics['mdd_worst_90'] >= -30.0)
         
-        if net_ret_pass and wilson_pass and mdd_pass:
+        if net_ret_pass and wilson_pass and mdd_pass and api_pass == 'PASS' and git_commit != 'NOT_EVALUATED':
             oos_pass = 'PASS'
             oos_reason = 'PASS'
         else:
-            if not net_ret_pass:
+            if git_commit == 'NOT_EVALUATED':
+                oos_reason = 'git_commit_metadata_missing'
+            elif api_pass != 'PASS':
+                oos_reason = f'api_verification_fail_{api_pass}'
+            elif not net_ret_pass:
                 oos_reason = 'expectancy_less_than_zero_or_insufficient_edge'
             elif not wilson_pass:
                 oos_reason = 'wilson_lower_bound_fail'
             else:
                 oos_reason = 'mdd_drawdown_exceeds_threshold'
+    else:
+        # 如果是因为样本数不足熔断
+        if bt_res['status'] != 'SUCCESS':
+            oos_reason = bt_res['status']
+        else:
+            oos_reason = 'insufficient_oos_sample_count'
                 
     pool_missing_count = len(events) - identity_pass_count
     coverage_fail_count = identity_pass_count - coverage_pass_count
     
     # 汇编正式报告
+    status_title = 'PASS' if oos_pass == 'PASS' else 'DENIED'
+    
     report_lines = [
-        '# Formal Signal Validation Report (P0-P6 v6 报告)',
+        f'# Formal Signal Validation Report (P0-P6 v6 报告 — {status_title})',
         '',
         f'> 报告生成时间：{datetime.now().isoformat(timespec="seconds")}；生产数据库只读。',
         '> 本报告完全按照 Codex v6 与真实数据库重算，消除了全部 C1-C8 未来泄漏与池歧义。',
         '',
         '## 一、可审计 Run Manifest (C7)',
         '',
-        f'- **Git Commit**: `f05b192_patched_v6`',
+        f'- **Git Commit**: `{git_commit}`',
         f'- **Schema Version**: `v6.0`',
         f'- **配置 JSON Hash**: `{bt_res["config_hash"]}`',
         f'- **寻优状态**: `{bt_res["status"]}`',
@@ -268,14 +301,20 @@ def execute_validation_pipeline(
     for name, res in bt_res['train_results'].items():
         grid_config = [x for x in GRIDS if x['name'] == name][0]
         exp_str = f"{res['expectancy']:+.2f}%" if res['expectancy'] is not None else 'N/A'
+        wilson_str = f"{res['wilson_lower']:.1%}" if res['wilson_lower'] is not None else 'N/A'
         report_lines.append(
             f"| {name} | {grid_config['v2_mul']}x / {grid_config['v3_mul']}x | {grid_config['breakout']*100 - 100:.0f}% | "
-            f"{res['triggered']} | {exp_str} | {res['wilson_lower']:.1%} |"
+            f"{res['triggered']} | {exp_str} | {wilson_str} |"
         )
+        
+    if bt_res['status'] != 'SUCCESS':
+        decision_text = f"最佳网格为 **None**（由于训练集合格启动样本不足 30，寻优决策强制标为 `{bt_res['status']}`）。"
+    else:
+        decision_text = f"最佳网格为 **{bt_res['grid_name']}**（通过字典序寻优选出）。"
         
     report_lines += [
         '',
-        f"**字典序寻优裁决**：最佳网格为 **{bt_res['grid_name']}**（由于训练集合格启动样本不足 30，寻优决策强制标为 `INSUFFICIENT_TRAINING_SAMPLE`）。",
+        f"**字典序寻优裁决**：{decision_text}",
         '',
         '## 三、Holdout 双重 OOS 审计表现 (C4, C5)',
         '',
@@ -303,14 +342,46 @@ def execute_validation_pipeline(
         '|---|---|---|---|---|',
         f"| `identity_pass` | 物理身份绑定且无冲突 | PASS | PASS | A前24h锁定LP最大池，并绑定候选池。 |",
         f"| `coverage_pass` | 特征与路径覆盖度三段解耦 | PASS | PASS | 特征期覆盖率通过，剔除了 {pool_missing_count} 个未绑定池，剔除了 {coverage_fail_count} 个特征覆盖失败样本。 |",
-        f"| `oos_pass` | 期望净收益与双 OOS 胜率下界 | **DENIED** | `{oos_reason}` | B启动独立 Identity 数为 {time_metrics['unique_ids']}，未满足 $N \\ge 30$ 的最低收益评估要求。 |",
+        f"| `oos_pass` | 期望净收益与双 OOS 胜率下界 | **{oos_pass}** | `{oos_reason}` | time_oos_B_triggered 独立数: {bt_res['independent_stats']['time_oos_b_ids']}, unseen_oos_B_triggered 独立数: {bt_res['independent_stats']['unseen_oos_b_ids']} |",
         '| `risk_pass` | 尾损最差回撤与软风险提示 | PASS | PASS | 90% 最差回撤拦截通过；大户变化成功软提示。 |',
-        f"| `api_pass` | 实时双源接口偏离校验 | FAIL | api_call_absent_or_failed | { '未配置代理（ api_config_missing ）' if not get_proxy() else '实时双源代理校验 FAIL' } |",
+        f"| `api_pass` | 实时双源接口偏离校验 | {api_pass if api_pass in ['PASS', 'FAIL'] else 'NOT_EVALUATED'} | {api_pass} | { '未配置代理（ api_config_missing ）' if not get_proxy() else ('Mock 排除后无可校验真实池' if api_pass == 'NOT_EVALUATED' else '实时双源校验完成') } |",
         '',
-        '### 最终裁决：DENIED',
-        '由于 OOS（时间与资产泛化两套）样本数量均不足以进行统计学有效评估，模型不具备正向优势推导条件。L3 信号合并被彻底阻断，对外展示锁定为非正式候选。'
+        f'### 最终裁决：{status_title}',
+        f'最终判定结果锁定为 **{status_title}**。' + (
+            'L3 生产门禁成功通过。各指标达到统计学显著优势，允许信号合并与量化发布。'
+            if status_title == 'PASS' else
+            '由于 OOS（时间与资产隔离）或 API 门禁核验未完全通过，系统触发物理熔断。'
+        ),
+        '',
+        '## 五、 物理审计资产明细清单 (Asset Audit Manifest)',
+        '',
+        f'本轮共对 **{len(events)}** 个代币资产进行了只读物理审计。明细如下：',
+        '',
+        '| 序号 | event_id | 代币符号 | 网络 | 代币合约地址 | 信号时间 | 绑定池地址 | 数据分区 | 门禁判定 | 备注 / 拒绝原因 |',
+        '|---|---|---|---|---|---|---|---|:---:|---|'
     ]
     
+    # 拆分训练和留出的临界点
+    split_date_val = events[int(len(events) * 0.80)]['at']
+    
+    for idx, ev in enumerate(events):
+        is_pass = ev.get('identity_pass')
+        pass_str = '🟢 PASS' if is_pass else '🔴 REJECT'
+        pool_addr = ev.get('pool_address') or 'N/A'
+        addr = ev.get('address')
+        addr_short = f"{addr[:8]}...{addr[-6:]}" if addr else 'N/A'
+        pool_short = f"{pool_addr[:8]}...{pool_addr[-6:]}" if pool_addr != 'N/A' else 'N/A'
+        
+        part = 'N/A'
+        if is_pass:
+            part = 'Time_Holdout' if ev['at'] >= split_date_val else 'Train'
+            
+        report_lines.append(
+            f"| {idx+1} | `{ev.get('event_id')}` | **{ev.get('symbol')}** | `{ev.get('chain')}` | "
+            f"`{addr_short}` | {ev.get('at').strftime('%Y-%m-%d %H:%M:%S') if isinstance(ev.get('at'), datetime) else ev.get('at')} | "
+            f"`{pool_short}` | `{part}` | {pass_str} | `{ev.get('reason_code') or 'PASS'}` |"
+        )
+        
     out_dir = Path(report_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     report_file = out_dir / 'formal_signal_validation_report.md'
@@ -330,5 +401,3 @@ def execute_validation_pipeline(
         'report_path': str(report_file)
     }
 
-if __name__ == '__main__':
-    execute_validation_pipeline()

@@ -12,9 +12,18 @@ def resample_daily_features(
     pool_address: str,
     candidate_pools: list[str],
     at: datetime,
-    select_db: str
+    select_db: str | any
 ) -> tuple[list[dict], bool, str, bool, datetime | None]:
-    q = sqlite3.connect(f'file:{select_db}?mode=ro', uri=True)
+    # 统一使用 SourceLoader
+    if hasattr(select_db, 'connect'):
+        q = select_db.connect()
+        close_loader = False
+    else:
+        from signal_validation.source_loader import SourceLoader
+        loader = SourceLoader(select_db)
+        q = loader.connect()
+        close_loader = True
+        
     q.row_factory = sqlite3.Row
     
     # C3/F1: 采样区间延长为 A - 7d 到 A + 37d (共 45 天)
@@ -30,7 +39,11 @@ def resample_daily_features(
         ORDER BY scan_time
     ''', (chain, token_address, start_time, end_time)).fetchall()
     
-    q.close()
+    if hasattr(select_db, 'connect'):
+        # 外层管理连接，不在此处关闭
+        pass
+    else:
+        q.close()
     
     # 日终 UTC 自然日重采样
     day_snapshots = defaultdict(list)
@@ -111,3 +124,4 @@ def resample_daily_features(
         })
         
     return snapshots, coverage_pass, reason_code, identity_conflict, conflict_time
+
