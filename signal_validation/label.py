@@ -37,7 +37,7 @@ def evaluate_single_asset_path(
     v2_mul: float,
     v3_mul: float,
     breakout: float,
-    select_db_path: str
+    select_db_path: str | any
 ) -> dict:
     label = 'censored'
     bt = None
@@ -141,26 +141,29 @@ def evaluate_single_asset_path(
             outcome_incomplete = 'outcome_incomplete'
                 
         # 巨鲸快照无未来泄漏代理审计 (F6)
-        conn = sqlite3.connect(f'file:{select_db_path}?mode=ro', uri=True)
-        conn.row_factory = sqlite3.Row
-        c = conn.cursor()
-        
         at_str = a_time.isoformat(sep=' ')
         bt_str = bt.isoformat(sep=' ')
         
-        a_holders = c.execute('''
-            SELECT snapshot_time, hold_percentage FROM bubblemap_holders
-            WHERE chain=? AND token_address=? AND snapshot_time<=?
-            ORDER BY snapshot_time DESC LIMIT 40
-        ''', (chain, token_address, at_str)).fetchall()
-        
-        b_holders = c.execute('''
-            SELECT snapshot_time, hold_percentage FROM bubblemap_holders
-            WHERE chain=? AND token_address=? AND snapshot_time<=?
-            ORDER BY snapshot_time DESC LIMIT 40
-        ''', (chain, token_address, bt_str)).fetchall()
-        
-        conn.close()
+        # 适配 SourceLoader
+        if hasattr(select_db_path, 'query_bubblemap_holders_union'):
+            loader = select_db_path
+            a_holders = loader.query_bubblemap_holders_union(chain, token_address, at_str)
+            b_holders = loader.query_bubblemap_holders_union(chain, token_address, bt_str)
+        else:
+            conn = sqlite3.connect(f'file:{select_db_path}?mode=ro', uri=True)
+            conn.row_factory = sqlite3.Row
+            c = conn.cursor()
+            a_holders = c.execute('''
+                SELECT snapshot_time, hold_percentage FROM bubblemap_holders
+                WHERE chain=? AND token_address=? AND snapshot_time<=?
+                ORDER BY snapshot_time DESC LIMIT 40
+            ''', (chain, token_address, at_str)).fetchall()
+            b_holders = c.execute('''
+                SELECT snapshot_time, hold_percentage FROM bubblemap_holders
+                WHERE chain=? AND token_address=? AND snapshot_time<=?
+                ORDER BY snapshot_time DESC LIMIT 40
+            ''', (chain, token_address, bt_str)).fetchall()
+            conn.close()
         
         if a_holders and b_holders:
             a_gps = defaultdict(list)
@@ -189,3 +192,4 @@ def evaluate_single_asset_path(
         'outcome_incomplete': outcome_incomplete,
         'soft_risk': soft_risk if label == 'B_triggered' else 'PASS'
     }
+

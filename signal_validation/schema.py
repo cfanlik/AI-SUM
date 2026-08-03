@@ -21,7 +21,8 @@ def init_db(db_path: str = '/opt/AI-SUM/data/signal-validation.db'):
             reason_code TEXT NOT NULL,
             candidate_pools TEXT,
             identity_conflict INTEGER DEFAULT 0,
-            conflict_time TEXT
+            conflict_time TEXT,
+            event_id TEXT
         )
     ''')
     
@@ -31,6 +32,10 @@ def init_db(db_path: str = '/opt/AI-SUM/data/signal-validation.db'):
         pass
     try:
         c.execute('ALTER TABLE asset_identity ADD COLUMN conflict_time TEXT')
+    except sqlite3.OperationalError:
+        pass
+    try:
+        c.execute('ALTER TABLE asset_identity ADD COLUMN event_id TEXT')
     except sqlite3.OperationalError:
         pass
     
@@ -127,3 +132,4 @@ def init_db(db_path: str = '/opt/AI-SUM/data/signal-validation.db'):
     conn.commit()
     conn.close()
     print(f"数据库 {db_path} 结构（含 C1-C8 迁移兼容）初始化完毕。")
+
