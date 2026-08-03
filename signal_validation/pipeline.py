@@ -116,7 +116,6 @@ def execute_validation_pipeline(
 ) -> dict:
     print("--- 开始 Launch Path 验证第一阶段 (P0-P2) ---")
     
-    # 动态抓取运行时的 Git Commit HEAD (C7)
     try:
         git_commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd='/opt/AI-SUM').decode('utf-8').strip()
     except Exception:
@@ -160,7 +159,6 @@ def execute_validation_pipeline(
         
         if identity_pass and pool_address:
             identity_pass_count += 1
-            # 传入 select_db 的 SourceLoader 以防接缝与去重异常
             from signal_validation.source_loader import SourceLoader
             loader = SourceLoader(select_db)
             snapshots, coverage_pass, cov_reason, identity_conflict, conflict_time = resample_daily_features(
@@ -220,7 +218,6 @@ def execute_validation_pipeline(
         "SELECT * FROM signal_decision_result WHERE path_label='B_triggered' AND split_type='Time_Holdout'"
     ).fetchall()
     
-    # P5 Mock 排除规则：过滤 0xmock_ 开头的测试池地址
     real_b_triggered = [r for r in b_triggered_holdout if r['pool_address'] and not r['pool_address'].startswith('0xmock')]
     
     if real_b_triggered:
@@ -232,7 +229,6 @@ def execute_validation_pipeline(
         except Exception:
             api_pass = 'FAIL'
     else:
-        # 过滤后无真实候选池，api_pass 退化标记为 NOT_EVALUATED
         api_pass = 'NOT_EVALUATED'
             
     time_metrics = bt_res['time_metrics']
@@ -241,7 +237,6 @@ def execute_validation_pipeline(
     oos_pass = 'DENIED'
     oos_reason = 'insufficient_oos_sample'
     
-    # 必须训练集与 OOS 均满足 N>=30 才能通过，且 api 必须为 PASS 且 git_commit 正常
     if time_metrics['has_enough'] and unseen_metrics['has_enough'] and bt_res['status'] == 'SUCCESS':
         net_ret_pass = (time_metrics['expectancy'] > 0.005 and unseen_metrics['expectancy'] > 0.005)
         wilson_pass = (time_metrics['wilson_lower'] > 0.50 and unseen_metrics['wilson_lower'] > 0.50)
@@ -262,7 +257,6 @@ def execute_validation_pipeline(
             else:
                 oos_reason = 'mdd_drawdown_exceeds_threshold'
     else:
-        # 如果是因为样本数不足熔断
         if bt_res['status'] != 'SUCCESS':
             oos_reason = bt_res['status']
         else:
@@ -271,7 +265,6 @@ def execute_validation_pipeline(
     pool_missing_count = len(events) - identity_pass_count
     coverage_fail_count = identity_pass_count - coverage_pass_count
     
-    # 汇编正式报告
     status_title = 'PASS' if oos_pass == 'PASS' else 'DENIED'
     
     report_lines = [
@@ -357,11 +350,10 @@ def execute_validation_pipeline(
         '',
         f'本轮共对 **{len(events)}** 个代币资产进行了只读物理审计。明细如下：',
         '',
-        '| 序号 | event_id | 代币符号 | 网络 | 代币合约地址 | 信号时间 | 绑定池地址 | 数据分区 | 门禁判定 | 备注 / 拒绝原因 |',
-        '|---|---|---|---|---|---|---|---|:---:|---|'
+        '| 序号 | 代币符号 | 网络 | 代币合约地址 | 信号时间 | 绑定池地址 | 数据分区 | 门禁判定 | 备注 / 拒绝原因 | event_id |',
+        '|---|---|---|---|---|---|---|:---:|---|---|'
     ]
     
-    # 拆分训练和留出的临界点
     split_date_val = events[int(len(events) * 0.80)]['at']
     
     for idx, ev in enumerate(events):
@@ -377,9 +369,9 @@ def execute_validation_pipeline(
             part = 'Time_Holdout' if ev['at'] >= split_date_val else 'Train'
             
         report_lines.append(
-            f"| {idx+1} | `{ev.get('event_id')}` | **{ev.get('symbol')}** | `{ev.get('chain')}` | "
-            f"`{addr_short}` | {ev.get('at').strftime('%Y-%m-%d %H:%M:%S') if isinstance(ev.get('at'), datetime) else ev.get('at')} | "
-            f"`{pool_short}` | `{part}` | {pass_str} | `{ev.get('reason_code') or 'PASS'}` |"
+            f"| {idx+1} | **{ev.get('symbol')}** | `{ev.get('chain')}` | `{addr_short}` | "
+            f"{ev.get('at').strftime('%Y-%m-%d %H:%M:%S') if isinstance(ev.get('at'), datetime) else ev.get('at')} | "
+            f"`{pool_short}` | `{part}` | {pass_str} | `{ev.get('reason_code') or 'PASS'}` | `{ev.get('event_id')}` |"
         )
         
     out_dir = Path(report_dir)
@@ -401,3 +393,5 @@ def execute_validation_pipeline(
         'report_path': str(report_file)
     }
 
+if __name__ == '__main__':
+    execute_validation_pipeline()
