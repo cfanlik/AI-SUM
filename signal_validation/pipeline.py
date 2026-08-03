@@ -135,6 +135,9 @@ def execute_validation_pipeline(
     conn = sqlite3.connect(out_db)
     c = conn.cursor()
     
+    from signal_validation.source_loader import SourceLoader
+    loader = SourceLoader(select_db)
+    
     identity_pass_count = 0
     coverage_pass_count = 0
     total_snapshots_saved = 0
@@ -159,8 +162,6 @@ def execute_validation_pipeline(
         
         if identity_pass and pool_address:
             identity_pass_count += 1
-            from signal_validation.source_loader import SourceLoader
-            loader = SourceLoader(select_db)
             snapshots, coverage_pass, cov_reason, identity_conflict, conflict_time = resample_daily_features(
                 chain, addr, pool_address, ev.get('candidate_pools', []), at, loader
             )
@@ -202,6 +203,7 @@ def execute_validation_pipeline(
 
     conn.commit()
     conn.close()
+    loader.close()
     
     print(f"--- P0-P2 运行完毕，开始第二阶段 (P3-P4) 回测寻优 ---")
     
@@ -395,9 +397,17 @@ def execute_validation_pipeline(
         
     out_dir = Path(report_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    report_file = out_dir / 'formal_signal_validation_report.md'
+    
+    # 1. 统一命名格式的正式时间戳报告
+    timestamp_filename = f"unified_{datetime.now().strftime('%Y%m%d_%H%M')}.md"
+    report_file = out_dir / timestamp_filename
     report_file.write_text('\n'.join(report_lines) + '\n', encoding='utf-8')
-    print(f"L3 生产门禁报告生成完毕: {report_file}")
+    print(f"L3 生产门禁时间戳报告生成完毕: {report_file}")
+    
+    # 2. 兼容用固定路径最新副本
+    compat_file = out_dir / 'formal_signal_validation_report.md'
+    compat_file.write_text('\n'.join(report_lines) + '\n', encoding='utf-8')
+    print(f"L3 生产门禁兼容路径副本写入完毕: {compat_file}")
     
     conn.close()
     
