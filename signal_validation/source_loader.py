@@ -161,9 +161,17 @@ class SourceLoader:
                 cursor.execute("DROP VIEW IF EXISTS temp.gecko_market_data")
                 cursor.execute(f"""
                     CREATE TEMP VIEW temp.gecko_market_data AS
-                    SELECT * FROM {main_db_prefix}.gecko_market_data
+                    SELECT 
+                        chain, token_address, scan_time, pool_address, dex_id, reserve_usd,
+                        volume_24h, volume_6h, volume_1h, buys_24h, sells_24h, buyers_24h, sellers_24h,
+                        price_usd, price_change_24h, fdv_usd, market_cap_usd, vl_ratio, mcap_liq_ratio, buy_tx_pct
+                    FROM {main_db_prefix}.gecko_market_data
                     UNION ALL
-                    SELECT * FROM patch_db.gecko_market_data
+                    SELECT 
+                        chain, token_address, scan_time, pool_address, '' AS dex_id, 0.0 AS reserve_usd,
+                        volume_24h, 0.0 AS volume_6h, 0.0 AS volume_1h, 0 AS buys_24h, 0 AS sells_24h, 0 AS buyers_24h, 0 AS sellers_24h,
+                        price_usd, 0.0 AS price_change_24h, 0.0 AS fdv_usd, 0.0 AS market_cap_usd, 0.0 AS vl_ratio, 0.0 AS mcap_liq_ratio, 0.0 AS buy_tx_pct
+                    FROM patch_db.market_data_cache
                 """)
                 print("已成功在内存中拼装 temp.gecko_market_data 视图 (包含补水行情)")
             except Exception as e:
