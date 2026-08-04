@@ -50,5 +50,18 @@ def main():
     deleted_cnt = prune_all_aisum_reports()
     print(f"REPORT_PRUNING_COMPLETED: Deleted {deleted_cnt} old report files")
 
+    # 7. 运行市场实时观察与多维白盒判定报告生成 (Live Observation)
+    try:
+        import os
+        import shutil
+        from anomaly_watch.generate_live_observation_report import generate_report
+        generate_report()
+        os.makedirs('/tmp/0803', exist_ok=True)
+        shutil.copy2('/opt/AI-SUM/report/anomaly/observation/latest_live_observation.md', '/tmp/0803/latest_live_observation.md')
+        print("REPORT_LIVE_OBSERVATION_GENERATED: Copied to /tmp/0803")
+    except Exception as e:
+        print(f"REPORT_LIVE_OBSERVATION_FAILED: {e}")
+
 if __name__ == "__main__":
     main()
+
