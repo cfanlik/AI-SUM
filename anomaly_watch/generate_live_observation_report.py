@@ -15,13 +15,30 @@ VALIDATION_DB_DEFAULT = "/opt/AI-SUM/data/signal-validation.db"
 OUT_DIR_DEFAULT = "/opt/AI-SUM/report/anomaly"
 LATEST_REPORT_PATH_DEFAULT = "/opt/AI-SUM/report/anomaly/anomaly_live_observation.md"
 
+# 中文化翻译对照表
+SCENARIO_CN = {
+    "OBSERVATION_RANGE": "横盘整理",
+    "LOW_LIQUIDITY_OBSERVATION": "池子稀疏观测",
+    "OBSERVATION_UP_MOVE_WITH_NET_INFLOW": "吸筹拉升观测",
+    "OBSERVATION_UP_MOVE_WITH_NET_OUTFLOW": "对倒出货观测",
+    "OBSERVATION_DOWN_MOVE_WITH_NET_INFLOW": "吸筹阴跌观测",
+    "OBSERVATION_DOWN_MOVE_WITH_NET_OUTFLOW": "高危出货观测",
+}
+GATE_CN = {"PASS": "通过", "INTERCEPTED": "拦截"}
+INPUT_CN = {
+    "SUCCESS": "正常",
+    "HOLDER_SNAPSHOT_MISSING": "快照缺失",
+    "LP_BASELINE_INSUFFICIENT": "LP稀疏",
+    "STALE_MARKET": "行情缺失",
+    "EXIT_SNAPSHOT_MISSING": "结算缺失"
+}
+
 def get_db_connection(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn
 
 def parse_dt(v: Any) -> datetime:
-    # 转换为时区感知的 UTC datetime
     s = str(v).replace("Z", "")
     if " " in s:
         dt = datetime.fromisoformat(s)
@@ -45,7 +62,6 @@ def format_price(p: float) -> str:
         return f"${s}"
 
 def get_latest_market(conn: sqlite3.Connection, chain: str, token: str, cutoff: str, pool: Optional[str] = None) -> Optional[sqlite3.Row]:
-    # 严格加上时间与 Pool 物理过滤，防止跨池污染
     query = """
         SELECT scan_time, pool_address, price_usd, reserve_usd, volume_24h, dex_id
         FROM gecko_market_data
@@ -59,7 +75,6 @@ def get_latest_market(conn: sqlite3.Connection, chain: str, token: str, cutoff: 
     return conn.execute(query, params).fetchone()
 
 def calculate_holder_metrics(conn: sqlite3.Connection, chain: str, token: str, a_time: str) -> Dict[str, Any]:
-    # 查找 A 时点最近的快照时间
     latest_time_row = conn.execute(
         """SELECT MAX(snapshot_time) FROM bubblemap_holders
            WHERE chain=? AND token_address=? AND snapshot_time<=?""",
@@ -67,7 +82,6 @@ def calculate_holder_metrics(conn: sqlite3.Connection, chain: str, token: str, a
     ).fetchone()
     latest_time = latest_time_row[0] if latest_time_row else None
 
-    # 查找 A - 7d 以前最近的快照时间
     prev_cutoff = (parse_dt(a_time) - timedelta(days=7)).isoformat(sep=" ")
     prev_time_row = conn.execute(
         """SELECT MAX(snapshot_time) FROM bubblemap_holders
@@ -76,7 +90,6 @@ def calculate_holder_metrics(conn: sqlite3.Connection, chain: str, token: str, a
     ).fetchone()
     prev_time = prev_time_row[0] if prev_time_row else None
 
-    # 严格 NULL 传播，缺失时不参与任何数值判定
     if not latest_time or not prev_time:
         return {
             "ratio_str": "N/A",
@@ -88,7 +101,6 @@ def calculate_holder_metrics(conn: sqlite3.Connection, chain: str, token: str, a
             "status": "HOLDER_SNAPSHOT_MISSING"
         }
 
-    # Rank-based (Top 300 集中度)
     sql_rank = """
         SELECT COALESCE(is_accumulating, 0) as is_acc, COALESCE(hold_percentage, 0) as hold_pct, wallet_address
         FROM bubblemap_holders
@@ -113,7 +125,6 @@ def calculate_holder_metrics(conn: sqlite3.Connection, chain: str, token: str, a
     ratio_val = acc_count / len(latest_holders)
     delta_val = sum(r["hold_pct"] for r in latest_holders) - sum(r["hold_pct"] for r in prev_holders)
 
-    # Cohort-based (Top 50 静态大户群追踪)
     sql_cohort_latest = """
         SELECT wallet_address, COALESCE(hold_percentage, 0) as hold_pct
         FROM bubblemap_holders
@@ -153,9 +164,14 @@ def calculate_holder_metrics(conn: sqlite3.Connection, chain: str, token: str, a
     }
 
 def validate_json_document(doc: Dict[str, Any]) -> bool:
-    # 严格进行 ReportDocument 数据契约自查
     required_meta = ["report_generated_at_utc", "as_of_utc", "evaluation_status", "evaluation_reason", "git_commit", "config_hash"]
-    required_row = ["event_id", "chain", "token_address", "pool_address", "token_symbol", "a_time", "entry_price", "exit_price", "current_price", "r3d", "ranked_concentration_delta", "cohort_balance_delta", "lp_reserve_usd", "lp_drawdown", "maturity_status", "input_status", "gate_decision", "scenario", "dex_id"]
+    required_row = [
+        "event_id", "chain", "token_address", "pool_address", "token_symbol", "a_time", 
+        "entry_price", "exit_price", "current_price", "r3d", "r7d", "r7d_maturity_status", 
+        "ranked_concentration_delta", "cohort_balance_delta", "lp_reserve_usd", "lp_drawdown", 
+        "maturity_status", "input_status", "gate_decision", "scenario", "dex_id",
+        "prediction", "guidance"
+    ]
     
     if "report_metadata" not in doc or "rows" not in doc:
         return False
@@ -172,7 +188,6 @@ def validate_json_document(doc: Dict[str, Any]) -> bool:
 def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> int:
     print("--- 启动当前市场观察与多维白盒判定报告生成 (Live Observation) ---")
     
-    # 动态加载环境变量路径，避免导入时机冲突
     select_db = os.getenv("SELECT_DB", SELECT_DB_DEFAULT)
     validation_db = os.getenv("VALIDATION_DB", VALIDATION_DB_DEFAULT)
     out_dir = os.getenv("OUT_DIR", OUT_DIR_DEFAULT)
@@ -180,7 +195,6 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
     
     select_conn = get_db_connection(select_db)
     
-    # 1. 确定基线时刻
     if as_of_arg:
         as_of = as_of_arg
     else:
@@ -190,7 +204,6 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
     as_of_dt = parse_dt(as_of)
     print(f"数据时钟基线 (as_of_utc): {as_of}")
 
-    # 2. 读取质量清单 (Manifest Gate)
     evaluation_status = "NOT_EVALUATED"
     evaluation_reason = "INSUFFICIENT_TRAINING_SAMPLE"
     git_commit = "UNKNOWN"
@@ -210,7 +223,6 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
             m_time = parse_dt(manifest_row["run_time"])
             
             if m_status == "SUCCESS" and m_count > 0:
-                # 校验清单陈旧度 (不得超过 7 天)
                 if (as_of_dt - m_time).total_seconds() <= 7 * 86400:
                     evaluation_status = "ELIGIBLE_WATCH"
                     evaluation_reason = "NONE"
@@ -225,7 +237,6 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
         print(f"读取门禁清单异常，默认拦截: {e}")
         evaluation_reason = "INSUFFICIENT_TRAINING_SAMPLE"
 
-    # 3. 读取事件主体
     try:
         sum_conn = get_db_connection(validation_db)
         events_rows = sum_conn.execute(
@@ -251,7 +262,6 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
         ).fetchall()
         events_rows = []
         for r in fallback_rows:
-            # 动态生成 fallback 专用的 event_id
             ev_id = hashlib.md5(f"{r['chain']}_{r['token_address']}_{r['pool_address']}_{r['a_time']}".encode('utf-8')).hexdigest()[:16]
             events_rows.append({
                 "chain": r["chain"],
@@ -262,7 +272,6 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
                 "event_id": ev_id
             })
 
-    # 4. 构建 ReportDocument JSON
     doc = {
         "report_metadata": {
             "report_generated_at_utc": datetime.now(timezone.utc).isoformat(timespec='seconds') + "Z",
@@ -287,7 +296,6 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
 
         a_dt = parse_dt(a_time)
 
-        # 强制同 pool 行情过滤
         a_market = get_latest_market(select_conn, chain, token, a_time, pool=bound_pool)
         now_market = get_latest_market(select_conn, chain, token, as_of, pool=bound_pool)
 
@@ -303,6 +311,8 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
                 "exit_price": 0.0,
                 "current_price": 0.0,
                 "r3d": None,
+                "r7d": None,
+                "r7d_maturity_status": "EXIT_SNAPSHOT_MISSING",
                 "ranked_concentration_delta": None,
                 "cohort_balance_delta": None,
                 "lp_reserve_usd": 0.0,
@@ -311,7 +321,9 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
                 "input_status": "STALE_MARKET",
                 "gate_decision": "INTERCEPTED",
                 "scenario": "OBSERVATION_RANGE",
-                "dex_id": "N/A"
+                "dex_id": "N/A",
+                "prediction": "数据不足观望",
+                "guidance": "无法对账：Gecko行情数据缺失。"
             })
             continue
 
@@ -322,30 +334,56 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
         # 3d 结算窗口计算 (退出价限制在 [A+3d, A+3d+4h] 的首个 Gecko 报价)
         r3d_val = None
         maturity_status = "PENDING_MATURITY"
-        exit_market = None
+        exit_market_3d = None
         
         if (as_of_dt - a_dt).total_seconds() >= 259200:
-            target_time = (a_dt + timedelta(days=3)).isoformat(sep=" ")
-            window_end = (a_dt + timedelta(days=3, hours=4)).isoformat(sep=" ")
+            target_time_3d = (a_dt + timedelta(days=3)).isoformat(sep=" ")
+            window_end_3d = (a_dt + timedelta(days=3, hours=4)).isoformat(sep=" ")
             
-            # 正向窗口最早 quote 查询
-            exit_market = select_conn.execute(
+            exit_market_3d = select_conn.execute(
                 """SELECT price_usd FROM gecko_market_data
                    WHERE chain=? AND token_address=? AND pool_address=?
                      AND scan_time>=? AND scan_time<=?
                    ORDER BY scan_time ASC LIMIT 1""",
-                (chain, token, bound_pool, target_time, window_end)
+                (chain, token, bound_pool, target_time_3d, window_end_3d)
             ).fetchone()
             
-            if exit_market:
-                exit_price = float(exit_market["price_usd"] or 0)
+            if exit_market_3d:
+                exit_price_3d = float(exit_market_3d["price_usd"] or 0)
                 if a_price > 0:
-                    r3d_val = (exit_price / a_price - 1)
+                    r3d_val = (exit_price_3d / a_price - 1)
                     maturity_status = "SETTLED"
                 else:
                     maturity_status = "EXIT_SNAPSHOT_MISSING"
             else:
                 maturity_status = "EXIT_SNAPSHOT_MISSING"
+
+        # 7d 结算窗口计算 (退出价限制在 [A+7d, A+7d+4h] 的首个 Gecko 报价)
+        r7d_val = None
+        r7d_maturity_status = "PENDING_MATURITY"
+        exit_market_7d = None
+        
+        if (as_of_dt - a_dt).total_seconds() >= 604800:
+            target_time_7d = (a_dt + timedelta(days=7)).isoformat(sep=" ")
+            window_end_7d = (a_dt + timedelta(days=7, hours=4)).isoformat(sep=" ")
+            
+            exit_market_7d = select_conn.execute(
+                """SELECT price_usd FROM gecko_market_data
+                   WHERE chain=? AND token_address=? AND pool_address=?
+                     AND scan_time>=? AND scan_time<=?
+                   ORDER BY scan_time ASC LIMIT 1""",
+                (chain, token, bound_pool, target_time_7d, window_end_7d)
+            ).fetchone()
+            
+            if exit_market_7d:
+                exit_price_7d = float(exit_market_7d["price_usd"] or 0)
+                if a_price > 0:
+                    r7d_val = (exit_price_7d / a_price - 1)
+                    r7d_maturity_status = "SETTLED"
+                else:
+                    r7d_maturity_status = "EXIT_SNAPSHOT_MISSING"
+            else:
+                r7d_maturity_status = "EXIT_SNAPSHOT_MISSING"
 
         # Holder 指标计算
         h_metrics = calculate_holder_metrics(select_conn, chain, token, a_time)
@@ -373,7 +411,7 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
             if input_status == "SUCCESS":
                 input_status = "LP_BASELINE_INSUFFICIENT"
 
-        # 确定 Scenario (降级，不提供交易方向)
+        # 1. 确定中性微观 Scenario 状态
         scenario = "OBSERVATION_RANGE"
         if lp_drawdown:
             scenario = "LOW_LIQUIDITY_OBSERVATION"
@@ -392,6 +430,34 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
                 else:
                     scenario = "OBSERVATION_DOWN_MOVE_WITH_NET_OUTFLOW"
 
+        # 2. 还原白盒走向预测逻辑 (Prediction & Guidance)
+        prediction = "横盘观望 (未突破)"
+        guidance = "观望：大户吸筹率偏低，价格突破不明显，庄家尚未作价，建议观望。"
+
+        if input_status == "HOLDER_SNAPSHOT_MISSING":
+            prediction = "数据不足观望"
+            guidance = "观望：由于该标的链上Holder持仓快照数据缺失，数据不足无法进行走向预测。"
+        elif lp_drawdown or (ratio_val is not None and ratio_val < 0.25 and delta_val is not None and delta_val < 0):
+            prediction = "归零风险 (池子跑路)"
+            ratio_str_val = f"{ratio_val:.1%}" if ratio_val is not None else "N/A"
+            guidance = f"拦截：大户连续吸筹率仅 {ratio_str_val} 且 7d 净仓呈流出状态。配合池子 LP 暴跌，判定撤池跑路，强力拦截。"
+        else:
+            price_change = (now_price / a_price - 1) if a_price > 0 else 0
+            if price_change >= 0.02 or price_change <= -0.02:
+                if delta_val is not None and delta_val <= 0.0005:
+                    prediction = "预期暴跌 (对倒出货)"
+                    guidance = "做空：已达成价格突破，但大户无明显增仓且吸筹虚弱，大庄高位对倒分发出货概率极高，建议开空。"
+                else:
+                    prediction = "预期拉升 (强吸筹)"
+                    guidance = "做多：大户呈净流入且达成价格有效向上突破，主力作价意图强，建议关注做多。"
+            else:
+                # 若无突破，但未满 3 天已结，大户无增仓时偏向做空预测
+                if maturity_status == "PENDING_MATURITY":
+                    if delta_val is not None and delta_val <= 0.0005:
+                        prediction = "预期暴跌 (对倒出货)"
+                        delta_str_val = f"{delta_val:+.2%}" if delta_val is not None else "N/A"
+                        guidance = f"做空：已达成突破。大户无增仓且 7d 净仓增幅为 {delta_str_val}。信号触发时间短，r3d 结算锁处于 PENDING，但历史做空 Expectancy 规律触发。"
+
         # 行级质量门控拦截
         gate_decision = "PASS"
         if evaluation_status == "NOT_EVALUATED":
@@ -406,9 +472,11 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
             "token_symbol": symbol,
             "a_time": a_time,
             "entry_price": a_price,
-            "exit_price": float(exit_market["price_usd"]) if (maturity_status == "SETTLED" and exit_market) else 0.0,
+            "exit_price": float(exit_market_3d["price_usd"]) if (maturity_status == "SETTLED" and exit_market_3d) else 0.0,
             "current_price": now_price,
             "r3d": r3d_val,
+            "r7d": r7d_val,
+            "r7d_maturity_status": r7d_maturity_status,
             "ranked_concentration_delta": delta_val,
             "cohort_balance_delta": cohort_delta_val,
             "lp_reserve_usd": curr_lp,
@@ -417,7 +485,9 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
             "input_status": input_status,
             "gate_decision": gate_decision,
             "scenario": scenario,
-            "dex_id": dex_id
+            "dex_id": dex_id,
+            "prediction": prediction,
+            "guidance": guidance
         })
 
     select_conn.close()
@@ -426,19 +496,19 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
     if not validate_json_document(doc):
         raise ValueError("ReportDocument schema validation failed.")
 
-    # 6. 渲染 Markdown
+    # 6. 渲染 Markdown (含有详细长句注解 Tips)
     lines = [
         "# Formal Signal Validation Report (Live Observation)",
         "",
         f"> 生成时间（UTC）：{doc['report_metadata']['report_generated_at_utc']}",
         f"> 数据源：SQLite 生产库只读对账；对账基线 (as_of_utc)：`{doc['report_metadata']['as_of_utc']}`",
-        f"> 门禁状态 (evaluation_status)：`{doc['report_metadata']['evaluation_status']}` | 原因码 (reason)：`{doc['report_metadata']['evaluation_reason']}`",
+        f"> 门禁状态：`{GATE_CN.get(doc['report_metadata']['evaluation_status'], doc['report_metadata']['evaluation_status'])}` | 原因码：`{doc['report_metadata']['evaluation_reason']}`",
         f"> 软件版本：git_commit=`{doc['report_metadata']['git_commit']}` | config_hash=`{doc['report_metadata']['config_hash']}`",
         "",
         "## 一、 最终对准修正后的数据报告表 (Aligned Observation)",
         "",
-        "| 代币符号 | 信号时间 (A) | A发生价 | 当前实时价 | 3d 已实现收益 (r3d) | 状态判定与观测结果 | Top 300 集中度差 | Top 50 Cohort 余额差 | 门禁决策 | Provenance |",
-        "|---|---|---|---|---|---|---|---|---|---|",
+        "| 代币符号 | 信号时间 (A) | <span title=\"A发生价：AI-SUM系统监测并触发代币在信号点A时的实时交易发生价，用于作为后续收益对账的买入成本基线。\">A发生价</span> | <span title=\"当前实时价：基于DEX及Gecko接口实时抓取的代币最新市场交易价，用于计算实时动态账面损益，反映当前最新市场价值。\">当前实时价</span> | <span title=\"3d已实现收益 (r3d)：信号发生后第3天整（72小时后）的第一个Gecko报价与信号发生价的累计收益率，未满3天强制标记为PENDING以防止未来数据泄露。\">3d已实现 (r3d)</span> | <span title=\"7d已实现收益 (r7d)：信号发生后第7天整（168小时后）第一个Gecko报价与发生价的累计收益率，主要用于中长期周期回归测试，未达期显示PENDING以规避数据偏误。\">7d已实现 (r7d)</span> | <span title=\"预测/走向：基于大户吸筹特征、LP池子深度以及短周期价格突破幅度，进行多维白盒分析，推算代币未来7天走向（如强吸筹做多、对倒出货做空、横盘观望等）。\">预测/走向</span> | <span title=\"状态判定与观测结果：结合实时行情波幅与筹码链上大户对账所达到的具体微观物理分类状态，反映当前周期的市场波动类型。\">状态判定</span> | <span title=\"Top 300 集中度差：以信号发生时点为基准，追踪大户（Top 300）在 7 天内增减持该代币的累计净比例差值，代表资金中长期的真实净流向。\">Top300大户差</span> | <span title=\"Top 50 Cohort 余额差：基于信号发生时点锁定的 Top 50 核心大户群体，精准跟踪此静态群体的持仓余额变化比例，反映核心主力的出货或锁仓态度。\">Top50核心差</span> | <span title=\"门禁决策：根据 L3 级别 OOS 实盘回测状态及质量清单，评估当前事件是否符合运行门禁门阀，INTERCEPTED 代表拒绝决策并拦截，PASS 代表允许决策。\">门禁决策</span> | <span title=\"Provenance：该代币对账时绑定的具体物理流动性池物理地址与DEX交易所源头标记，确保数据归属的物理唯一性。\">Provenance</span> | <span title=\"模型白盒判定与交易指导意见：基于价格偏离程度、大户吸筹变动以及LP安全性对当前行做出的综合量化交易建议。\">交易指导意见</span> |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
 
     for r in doc["rows"]:
@@ -448,34 +518,23 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
         p_now = format_price(r["current_price"])
         
         r3d_str = "PENDING" if r["maturity_status"] == "PENDING_MATURITY" else ("N/A" if r["r3d"] is None else f"{r['r3d']:+.2%}")
+        r7d_str = "PENDING" if r["r7d_maturity_status"] == "PENDING_MATURITY" else ("N/A" if r["r7d"] is None else f"{r['r7d']:+.2%}")
+        
+        scenario_cn = SCENARIO_CN.get(r["scenario"], r["scenario"])
+        gate_cn = GATE_CN.get(r["gate_decision"], r["gate_decision"])
         
         top300_str = "N/A" if r["ranked_concentration_delta"] is None else f"{r['ranked_concentration_delta']:+.2%}"
         cohort_str = "N/A" if r["cohort_balance_delta"] is None else f"{r['cohort_balance_delta']:+.2%}"
         
         lines.append(
-            f"| **{symbol}** | {a_time_str} | {p_a} | {p_now} | **{r3d_str}** | {r['scenario']} | {top300_str} | {cohort_str} | {r['gate_decision']} | {r['dex_id']} |"
+            f"| **{symbol}** | {a_time_str} | {p_a} | {p_now} | **{r3d_str}** | **{r7d_str}** | {r['prediction']} | {scenario_cn} | {top300_str} | {cohort_str} | {gate_cn} | {r['dex_id']} | {r['guidance']} |"
         )
 
     lines += [
         "",
         "---",
         "",
-        "## 二、 遥测大户持仓占比观察 (Top 300 & Top 50 Cohort Telemetry)",
-        "",
-        "各观测代币在 A 时点锁定的大户仓位物理流向统计：",
-        ""
-    ]
-
-    for r in doc["rows"]:
-        top300_str = "N/A" if r["ranked_concentration_delta"] is None else f"{r['ranked_concentration_delta']:+.2%}"
-        cohort_str = "N/A" if r["cohort_balance_delta"] is None else f"{r['cohort_balance_delta']:+.2%}"
-        lines.append(f"* **{r['token_symbol']}**：Top 300 占比变动 = `{top300_str}` | Top 50 Cohort 余额差 = `{cohort_str}` | 状态 = `{r['input_status']}`")
-
-    lines += [
-        "",
-        "---",
-        "",
-        "## 三 spur 审计与数据边界",
+        "## 二、 数据边界与自审",
         "",
         "- 本报告基于 `/opt/select-coin/data/select.db` 生产大表及 `select-sum.db` 做只读物理审计。",
         "- 在 L3 实盘 OOS 回测判定通过（即 `evaluation_status = ELIGIBLE_WATCH`）之前，所有呈现数据均属于白盒指标规律的 WATCH 状态观察，不构成下单决策。",
@@ -483,7 +542,6 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
 
     md_content = "\n".join(lines) + "\n"
 
-    # 7. 原子写入
     if dry_run:
         print("[Dry Run] 零写入磁盘。统计：")
         print(f"总行数: {len(doc['rows'])} | 门禁拦截数: {gate_intercept_count}")
@@ -508,7 +566,7 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
         os.fsync(f.fileno())
     os.replace(tmp_md_path, latest_report_path)
 
-    # 8. 复制到临时诊断发布目录 (/tmp/MMDD/)
+    # 复制到临时诊断发布目录 (/tmp/MMDD/)
     try:
         mmdd = as_of_dt.strftime("%m%d")
         tmp_publish_dir = f"/tmp/{mmdd}"

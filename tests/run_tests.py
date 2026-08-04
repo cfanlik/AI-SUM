@@ -191,8 +191,8 @@ def test_holder_missing_null_propagation(tmp_dir):
     assert row["ranked_concentration_delta"] is None
     assert row["cohort_balance_delta"] is None
     assert row["input_status"] == "HOLDER_SNAPSHOT_MISSING"
-    assert "UP_MOVE" not in row["scenario"]
-    assert "DOWN_MOVE" not in row["scenario"]
+    assert row["scenario"] == "OBSERVATION_RANGE"
+    assert row["prediction"] == "数据不足观望"
     print("-> test_holder_missing_null_propagation passed.")
 
 def test_settlement_window_alignment(tmp_dir):
@@ -406,14 +406,70 @@ def test_dry_run_zero_writes(tmp_dir):
     assert not os.path.exists(latest_md_path.replace(".md", ".json"))
     print("-> test_dry_run_zero_writes passed.")
 
+def test_r7d_settlement_and_whitebox_prediction(tmp_dir):
+    print("Running test_r7d_settlement_and_whitebox_prediction...")
+    select_path, val_path, latest_md_path, _ = setup_paths(tmp_dir, 8)
+    as_of = "2026-08-04 07:00:00"
+    
+    conn_select = sqlite3.connect(select_path)
+    # Entry A: 2026-07-28 01:00:00 (大于 7 天)
+    conn_select.execute(
+        "INSERT INTO gecko_market_data VALUES (?,?,?,?,?,?,?,?)",
+        ("bsc", "0xtoken", "0xpool", "2026-07-28 01:00:00", 1.0, 10000, 1000, "pancakeswap")
+    )
+    # 7d 结算窗口内报价 (2026-08-04 01:30:00)
+    conn_select.execute(
+        "INSERT INTO gecko_market_data VALUES (?,?,?,?,?,?,?,?)",
+        ("bsc", "0xtoken", "0xpool", "2026-08-04 01:30:00", 1.5, 10000, 1000, "pancakeswap")
+    )
+    # 实时报价 (2026-08-04 07:00:00)
+    conn_select.execute(
+        "INSERT INTO gecko_market_data VALUES (?,?,?,?,?,?,?,?)",
+        ("bsc", "0xtoken", "0xpool", "2026-08-04 07:00:00", 1.5, 10000, 1000, "pancakeswap")
+    )
+    # 写入 Holder 吸筹
+    conn_select.execute(
+        "INSERT INTO bubblemap_holders VALUES (?,?,?,?,?,?,?)",
+        ("bsc", "0xtoken", "0xholder", "2026-07-28 01:00:00", 10.0, 1, 1)
+    )
+    conn_select.execute(
+        "INSERT INTO bubblemap_holders VALUES (?,?,?,?,?,?,?)",
+        ("bsc", "0xtoken", "0xholder", "2026-07-21 01:00:00", 9.0, 1, 1) # 净增 1.0% (吸筹)
+    )
+    conn_select.commit()
+    conn_select.close()
+    
+    conn_val = sqlite3.connect(val_path)
+    conn_val.execute(
+        "INSERT INTO run_manifest (git_commit, schema_version, config_hash, grid_name, status, train_eligible_count, source_db_mtime, output_table_hash, run_time) VALUES (?,?,?,?,?,?,?,?,?)",
+        ("git_commit", "v6", "cfg_hash", "grid", "SUCCESS", 10, "mtime", "outhash", "2026-08-04 06:00:00")
+    )
+    conn_val.execute(
+        "INSERT INTO asset_identity (chain, token_address, pool_address, token_symbol, a_time, identity_pass, reason_code, event_id, chain_source, chain_confidence) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        ("bsc", "0xtoken", "0xpool", "TKN", "2026-07-28 01:00:00", 1, "PASS", "ev_123", "bsc", "high")
+    )
+    conn_val.commit()
+    conn_val.close()
+    
+    generate_report(as_of_arg=as_of, dry_run=False)
+    
+    json_path = latest_md_path.replace(".md", ".json")
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+        
+    row = data["rows"][0]
+    assert row["r7d_maturity_status"] == "SETTLED"
+    assert row["r7d"] == 0.5 # 1.5 / 1.0 - 1 = +50.00%
+    assert row["prediction"] == "预期拉升 (强吸筹)"
+    assert "大户呈净流入" in row["guidance"]
+    print("-> test_r7d_settlement_and_whitebox_prediction passed.")
+
 def main():
     print("=================== 启动本地物理闭环测试 ===================")
     
-    # 用 tempfile 创建隔离目录
     with tempfile.TemporaryDirectory() as tmp_dir:
         test_price_formatting()
         
-        # 执行带有独立 DB Fixture 的测试
         test_pool_and_time_binding(tmp_dir)
         test_holder_missing_null_propagation(tmp_dir)
         test_settlement_window_alignment(tmp_dir)
@@ -421,6 +477,7 @@ def main():
         test_lp_insufficient_no_interpolation(tmp_dir)
         test_manifest_gate_lock(tmp_dir)
         test_dry_run_zero_writes(tmp_dir)
+        test_r7d_settlement_and_whitebox_prediction(tmp_dir)
         
     print("=================== 所有本地物理测试 100% 成功 ===================")
 
