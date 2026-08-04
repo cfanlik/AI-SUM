@@ -220,7 +220,21 @@ def execute_validation_pipeline(
         "SELECT * FROM signal_decision_result WHERE path_label='B_triggered' AND split_type='Time_Holdout'"
     ).fetchall()
     
-    real_b_triggered = [r for r in b_triggered_holdout if r['pool_address'] and not r['pool_address'].startswith('0xmock')]
+    real_b_triggered = []
+    for r in b_triggered_holdout:
+        p_addr = r['pool_address']
+        if not p_addr:
+            continue
+        if p_addr.startswith('0xmock'):
+            continue
+        chain_lower = str(r['chain']).lower()
+        if chain_lower in ('bsc', 'eth', 'base'):
+            if not (p_addr.startswith('0x') and len(p_addr) == 42):
+                continue
+        elif chain_lower in ('sol', 'solana'):
+            if not (32 <= len(p_addr) <= 44):
+                continue
+        real_b_triggered.append(r)
     
     if real_b_triggered:
         first_b = real_b_triggered[0]
@@ -401,6 +415,14 @@ def execute_validation_pipeline(
     report_file.write_text('\n'.join(report_lines) + '\n', encoding='utf-8')
     print(f"L3 生产门禁报告生成完毕: {report_file}")
     
+    # 依据用户指令：同步在 /tmp 输出一份报告副本
+    try:
+        tmp_report = Path('/tmp') / 'formal_signal_validation_report.md'
+        tmp_report.write_text('\n'.join(report_lines) + '\n', encoding='utf-8')
+        print(f"L3 生产门禁报告已同步写入 /tmp 目录: {tmp_report}")
+    except Exception as e:
+        print(f"警告: 写入 /tmp 报告失败: {e}")
+        
     conn.close()
     
     return {

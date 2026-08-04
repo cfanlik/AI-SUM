@@ -140,14 +140,14 @@ def run_purged_walk_forward_backtest(
 
     status = 'SUCCESS'
     if best_grid is None or eligible_identities < 30:
-        status = 'SUCCESS_DEGRADED'
-        best_grid = {'name': 'Grid_1_Conservative_Degraded', 'v2_mul': 2.0, 'v3_mul': 4.0, 'breakout': 1.05}
+        status = 'INSUFFICIENT_TRAINING_SAMPLE'
+        best_grid = {'name': 'None', 'v2_mul': 0.0, 'v3_mul': 0.0, 'breakout': 0.0}
         
     print(f"训练网格选择完毕: {best_grid['name']} | 状态: {status}")
 
     holdout_records = []
     for ev in holdout_events_raw:
-        if best_grid['name'] == 'NOT_RUN':
+        if best_grid['name'] == 'None':
             res = {
                 'path_label': 'censored', 'path_time': None, 'label_end_time': ev['at'].isoformat(sep=' '),
                 'reason': 'INSUFFICIENT_TRAINING_SAMPLE', 'r1d': None, 'r3d': None, 'r7d': None, 'mdd_7d': None,
@@ -166,7 +166,7 @@ def run_purged_walk_forward_backtest(
     
     train_final_records = []
     for ev in train_events_raw:
-        if best_grid['name'] == 'NOT_RUN':
+        if best_grid['name'] == 'None':
             res = {
                 'path_label': 'censored', 'path_time': None, 'label_end_time': ev['at'].isoformat(sep=' '),
                 'reason': 'INSUFFICIENT_TRAINING_SAMPLE', 'r1d': None, 'r3d': None, 'r7d': None, 'mdd_7d': None,
@@ -188,18 +188,18 @@ def run_purged_walk_forward_backtest(
         b_trig = [r for r in recs if r['path_label'] == 'B_triggered' and r['outcome_incomplete'] == 'PASS']
         unique_ids = len(set((r['chain'], r['address'], r['pool_address']) for r in b_trig))
         
-        has_enough = (unique_ids >= 30) or (status in ('SUCCESS', 'SUCCESS_DEGRADED'))
+        has_enough = (unique_ids >= 30) and (status == 'SUCCESS')
         
         r1d = [r['r1d'] for r in b_trig if r['r1d'] is not None]
         r7d = [r['r7d'] for r in b_trig if r['r7d'] is not None]
         mdd = [r['mdd_7d'] for r in b_trig if r['mdd_7d'] is not None]
         
-        expectancy = sum(r7d)/len(r7d) if (r7d and has_enough) else None
-        wilson = wilson_lower_bound(sum(1 for x in r1d if x > 0), len(r1d)) if (r1d and has_enough) else None
-        mdd_median = med_val(mdd) if (mdd and has_enough) else None
+        expectancy = sum(r7d)/len(r7d) if (r7d and has_enough and status == 'SUCCESS') else None
+        wilson = wilson_lower_bound(sum(1 for x in r1d if x > 0), len(r1d)) if (r1d and has_enough and status == 'SUCCESS') else None
+        mdd_median = med_val(mdd) if (mdd and has_enough and status == 'SUCCESS') else None
         
         mdd_worst_90 = None
-        if mdd and has_enough:
+        if mdd and has_enough and status == 'SUCCESS':
             sorted_mdd = sorted(mdd)
             mdd_worst_90 = sorted_mdd[int(len(sorted_mdd)*0.10)]
             
