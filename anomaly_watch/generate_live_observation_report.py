@@ -9,8 +9,8 @@ from typing import Dict, List, Optional, Any
 
 SELECT_DB = "/opt/select-coin/data/select.db"
 VALIDATION_DB = "/opt/AI-SUM/data/signal-validation.db"
-OUT_DIR = "/opt/AI-SUM/report/anomaly/observation"
-LATEST_REPORT_PATH = "/opt/AI-SUM/report/anomaly/observation/latest_live_observation.md"
+OUT_DIR = "/opt/AI-SUM/report/anomaly"
+LATEST_REPORT_PATH = "/opt/AI-SUM/report/anomaly/anomaly_live_observation.md"
 
 def get_db_connection(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)

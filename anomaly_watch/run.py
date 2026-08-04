@@ -57,7 +57,7 @@ def main():
         from anomaly_watch.generate_live_observation_report import generate_report
         generate_report()
         os.makedirs('/tmp/0803', exist_ok=True)
-        shutil.copy2('/opt/AI-SUM/report/anomaly/observation/latest_live_observation.md', '/tmp/0803/latest_live_observation.md')
+        shutil.copy2('/opt/AI-SUM/report/anomaly/anomaly_live_observation.md', '/tmp/0803/latest_live_observation.md')
         print("REPORT_LIVE_OBSERVATION_GENERATED: Copied to /tmp/0803")
     except Exception as e:
         print(f"REPORT_LIVE_OBSERVATION_FAILED: {e}")
