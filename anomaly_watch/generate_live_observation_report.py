@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Any
 SELECT_DB_DEFAULT = "/opt/select-coin/data/select.db"
 VALIDATION_DB_DEFAULT = "/opt/AI-SUM/data/signal-validation.db"
 OUT_DIR_DEFAULT = "/opt/AI-SUM/report/anomaly"
-LATEST_REPORT_PATH_DEFAULT = "/opt/AI-SUM/report/anomaly/anomaly_live_observation.md"
+LATEST_REPORT_PATH_DEFAULT = "/opt/AI-SUM/report/anomaly/latest_实时信号验证报告_实盘观察.md"
 
 # 中文化翻译对照表
 SCENARIO_CN = {
@@ -203,6 +203,10 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
         
     as_of_dt = parse_dt(as_of)
     print(f"数据时钟基线 (as_of_utc): {as_of}")
+
+    mmdd = as_of_dt.strftime("%m%d")
+    hhmm = as_of_dt.strftime("%H%M")
+    history_report_path = os.path.join(out_dir, f"实时信号验证报告_实盘观察_{mmdd}_{hhmm}.md")
 
     evaluation_status = "NOT_EVALUATED"
     evaluation_reason = "INSUFFICIENT_TRAINING_SAMPLE"
@@ -498,7 +502,7 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
 
     # 6. 渲染 Markdown (含有详细长句注解 Tips)
     lines = [
-        "# Formal Signal Validation Report (Live Observation)",
+        "# 实时信号验证报告 (实盘观察)",
         "",
         f"> 生成时间（UTC）：{doc['report_metadata']['report_generated_at_utc']}",
         f"> 数据源：SQLite 生产库只读对账；对账基线 (as_of_utc)：`{doc['report_metadata']['as_of_utc']}`",
@@ -549,7 +553,7 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
 
     os.makedirs(out_dir, exist_ok=True)
     
-    # 写入 JSON
+    # 1. 写入最新的 JSON 和 MD 锚点文件
     json_path = latest_report_path.replace(".md", ".json")
     tmp_json_path = json_path + ".tmp"
     with open(tmp_json_path, "w", encoding="utf-8") as f:
@@ -558,7 +562,6 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
         os.fsync(f.fileno())
     os.replace(tmp_json_path, json_path)
     
-    # 写入 MD
     tmp_md_path = latest_report_path + ".tmp"
     with open(tmp_md_path, "w", encoding="utf-8") as f:
         f.write(md_content)
@@ -566,14 +569,30 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
         os.fsync(f.fileno())
     os.replace(tmp_md_path, latest_report_path)
 
-    # 复制到临时诊断发布目录 (/tmp/MMDD/)
+    # 2. 同时写入带时间戳的历史 JSON 和 MD 文件（支持一天四份）
+    history_json_path = history_report_path.replace(".md", ".json")
+    tmp_hist_json = history_json_path + ".tmp"
+    with open(tmp_hist_json, "w", encoding="utf-8") as f:
+        json.dump(doc, f, indent=2, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_hist_json, history_json_path)
+
+    tmp_hist_md = history_report_path + ".tmp"
+    with open(tmp_hist_md, "w", encoding="utf-8") as f:
+        f.write(md_content)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_hist_md, history_report_path)
+
+    # 3. 复制到临时诊断发布目录 (/tmp/MMDD/)
     try:
         mmdd = as_of_dt.strftime("%m%d")
         tmp_publish_dir = f"/tmp/{mmdd}"
         os.makedirs(tmp_publish_dir, exist_ok=True)
         
-        dest_md = os.path.join(tmp_publish_dir, "latest_live_observation.md")
-        dest_json = os.path.join(tmp_publish_dir, "latest_live_observation.json")
+        dest_md = os.path.join(tmp_publish_dir, f"实时信号验证报告_实盘观察_{hhmm}.md")
+        dest_json = os.path.join(tmp_publish_dir, f"实时信号验证报告_实盘观察_{hhmm}.json")
         
         with open(dest_md, "w", encoding="utf-8") as f:
             f.write(md_content)
@@ -582,6 +601,7 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
             
         print(f"DEX 市场实时观察报告生成并发布成功。")
         print(f"主报告: {latest_report_path}")
+        print(f"历史报告: {history_report_path}")
         print(f"诊断副本: {dest_md}")
     except Exception as e:
         print(f"复制副本至临时目录失败: {e}")
