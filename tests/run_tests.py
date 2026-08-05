@@ -88,7 +88,7 @@ def init_mock_databases(tmp_dir, index):
 def setup_paths(tmp_dir, index):
     select_path, val_path = init_mock_databases(tmp_dir, index)
     out_dir = os.path.join(tmp_dir, f"out_{index}")
-    latest_md_path = os.path.join(out_dir, "anomaly_live_observation.md")
+    latest_md_path = os.path.join(out_dir, "latest_实时信号验证报告_实盘观察.md")
     
     os.environ["SELECT_DB"] = select_path
     os.environ["VALIDATION_DB"] = val_path

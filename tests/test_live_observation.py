@@ -84,7 +84,7 @@ def init_mock_databases(tmp_path):
 def db_paths(tmp_path, monkeypatch):
     select_path, val_path = init_mock_databases(tmp_path)
     out_dir = str(tmp_path / "out")
-    latest_md_path = str(tmp_path / "out" / "anomaly_live_observation.md")
+    latest_md_path = str(tmp_path / "out" / "latest_实时信号验证报告_实盘观察.md")
     
     monkeypatch.setenv("SELECT_DB", select_path)
     monkeypatch.setenv("VALIDATION_DB", val_path)

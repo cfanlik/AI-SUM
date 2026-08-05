@@ -55,6 +55,10 @@ def prune_category_reports(dir_path: str, max_keep: int = 60) -> int:
             try:
                 os.remove(fpath)
                 deleted_count += 1
+                # 同时也清除同名的 .json 文件以防残留堆积
+                json_path = fpath.replace(".md", ".json")
+                if os.path.exists(json_path):
+                    os.remove(json_path)
             except Exception as e:
                 logger.error(f"[ReportCleaner] 轮询删除旧报告失败: {fpath}, err: {e}")
         logger.info(f"[ReportCleaner] 分类 [{dir_path}] 轮询覆盖完毕: 当前保留 60 份，已淘汰物理覆盖 {deleted_count} 份旧专报")
