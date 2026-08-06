@@ -102,6 +102,19 @@ def generate_report():
                 status = 'EXIT_SNAPSHOT_MISSING'
                 ret = None
 
+        # 增加 7d 收益结算报价窗口查询
+        es_7d = ts + timedelta(days=7)
+        ee_7d = es_7d + timedelta(hours=4)
+
+        if es_7d > ldt:
+            ret_7d = None
+        else:
+            ex_7d = sub[(sub['dt'] >= es_7d) & (sub['dt'] <= ee_7d)].sort_values('dt')
+            if len(ex_7d) > 0 and entry_p:
+                ret_7d = (ex_7d.iloc[0]['price_usd'] - entry_p) / entry_p * 100
+            else:
+                ret_7d = None
+
         out.append({
             'sym': r['symbol'],
             'time': r['snapshot_time'],
@@ -110,6 +123,7 @@ def generate_report():
             'ds': f"+{r['ds']:.2f}",
             'status': status,
             'ret': f"{ret:+.2f}%" if ret is not None else '—',
+            'ret_7d': f"{ret_7d:+.2f}%" if ret_7d is not None else '—',
             'lv': r['lv'],
             'pool': (pool[:10] + '..') if pool else 'N/A'
         })
@@ -174,9 +188,9 @@ def generate_report():
     do = pd.DataFrame(out)
     if not do.empty:
         do = do.sort_values(by='time', ascending=False)
-        h = "| 代币 | 时间 | 大户增量 | 平均分 | 分数变动 | 状态 | 3d收益 | 级别 | 池地址 |"
-        d = "|---|---|---|---|---|---|---|---|---|"
-        rs = [f"| {r['sym']} | {r['time']} | {r['da']} | {r['score']} | {r['ds']} | {r['status']} | {r['ret']} | {r['lv']} | {r['pool']} |" for _, r in do.iterrows()]
+        h = "| 代币 | 时间 | 大户增量 | 平均分 | 分数变动 | 状态 | 3d收益 | 7d收益 | 级别 | 池地址 |"
+        d = "|---|---|---|---|---|---|---|---|---|---|"
+        rs = [f"| {r['sym']} | {r['time']} | {r['da']} | {r['score']} | {r['ds']} | {r['status']} | {r['ret']} | {r['ret_7d']} | {r['lv']} | {r['pool']} |" for _, r in do.iterrows()]
         table_md = "\n".join([h, d] + rs)
     else:
         table_md = "*当前未检测到符合常规或强异动级别的快照断点*"
@@ -203,7 +217,7 @@ def generate_report():
 """
 
     os.makedirs(REPORT_DIR, exist_ok=True)
-    filename = f"anomaly_periodic_impulse_surge_{datetime.now().strftime('%m%d_%H%M')}.md"
+    filename = f"anomaly_intense_surge_{datetime.now().strftime('%m%d_%H%M')}.md"
     filepath = os.path.join(REPORT_DIR, filename)
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(report_md)

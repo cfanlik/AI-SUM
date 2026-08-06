@@ -45,6 +45,14 @@ def main():
     rep_b = generator.generate_periodic_impulse_surge_report(accumulation_run)
     print("REPORT_B_GENERATED:", rep_b)
 
+    # 运行新版 剧烈突发吸筹风控专报 生成器
+    import subprocess
+    print("Executing Anomaly Intense Surge Report...")
+    try:
+        subprocess.run(["/usr/bin/python3", "meta-verdict/anomaly_surge_report.py"], check=True)
+    except Exception as e:
+        print(f"Error executing anomaly_surge_report: {e}")
+
     # 6. 全局物理专报上限清理 (每个分类最多保留 60 份)
     from anomaly_watch.report_cleaner import prune_all_aisum_reports
     deleted_cnt = prune_all_aisum_reports()
