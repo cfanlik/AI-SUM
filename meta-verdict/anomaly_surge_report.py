@@ -1,6 +1,7 @@
 import sqlite3
 import pandas as pd
 import numpy as np
+import time
 from datetime import datetime, timedelta
 import os
 import uuid
@@ -42,20 +43,33 @@ def generate_report():
 
     latest_price_time = val_conn.execute("SELECT MAX(scan_time) FROM market_pool_asof").fetchone()[0]
 
-    # B. 异动扫描与双轨阈值去噪
-    df = pd.read_sql_query("SELECT * FROM snapshot_asset_metrics ORDER BY symbol, snapshot_time", val_conn)
-    df['prev_s'] = df.groupby(['chain','token_address'])['avg_acc_score'].shift(1)
-    df['prev_a'] = df.groupby(['chain','token_address'])['acc_count'].shift(1)
-    df['ds'] = df['avg_acc_score'] - df['prev_s']
-    df['da'] = df['acc_count'] - df['prev_a']
-    df = df.dropna(subset=['prev_s'])
+    # B. 异动扫描与双轨级联级判定 (Dual-Gate Cascade)
+    df = pd.read_sql_query("SELECT * FROM snapshot_asset_metrics ORDER BY chain, token_address, snapshot_time", val_conn)
+    
+    # 2 快照变动
+    df['prev_s1'] = df.groupby(['chain','token_address'])['avg_acc_score'].shift(1)
+    df['prev_a1'] = df.groupby(['chain','token_address'])['acc_count'].shift(1)
+    df['ds_2'] = df['avg_acc_score'] - df['prev_s1']
+    df['da_2'] = df['acc_count'] - df['prev_a1']
+    
+    # 3 快照变动
+    df['prev_s2'] = df.groupby(['chain','token_address'])['avg_acc_score'].shift(2)
+    df['prev_a2'] = df.groupby(['chain','token_address'])['acc_count'].shift(2)
+    df['ds_3'] = df['avg_acc_score'] - df['prev_s2']
+    df['da_3'] = df['acc_count'] - df['prev_a2']
+    
+    df = df.dropna(subset=['prev_s1'])
 
-    # 双轨健动阈值：常规(ds>=2.0 & da>=10) 与 强异动(ds>=5.0 & da>=50)
-    w_cond = (df['ds'] >= 2.0) & (df['da'] >= 10)
-    s_cond = (df['ds'] >= 5.0) & (df['da'] >= 50)
+    # 双轨级联机制
+    cond_w2 = (df['ds_2'] >= 2.0) & (df['da_2'] >= 10)
+    cond_s2 = (df['ds_2'] >= 5.0) & (df['da_2'] >= 50)
+    
+    cond_w3 = (df['ds_3'] >= 3.0) & (df['da_3'] >= 15)
+    cond_s3 = (df['ds_3'] >= 6.0) & (df['da_3'] >= 60)
+    
     df['lv'] = 'NONE'
-    df.loc[w_cond, 'lv'] = 'WATCH'
-    df.loc[s_cond, 'lv'] = 'WATCH_STRONG'
+    df.loc[cond_w2 | cond_w3, 'lv'] = 'WATCH'
+    df.loc[cond_s2 | cond_s3, 'lv'] = 'WATCH_STRONG'
     
     # 筛选出触发异动的快照
     trig = df[df['lv'] != 'NONE'].copy()
@@ -115,21 +129,27 @@ def generate_report():
             else:
                 ret_7d = None
 
+        t_type = []
+        if (r['ds_2'] >= 2.0) and (r['da_2'] >= 10): t_type.append("2期")
+        if (not pd.isna(r['ds_3'])) and (r['ds_3'] >= 3.0) and (r['da_3'] >= 15): t_type.append("3期")
+        trigger_tag = "+".join(t_type) if t_type else "级联"
+
         out.append({
             'sym': r['symbol'],
             'time': r['snapshot_time'],
-            'da': f"+{r['da']:.0f}",
+            'da': f"+{r['da_2']:.0f}" if not pd.isna(r['da_2']) else "—",
             'score': f"{r['avg_acc_score']:.2f}",
-            'ds': f"+{r['ds']:.2f}",
+            'ds': f"+{r['ds_2']:.2f}" if not pd.isna(r['ds_2']) else "—",
             'status': status,
             'ret': f"{ret:+.2f}%" if ret is not None else '—',
             'ret_7d': f"{ret_7d:+.2f}%" if ret_7d is not None else '—',
             'lv': r['lv'],
-            'pool': (pool[:10] + '..') if pool else 'N/A'
+            'pool': (pool[:10] + '..') if pool else 'N/A',
+            'trig_tag': trigger_tag
         })
         
         if r['lv'] == 'WATCH_STRONG':
-            strong_signals.append((r['chain'], r['token_address'], r['snapshot_time'], r['symbol'], r['prev_s']))
+            strong_signals.append((r['chain'], r['token_address'], r['snapshot_time'], r['symbol'], r['prev_s1']))
 
     # E. 动态大户双快照差异审计 (消除任何代币硬编码)
     audit_sections = []
@@ -188,9 +208,9 @@ def generate_report():
     do = pd.DataFrame(out)
     if not do.empty:
         do = do.sort_values(by='time', ascending=False)
-        h = "| 代币 | 时间 | 大户增量 | 平均分 | 分数变动 | 状态 | 3d收益 | 7d收益 | 级别 | 池地址 |"
-        d = "|---|---|---|---|---|---|---|---|---|---|"
-        rs = [f"| {r['sym']} | {r['time']} | {r['da']} | {r['score']} | {r['ds']} | {r['status']} | {r['ret']} | {r['ret_7d']} | {r['lv']} | {r['pool']} |" for _, r in do.iterrows()]
+        h = "| 代币 | 时间 | 大户增量(2期) | 平均分 | 分数变动(2期) | 状态 | 3d收益 | 7d收益 | 触发来源 | 级别 | 池地址 |"
+        d = "|---|---|---|---|---|---|---|---|---|---|---|"
+        rs = [f"| {r['sym']} | {r['time']} | {r['da']} | {r['score']} | {r['ds']} | {r['status']} | {r['ret']} | {r['ret_7d']} | {r['trig_tag']} | {r['lv']} | {r['pool']} |" for _, r in do.iterrows()]
         table_md = "\n".join([h, d] + rs)
     else:
         table_md = "*当前未检测到符合常规或强异动级别的快照断点*"
@@ -203,7 +223,7 @@ def generate_report():
     report_md = f"""# 🚨 剧烈突发吸筹风控专报
 
 > 物理逆源 ID: `{run_id}` | 隔离库物化: {asset_cnt} 资产 | 价格时钟上限: `{latest_price_time}`
-> 本报告依据双轨健壮阈值与 `[A+3d, A+3d+4h]` 严格同池价格限制，对代币大户构成突增及收益进行去噪观察。
+> 本报告采用 2&3 快照级联判定逻辑 (Dual-Gate Cascade)，对突发脉冲异动与中长周期累积吸筹事件做无缝全覆盖。
 
 ---
 
