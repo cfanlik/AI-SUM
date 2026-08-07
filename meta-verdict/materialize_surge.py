@@ -112,17 +112,8 @@ def run_sync():
                 "INSERT OR REPLACE INTO snapshot_asset_metrics VALUES (?,?,?,?,?,?,?,?,?)", sam_insert)
             ts_cnt = len(sam_insert)
 
-            # SWM（14天过滤）
-            swm_rows = src.execute(f"""
-                SELECT chain, token_address, snapshot_time, wallet_address,
-                       is_accumulating, acc_score, is_cex, is_dex, is_contract
-                FROM bubblemap_holders
-                WHERE token_address IN ({ph}) AND snapshot_time >= ?
-            """, active_tokens + [retention_time]).fetchall()
-            val_conn.executemany(
-                "INSERT OR REPLACE INTO snapshot_wallet_membership VALUES (?,?,?,?,?,?,?,?,?)",
-                [list(r) for r in swm_rows])
-            tw_cnt = len(swm_rows)
+            # SWM 明细不在此处全量物化，改为生成专报时动态按需补拉，tw_cnt 置为 0
+            tw_cnt = 0
 
             # MPA（14天过滤）
             mpa_rows = src.execute(f"""
