@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 AI-SUM 串行流水线调度器
@@ -16,7 +16,9 @@ STEPS = [
     ("bigcoin", ["python3", "bigcoin/run.py"]),
     ("cost-basis-scan", ["python3", "cost-basis-scan/run.py"]),
     ("meta-verdict", ["python3", "meta-verdict/run.py"]),
-    ("history-report", ["python3", "meta-verdict/history_report.py"])
+    ("history-report", ["python3", "meta-verdict/history_report.py"]),
+    ("materialize-surge", ["python3", "meta-verdict/materialize_surge.py"]),
+    ("anomaly-surge-report", ["python3", "meta-verdict/anomaly_surge_report.py"])
 ]
 
 def run_pipeline():
