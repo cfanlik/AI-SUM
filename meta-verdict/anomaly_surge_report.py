@@ -223,7 +223,7 @@ def generate_report():
     report_md = f"""# 🚨 剧烈突发吸筹风控专报
 
 > 物理逆源 ID: `{run_id}` | 隔离库物化: {asset_cnt} 资产 | 价格时钟上限: `{latest_price_time}`
-> 本报告采用 2&3 快照级联判定逻辑 (Dual-Gate Cascade)，对突发脉冲异动与中长周期累积吸筹事件做无缝全覆盖。
+> 本报告采用 2&3 快照级联判定逻辑 (Dual-Gate Cascade)，对突发脉冲异动与中长周期累积吸筹事件做无缝全覆盖。本期共有 {asset_cnt} 个活跃资产参与了异动审计。
 
 ---
 

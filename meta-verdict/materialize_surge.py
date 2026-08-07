@@ -63,17 +63,6 @@ def run_sync():
         init_db(val_conn)
         src = sqlite3.connect(PROD_DB, uri=True, timeout=30.0)
 
-        # 锁定黄金 6 核心代币白名单（实际映射 8 个合约地址）
-        core_symbols = ['TAKE', 'BASED', 'BTW', 'Beat', 'H', 'FOLKS']
-        placeholders_core = ",".join(["?"] * len(core_symbols))
-        try:
-            active_tokens = [r[0] for r in src.execute(
-                f"SELECT token_address FROM token_names WHERE symbol IN ({placeholders_core})",
-                core_symbols).fetchall() if r[0]]
-        except Exception as e:
-            print(f"获取核心代币失败: {e}")
-            active_tokens = []
-
         try:
             interval_h = src.execute(
                 "SELECT interval_hours FROM bm_schedule_config WHERE enabled=1 LIMIT 1").fetchone()
@@ -85,6 +74,16 @@ def run_sync():
         retention_days = 14
         now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
         retention_time = (now_utc - timedelta(days=retention_days)).strftime('%Y-%m-%d %H:%M:%S')
+
+        # 动态获取最近 14 天在 bubblemap_holders 中有快照的活跃代币地址 (消除硬编码)
+        try:
+            active_tokens = [r[0] for r in src.execute(
+                "SELECT DISTINCT token_address FROM bubblemap_holders WHERE snapshot_time >= ?",
+                [retention_time]).fetchall() if r[0]]
+            print(f"已动态加载最近 14 天活跃代币，共 {len(active_tokens)} 个合约地址")
+        except Exception as e:
+            print(f"获取活跃代币失败: {e}")
+            active_tokens = []
 
         ts_cnt = tw_cnt = tp_cnt = 0
 
