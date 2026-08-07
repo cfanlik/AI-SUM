@@ -165,13 +165,43 @@ def generate_report():
             continue
         snap_old = prev_snap_row[0]
         
-        # 提取名单
-        w_new = {r['wallet_address']: dict(r) for r in val_conn.execute(
+        # 提取名单 (若隔离库中无缓存则动态按需补拉)
+        w_new_rows = val_conn.execute(
             "SELECT * FROM snapshot_wallet_membership WHERE chain=? AND token_address=? AND snapshot_time=?",
-            [chain, addr, snap_new]).fetchall()}
-        w_old = {r['wallet_address']: dict(r) for r in val_conn.execute(
+            [chain, addr, snap_new]).fetchall()
+        if not w_new_rows:
+            src_conn = connect(SRC_DB, readonly=True)
+            src_rows = src_conn.execute(
+                "SELECT chain, token_address, snapshot_time, wallet_address, is_accumulating, acc_score, is_cex, is_dex, is_contract FROM bubblemap_holders WHERE token_address=? AND snapshot_time=?",
+                [addr, snap_new]).fetchall()
+            src_conn.close()
+            val_conn.executemany(
+                "INSERT OR REPLACE INTO snapshot_wallet_membership VALUES (?,?,?,?,?,?,?,?,?)",
+                [list(r) for r in src_rows])
+            val_conn.commit()
+            w_new_rows = val_conn.execute(
+                "SELECT * FROM snapshot_wallet_membership WHERE chain=? AND token_address=? AND snapshot_time=?",
+                [chain, addr, snap_new]).fetchall()
+
+        w_old_rows = val_conn.execute(
             "SELECT * FROM snapshot_wallet_membership WHERE chain=? AND token_address=? AND snapshot_time=?",
-            [chain, addr, snap_old]).fetchall()}
+            [chain, addr, snap_old]).fetchall()
+        if not w_old_rows:
+            src_conn = connect(SRC_DB, readonly=True)
+            src_rows = src_conn.execute(
+                "SELECT chain, token_address, snapshot_time, wallet_address, is_accumulating, acc_score, is_cex, is_dex, is_contract FROM bubblemap_holders WHERE token_address=? AND snapshot_time=?",
+                [addr, snap_old]).fetchall()
+            src_conn.close()
+            val_conn.executemany(
+                "INSERT OR REPLACE INTO snapshot_wallet_membership VALUES (?,?,?,?,?,?,?,?,?)",
+                [list(r) for r in src_rows])
+            val_conn.commit()
+            w_old_rows = val_conn.execute(
+                "SELECT * FROM snapshot_wallet_membership WHERE chain=? AND token_address=? AND snapshot_time=?",
+                [chain, addr, snap_old]).fetchall()
+
+        w_new = {r['wallet_address']: dict(r) for r in w_new_rows}
+        w_old = {r['wallet_address']: dict(r) for r in w_old_rows}
 
         s_new = dict(val_conn.execute("SELECT * FROM snapshot_asset_metrics WHERE chain=? AND token_address=? AND snapshot_time=?", [chain, addr, snap_new]).fetchone())
         s_old = dict(val_conn.execute("SELECT * FROM snapshot_asset_metrics WHERE chain=? AND token_address=? AND snapshot_time=?", [chain, addr, snap_old]).fetchone())
