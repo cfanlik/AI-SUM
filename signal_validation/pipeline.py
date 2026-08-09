@@ -111,7 +111,7 @@ def check_dual_api_real(chain, pool_address, db_path):
 def execute_validation_pipeline(
     sum_db: str = '/opt/AI-SUM/select-sum.db',
     select_db: str = '/opt/select-coin/data/select.db',
-    out_db: str = '/opt/AI-SUM/data/signal-validation.db',
+    out_db: str = '/opt/AI-SUM/data/backtest-validation.db',
     report_dir: str = '/opt/AI-SUM/report/unified'
 ) -> dict:
     print("--- 开始 Launch Path 验证第一阶段 (P0-P2) ---")

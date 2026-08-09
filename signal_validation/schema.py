@@ -1,6 +1,6 @@
 import sqlite3
 
-def init_db(db_path: str = '/opt/AI-SUM/data/signal-validation.db'):
+def init_db(db_path: str = '/opt/AI-SUM/data/backtest-validation.db'):
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
     
