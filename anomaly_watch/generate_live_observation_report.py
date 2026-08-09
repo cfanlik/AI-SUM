@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Any
 
 # 物理路径默认常量
 SELECT_DB_DEFAULT = "/opt/select-coin/data/select.db"
-VALIDATION_DB_DEFAULT = "/opt/AI-SUM/data/signal-validation.db"
+VALIDATION_DB_DEFAULT = "/opt/AI-SUM/data/backtest-validation.db"
 OUT_DIR_DEFAULT = "/opt/AI-SUM/report/anomaly"
 LATEST_REPORT_PATH_DEFAULT = "/opt/AI-SUM/report/anomaly/latest_实时信号验证报告_实盘观察.md"
 
@@ -256,14 +256,33 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
         events_rows = []
 
     if not events_rows:
-        fallback_rows = select_conn.execute(
-            """SELECT DISTINCT chain, token_address, 'MOCK' as token_symbol, MAX(scan_time) as a_time, pool_address
-               FROM gecko_market_data
-               WHERE scan_time <= ?
-               GROUP BY chain, token_address
-               ORDER BY a_time DESC LIMIT 10""",
-            (as_of,)
-        ).fetchall()
+        has_token_names = False
+        try:
+            select_conn.execute("SELECT 1 FROM token_names LIMIT 1")
+            has_token_names = True
+        except Exception:
+            pass
+
+        if has_token_names:
+            fallback_rows = select_conn.execute(
+                """SELECT DISTINCT g.chain, g.token_address, COALESCE(tn.symbol, 'MOCK') as token_symbol, MAX(g.scan_time) as a_time, g.pool_address
+                   FROM gecko_market_data g
+                   LEFT JOIN token_names tn ON g.chain = tn.chain AND g.token_address = tn.token_address
+                   WHERE g.scan_time <= ?
+                   GROUP BY g.chain, g.token_address
+                   ORDER BY a_time DESC LIMIT 10""",
+                (as_of,)
+            ).fetchall()
+        else:
+            fallback_rows = select_conn.execute(
+                """SELECT DISTINCT chain, token_address, 'MOCK' as token_symbol, MAX(scan_time) as a_time, pool_address
+                   FROM gecko_market_data
+                   WHERE scan_time <= ?
+                   GROUP BY chain, token_address
+                   ORDER BY a_time DESC LIMIT 10""",
+                (as_of,)
+            ).fetchall()
+
         events_rows = []
         for r in fallback_rows:
             ev_id = hashlib.md5(f"{r['chain']}_{r['token_address']}_{r['pool_address']}_{r['a_time']}".encode('utf-8')).hexdigest()[:16]
