@@ -86,7 +86,7 @@ def run_sync():
 
         # 14 天滑动窗口（7d 最长结算周期 × 2 冗余）
         retention_days = 14
-        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        now_utc = datetime.now()  # 改为本地北京时间 (HKT)，以对齐 select.db 本地时间戳
         retention_time = (now_utc - timedelta(days=retention_days)).strftime('%Y-%m-%d %H:%M:%S')
 
         # 1. 物理清理 14 天前的隔离库过期历史数据
