@@ -61,7 +61,7 @@ def main():
     # 运行新版 剧烈突发吸筹风控专报 生成器
     print("Executing Anomaly Intense Surge Report...")
     try:
-        subprocess.run(["/usr/bin/python3", "meta-verdict/anomaly_surge_report.py"], check=True)
+        subprocess.run(["/usr/bin/python3", "meta-verdict/anomaly_surge_report.py"], cwd="/opt/AI-SUM", check=True)
     except Exception as e:
         print(f"Error executing anomaly_surge_report: {e}")
 
