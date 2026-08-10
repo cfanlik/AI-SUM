@@ -1,5 +1,6 @@
 import sys
 sys.path.append('/opt/AI-SUM')
+import subprocess
 
 from anomaly_watch.anomaly_analyzer import AnomalyAnalyzer
 from anomaly_watch.impulse_surge_analyzer import ImpulseSurgeAnalyzer
@@ -45,8 +46,17 @@ def main():
     rep_b = generator.generate_periodic_impulse_surge_report(accumulation_run)
     print("REPORT_B_GENERATED:", rep_b)
 
+    # 专报生成前触发即时增量物化同步，以获取源端 select.db 最新快照和 Gecko 价格
+    print("Executing Real-time Materialize Surge Sync...")
+    try:
+        subprocess.run(["/usr/bin/python3", "meta-verdict/materialize_surge.py"], 
+                       cwd="/opt/AI-SUM", check=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        print("Warning: materialize_surge sync timed out after 120s, continuing...")
+    except Exception as e:
+        print(f"Warning: materialize_surge sync failed: {e}, continuing...")
+
     # 运行新版 剧烈突发吸筹风控专报 生成器
-    import subprocess
     print("Executing Anomaly Intense Surge Report...")
     try:
         subprocess.run(["/usr/bin/python3", "meta-verdict/anomaly_surge_report.py"], check=True)
