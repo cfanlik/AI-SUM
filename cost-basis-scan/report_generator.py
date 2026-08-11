@@ -213,7 +213,7 @@ def _build_md(
             )
         lines.append("")
 
-    # ── 锁仓 Top 10 独立看板 (追加在底部的新增章节) ──
+    # ── 锁仓 Top 10 独立看板 (平行新增章节，独立于吸筹/出货/跃迁等信号大类，绝不进行任何替换或覆盖) ──
     lock_top10 = _fetch_global_lock_top10()
     if lock_top10:
         lines.append("## 📊 本期活跃代币强锁仓 Top 10 (只买不卖/极低卖出汇总)")
