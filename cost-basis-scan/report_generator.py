@@ -125,6 +125,33 @@ def _build_md(
         "",
     ]
 
+    # ── 锁仓 Top 10 独立看板 ──
+    lock_candidates = [r for r in results if r.cost_holders_count >= 3]
+    lock_candidates.sort(key=lambda r: (getattr(r, 'only_buy_pct', 0.0), r.cost_holders_count), reverse=True)
+    lock_top10 = lock_candidates[:10]
+    
+    if lock_top10:
+        lines.append("## 📊 本期活跃代币强锁仓 Top 10 (只买不卖/极低卖出汇总)")
+        lines.append("")
+        lines.append("> **统计口径**: 仅计算非 CEX/DEX/Contract 且 `buy_amt_usd > 0` 的大户地址 (大户样本数 >= 3)，按只买不卖人数占比降序")
+        lines.append("")
+        lines.append("| 排名 | 代币 | 链 | 总大户数 | 只买不卖人数 (占比) | 只买不卖持仓% | 卖出<1%人数 (占比) | 卖出<1%持仓% | 卖出<3%人数 (占比) | 卖出<3%持仓% |")
+        lines.append("| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
+        for idx, r in enumerate(lock_top10):
+            rank = idx + 1
+            ob_pct = getattr(r, 'only_buy_pct', 0.0)
+            s1_pct = getattr(r, 'sell_under_1_pct', 0.0)
+            s3_pct = getattr(r, 'sell_under_3_pct', 0.0)
+            
+            ob_str = f"{getattr(r, 'only_buy_cnt', 0)} ({ob_pct:.1f}%)"
+            s1_str = f"{getattr(r, 'sell_under_1_cnt', 0)} ({s1_pct:.1f}%)"
+            s3_str = f"{getattr(r, 'sell_under_3_cnt', 0)} ({s3_pct:.1f}%)"
+            
+            lines.append(
+                f"| **No.{rank}** | {r.token_symbol} | `{r.chain}` | {r.cost_holders_count} | {ob_str} | {getattr(r, 'only_buy_hold_pct', 0.0):.2f}% | {s1_str} | {getattr(r, 'sell_under_1_hold_pct', 0.0):.2f}% | {s3_str} | {getattr(r, 'sell_under_3_hold_pct', 0.0):.2f}% |"
+            )
+        lines.append("")
+
     # ── 状态跃迁 ──
     if transition_list:
         lines.append(f"## ⚡ 状态跃迁预警 — {len(transition_list)} 个")

@@ -33,6 +33,7 @@ class CostHolder:
     is_new_buyer: int
     recent_48h_in: float
     recent_48h_out: float
+    sell_amt_usd: float = 0.0
 
 
 @dataclass
@@ -159,6 +160,7 @@ def load_cost_holders(
                buy_cnt, sell_cnt,
                gmgn_avg_price, gmgn_buy_amount,
                COALESCE(gmgn_buy_cost_usd, 0) as gmgn_buy_cost_usd,
+               COALESCE(sell_amt_usd, 0) as sell_amt_usd,
                is_cex, is_dex, is_contract, is_new_buyer,
                recent_48h_in, recent_48h_out
         FROM src.bubblemap_holders
@@ -196,6 +198,7 @@ def load_cost_holders(
             is_new_buyer=r["is_new_buyer"] or 0,
             recent_48h_in=r["recent_48h_in"] or 0,
             recent_48h_out=r["recent_48h_out"] or 0,
+            sell_amt_usd=r["sell_amt_usd"] or 0,
         ))
 
     return holders
@@ -227,6 +230,7 @@ def load_previous_cost_holders(
                buy_cnt, sell_cnt,
                gmgn_avg_price, gmgn_buy_amount,
                COALESCE(gmgn_buy_cost_usd, 0) as gmgn_buy_cost_usd,
+               COALESCE(sell_amt_usd, 0) as sell_amt_usd,
                is_cex, is_dex, is_contract, is_new_buyer,
                recent_48h_in, recent_48h_out
         FROM src.bubblemap_holders
@@ -250,6 +254,7 @@ def load_previous_cost_holders(
         is_new_buyer=r["is_new_buyer"] or 0,
         recent_48h_in=r["recent_48h_in"] or 0,
         recent_48h_out=r["recent_48h_out"] or 0,
+            sell_amt_usd=r["sell_amt_usd"] or 0,
     ) for r in rows]
 
 
