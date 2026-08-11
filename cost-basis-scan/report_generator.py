@@ -216,7 +216,7 @@ def _build_md(
     # ── 锁仓 Top 10 独立看板 (平行新增章节，独立于吸筹/出货/跃迁等信号大类，绝不进行任何替换或覆盖) ──
     lock_top10 = _fetch_global_lock_top10()
     if lock_top10:
-        lines.append("## 📊 本期活跃代币强锁仓 Top 10 (只买不卖/极低卖出汇总)")
+        lines.append("## 📊 本期活跃代币强锁仓 Top 10 (只买不卖/极低卖出汇总 - 项目方分发画像)")
         lines.append("")
         lines.append("> **统计口径**: 仅计算非 CEX/DEX/Contract/Supernode 且 `buy_amt_usd > 0` 的大户地址 (大户样本数 >= 3)，按只买不卖人数占比降序")
         lines.append("")
@@ -246,6 +246,42 @@ def _build_md(
                 f"{ob_dex_str} | {r['ob_dex_hp']:.2f}% | "
                 f"{ob_hop2_s_str} | {r['ob_hop2_s_hp']:.2f}% | "
                 f"{ob_hop2_d_str} | {r['ob_hop2_d_hp']:.2f}% |"
+            )
+        lines.append("")
+
+    # ── 真吸筹 Top 10 独立看板 ──
+    real_acc_top10 = _fetch_global_real_accumulation_top10()
+    if real_acc_top10:
+        lines.append("## 🎯 本期活跃代币真金白银强吸筹 Top 10 (DEX纯净买入/Hop2二级穿透汇总)")
+        lines.append("")
+        lines.append("> **统计口径**: 仅计算非 CEX/DEX/Contract/Supernode 且 `buy_amt_usd > 0` 的大户地址 (大户样本数 >= 3)，按 DEX>95%且保留>=95% 大户占比降序")
+        lines.append("")
+        lines.append("| 排名 | 代币 | 链 | 总大户数 | DEX>95%且保留>=95% (占比) | DEX>95%且保留>=95%持仓% | Hop2单验100% (占比) | Hop2单验100%持仓% | Hop2双验100% (占比) | Hop2双验100%持仓% | 只买不卖人数 (占比) | 只买不卖持仓% | 卖出<1%人数 (占比) | 卖出<1%持仓% | 卖出<3%人数 (占比) | 卖出<3%持仓% |")
+        lines.append("| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
+        for idx, r in enumerate(real_acc_top10):
+            rank = idx + 1
+            ob_pct = r["ob_pct"]
+            s1_pct = r["s1_pct"]
+            s3_pct = r["s3_pct"]
+            ob_dex_pct = r["ob_dex_pct"]
+            ob_hop2_s_pct = r["ob_hop2_s_pct"]
+            ob_hop2_d_pct = r["ob_hop2_d_pct"]
+            
+            ob_str = f"{r['ob_cnt']} ({ob_pct:.1f}%)"
+            s1_str = f"{r['s1_cnt']} ({s1_pct:.1f}%)"
+            s3_str = f"{r['s3_cnt']} ({s3_pct:.1f}%)"
+            ob_dex_str = f"{r['ob_dex_cnt']} ({ob_dex_pct:.1f}%)"
+            ob_hop2_s_str = f"{r['ob_hop2_s_cnt']} ({ob_hop2_s_pct:.1f}%)"
+            ob_hop2_d_str = f"{r['ob_hop2_d_cnt']} ({ob_hop2_d_pct:.1f}%)"
+            
+            lines.append(
+                f"| **No.{rank}** | {r['symbol']} | `{r['chain']}` | {r['total_acc']} | "
+                f"{ob_dex_str} | {r['ob_dex_hp']:.2f}% | "
+                f"{ob_hop2_s_str} | {r['ob_hop2_s_hp']:.2f}% | "
+                f"{ob_hop2_d_str} | {r['ob_hop2_d_hp']:.2f}% | "
+                f"{ob_str} | {r['ob_hp']:.2f}% | "
+                f"{s1_str} | {r['s1_hp']:.2f}% | "
+                f"{s3_str} | {r['s3_hp']:.2f}% |"
             )
         lines.append("")
 
@@ -281,6 +317,22 @@ def _build_md(
 
 
 def _fetch_global_lock_top10() -> list[dict]:
+    stats = _fetch_all_lock_stats()
+    if not stats:
+        return []
+    stats.sort(key=lambda x: (x["ob_pct"], x["total_acc"]), reverse=True)
+    return stats[:10]
+
+
+def _fetch_global_real_accumulation_top10() -> list[dict]:
+    stats = _fetch_all_lock_stats()
+    if not stats:
+        return []
+    stats.sort(key=lambda x: (x["ob_dex_pct"], x["total_acc"]), reverse=True)
+    return stats[:10]
+
+
+def _fetch_all_lock_stats() -> list[dict]:
     import sqlite3
     db_path = "/opt/select-coin/data/select.db"
     if not os.path.exists(db_path):
@@ -403,7 +455,6 @@ def _fetch_global_lock_top10() -> list[dict]:
                 "ob_hop2_d_hp": ob_hop2_d_hp
             })
         conn.close()
-        stats.sort(key=lambda x: (x["ob_pct"], x["total_acc"]), reverse=True)
-        return stats[:10]
+        return stats
     except Exception as e:
         return []
