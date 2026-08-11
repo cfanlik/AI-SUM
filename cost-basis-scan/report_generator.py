@@ -220,20 +220,32 @@ def _build_md(
         lines.append("")
         lines.append("> **统计口径**: 仅计算非 CEX/DEX/Contract/Supernode 且 `buy_amt_usd > 0` 的大户地址 (大户样本数 >= 3)，按只买不卖人数占比降序")
         lines.append("")
-        lines.append("| 排名 | 代币 | 链 | 总大户数 | 只买不卖人数 (占比) | 只买不卖持仓% | 卖出<1%人数 (占比) | 卖出<1%持仓% | 卖出<3%人数 (占比) | 卖出<3%持仓% |")
-        lines.append("| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
+        lines.append("| 排名 | 代币 | 链 | 总大户数 | 只买不卖人数 (占比) | 只买不卖持仓% | 卖出<1%人数 (占比) | 卖出<1%持仓% | 卖出<3%人数 (占比) | 卖出<3%持仓% | DEX>95%且保留>=95% (占比) | DEX>95%且保留>=95%持仓% | Hop2单验100% (占比) | Hop2单验100%持仓% | Hop2双验100% (占比) | Hop2双验100%持仓% |")
+        lines.append("| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
         for idx, r in enumerate(lock_top10):
             rank = idx + 1
             ob_pct = r["ob_pct"]
             s1_pct = r["s1_pct"]
             s3_pct = r["s3_pct"]
+            ob_dex_pct = r["ob_dex_pct"]
+            ob_hop2_s_pct = r["ob_hop2_s_pct"]
+            ob_hop2_d_pct = r["ob_hop2_d_pct"]
             
             ob_str = f"{r['ob_cnt']} ({ob_pct:.1f}%)"
             s1_str = f"{r['s1_cnt']} ({s1_pct:.1f}%)"
             s3_str = f"{r['s3_cnt']} ({s3_pct:.1f}%)"
+            ob_dex_str = f"{r['ob_dex_cnt']} ({ob_dex_pct:.1f}%)"
+            ob_hop2_s_str = f"{r['ob_hop2_s_cnt']} ({ob_hop2_s_pct:.1f}%)"
+            ob_hop2_d_str = f"{r['ob_hop2_d_cnt']} ({ob_hop2_d_pct:.1f}%)"
             
             lines.append(
-                f"| **No.{rank}** | {r['symbol']} | `{r['chain']}` | {r['total_acc']} | {ob_str} | {r['ob_hp']:.2f}% | {s1_str} | {r['s1_hp']:.2f}% | {s3_str} | {r['s3_hp']:.2f}% |"
+                f"| **No.{rank}** | {r['symbol']} | `{r['chain']}` | {r['total_acc']} | "
+                f"{ob_str} | {r['ob_hp']:.2f}% | "
+                f"{s1_str} | {r['s1_hp']:.2f}% | "
+                f"{s3_str} | {r['s3_hp']:.2f}% | "
+                f"{ob_dex_str} | {r['ob_dex_hp']:.2f}% | "
+                f"{ob_hop2_s_str} | {r['ob_hop2_s_hp']:.2f}% | "
+                f"{ob_hop2_d_str} | {r['ob_hop2_d_hp']:.2f}% |"
             )
         lines.append("")
 
@@ -296,7 +308,7 @@ def _fetch_global_lock_top10() -> list[dict]:
             max_time = res[0]
             
             cursor.execute("""
-                SELECT hold_percentage, buy_amt_usd, sell_amt_usd 
+                SELECT hold_percentage, buy_amt_usd, sell_amt_usd, dex_ratio, dex_ratio_hop2
                 FROM bubblemap_holders 
                 WHERE chain = ? AND token_address = ? AND snapshot_time = ?
                   AND is_cex = 0 AND is_dex = 0 AND is_contract = 0 AND is_supernode = 0 AND buy_amt_usd > 0;
@@ -312,11 +324,22 @@ def _fetch_global_lock_top10() -> list[dict]:
             s1_hp = 0.0
             s3_cnt = 0
             s3_hp = 0.0
+            
+            ob_dex_cnt = 0
+            ob_dex_hp = 0.0
+            ob_hop2_s_cnt = 0
+            ob_hop2_s_hp = 0.0
+            ob_hop2_d_cnt = 0
+            ob_hop2_d_hp = 0.0
+            
             for h in holders:
                 hold_pct = h[0] if h[0] is not None else 0.0
                 buy_amt = h[1]
                 sell_amt = h[2] if h[2] is not None else 0.0
+                dex_ratio = h[3] if h[3] is not None else 0.0
+                dex_ratio_hop2 = h[4] if h[4] is not None else 0.0
                 
+                # 常规只买不卖
                 if sell_amt == 0.0:
                     ob_cnt += 1
                     ob_hp += hold_pct
@@ -327,9 +350,32 @@ def _fetch_global_lock_top10() -> list[dict]:
                     s3_cnt += 1
                     s3_hp += hold_pct
                     
+                # 宽松只买不卖 (保留>=95%)
+                is_loose_zero_sell = (sell_amt <= buy_amt * 0.05)
+                
+                # DEX > 95% 且 保留 >= 95%
+                if is_loose_zero_sell and dex_ratio > 0.95:
+                    ob_dex_cnt += 1
+                    ob_dex_hp += hold_pct
+                    
+                # Hop2单验 100% 且 保留 >= 95%
+                if is_loose_zero_sell and dex_ratio_hop2 == 1.0:
+                    ob_hop2_s_cnt += 1
+                    ob_hop2_s_hp += hold_pct
+                    
+                # Hop2双验 100% 且 保留 >= 95%
+                if is_loose_zero_sell and dex_ratio == 1.0 and dex_ratio_hop2 == 1.0:
+                    ob_hop2_d_cnt += 1
+                    ob_hop2_d_hp += hold_pct
+                    
             ob_pct = (ob_cnt / total_acc) * 100
             s1_pct = (s1_cnt / total_acc) * 100
             s3_pct = (s3_cnt / total_acc) * 100
+            
+            ob_dex_pct = (ob_dex_cnt / total_acc) * 100
+            ob_hop2_s_pct = (ob_hop2_s_cnt / total_acc) * 100
+            ob_hop2_d_pct = (ob_hop2_d_cnt / total_acc) * 100
+            
             symbol = token_symbols.get((chain, token_addr), "UNKNOWN")
             
             stats.append({
@@ -345,7 +391,16 @@ def _fetch_global_lock_top10() -> list[dict]:
                 "s1_hp": s1_hp,
                 "s3_cnt": s3_cnt,
                 "s3_pct": s3_pct,
-                "s3_hp": s3_hp
+                "s3_hp": s3_hp,
+                "ob_dex_cnt": ob_dex_cnt,
+                "ob_dex_pct": ob_dex_pct,
+                "ob_dex_hp": ob_dex_hp,
+                "ob_hop2_s_cnt": ob_hop2_s_cnt,
+                "ob_hop2_s_pct": ob_hop2_s_pct,
+                "ob_hop2_s_hp": ob_hop2_s_hp,
+                "ob_hop2_d_cnt": ob_hop2_d_cnt,
+                "ob_hop2_d_pct": ob_hop2_d_pct,
+                "ob_hop2_d_hp": ob_hop2_d_hp
             })
         conn.close()
         stats.sort(key=lambda x: (x["ob_pct"], x["total_acc"]), reverse=True)
