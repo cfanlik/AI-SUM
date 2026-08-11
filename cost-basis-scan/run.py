@@ -97,39 +97,6 @@ def scan_single(
         token_symbol=token_symbol,
     )
 
-    # ─── 锁仓聚合计算 ───
-    eoa_holders = [h for h in holders if h.is_cex == 0 and h.is_dex == 0 and h.is_contract == 0]
-    total_acc = len(eoa_holders)
-    ob_cnt = 0
-    ob_hp = 0.0
-    s1_cnt = 0
-    s1_hp = 0.0
-    s3_cnt = 0
-    s3_hp = 0.0
-    for h in eoa_holders:
-        buy_amt = h.gmgn_buy_cost_usd
-        sell_amt = h.sell_amt_usd
-        hold_pct = h.hold_percentage
-        if sell_amt == 0.0 and buy_amt > 0:
-            ob_cnt += 1
-            ob_hp += hold_pct
-        if sell_amt < buy_amt * 0.01 and buy_amt > 0:
-            s1_cnt += 1
-            s1_hp += hold_pct
-        if sell_amt < buy_amt * 0.03 and buy_amt > 0:
-            s3_cnt += 1
-            s3_hp += hold_pct
-    
-    vr.only_buy_cnt = ob_cnt
-    vr.only_buy_pct = (ob_cnt / total_acc * 100) if total_acc > 0 else 0.0
-    vr.only_buy_hold_pct = ob_hp
-    vr.sell_under_1_cnt = s1_cnt
-    vr.sell_under_1_pct = (s1_cnt / total_acc * 100) if total_acc > 0 else 0.0
-    vr.sell_under_1_hold_pct = s1_hp
-    vr.sell_under_3_cnt = s3_cnt
-    vr.sell_under_3_pct = (s3_cnt / total_acc * 100) if total_acc > 0 else 0.0
-    vr.sell_under_3_hold_pct = s3_hp
-
     # 8. 保存到 select-sum.db
     db_loader.save_scan_result(conn, {
         "chain": chain,

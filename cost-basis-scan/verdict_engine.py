@@ -57,15 +57,6 @@ class VerdictResult:
 
     # watchlist
     watchlist_ref: str = ""
-    only_buy_cnt: int = 0
-    only_buy_pct: float = 0.0
-    only_buy_hold_pct: float = 0.0
-    sell_under_1_cnt: int = 0
-    sell_under_1_pct: float = 0.0
-    sell_under_1_hold_pct: float = 0.0
-    sell_under_3_cnt: int = 0
-    sell_under_3_pct: float = 0.0
-    sell_under_3_hold_pct: float = 0.0
 
     # Gecko 补充
     lp_usd: float = 0.0

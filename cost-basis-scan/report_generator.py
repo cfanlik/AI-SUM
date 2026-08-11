@@ -125,32 +125,7 @@ def _build_md(
         "",
     ]
 
-    # ── 锁仓 Top 10 独立看板 ──
-    lock_candidates = [r for r in results if r.cost_holders_count >= 3]
-    lock_candidates.sort(key=lambda r: (getattr(r, 'only_buy_pct', 0.0), r.cost_holders_count), reverse=True)
-    lock_top10 = lock_candidates[:10]
-    
-    if lock_top10:
-        lines.append("## 📊 本期活跃代币强锁仓 Top 10 (只买不卖/极低卖出汇总)")
-        lines.append("")
-        lines.append("> **统计口径**: 仅计算非 CEX/DEX/Contract 且 `buy_amt_usd > 0` 的大户地址 (大户样本数 >= 3)，按只买不卖人数占比降序")
-        lines.append("")
-        lines.append("| 排名 | 代币 | 链 | 总大户数 | 只买不卖人数 (占比) | 只买不卖持仓% | 卖出<1%人数 (占比) | 卖出<1%持仓% | 卖出<3%人数 (占比) | 卖出<3%持仓% |")
-        lines.append("| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
-        for idx, r in enumerate(lock_top10):
-            rank = idx + 1
-            ob_pct = getattr(r, 'only_buy_pct', 0.0)
-            s1_pct = getattr(r, 'sell_under_1_pct', 0.0)
-            s3_pct = getattr(r, 'sell_under_3_pct', 0.0)
-            
-            ob_str = f"{getattr(r, 'only_buy_cnt', 0)} ({ob_pct:.1f}%)"
-            s1_str = f"{getattr(r, 'sell_under_1_cnt', 0)} ({s1_pct:.1f}%)"
-            s3_str = f"{getattr(r, 'sell_under_3_cnt', 0)} ({s3_pct:.1f}%)"
-            
-            lines.append(
-                f"| **No.{rank}** | {r.token_symbol} | `{r.chain}` | {r.cost_holders_count} | {ob_str} | {getattr(r, 'only_buy_hold_pct', 0.0):.2f}% | {s1_str} | {getattr(r, 'sell_under_1_hold_pct', 0.0):.2f}% | {s3_str} | {getattr(r, 'sell_under_3_hold_pct', 0.0):.2f}% |"
-            )
-        lines.append("")
+
 
     # ── 状态跃迁 ──
     if transition_list:
@@ -238,6 +213,30 @@ def _build_md(
             )
         lines.append("")
 
+    # ── 锁仓 Top 10 独立看板 (追加在底部的新增章节) ──
+    lock_top10 = _fetch_global_lock_top10()
+    if lock_top10:
+        lines.append("## 📊 本期活跃代币强锁仓 Top 10 (只买不卖/极低卖出汇总)")
+        lines.append("")
+        lines.append("> **统计口径**: 仅计算非 CEX/DEX/Contract/Supernode 且 `buy_amt_usd > 0` 的大户地址 (大户样本数 >= 3)，按只买不卖人数占比降序")
+        lines.append("")
+        lines.append("| 排名 | 代币 | 链 | 总大户数 | 只买不卖人数 (占比) | 只买不卖持仓% | 卖出<1%人数 (占比) | 卖出<1%持仓% | 卖出<3%人数 (占比) | 卖出<3%持仓% |")
+        lines.append("| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
+        for idx, r in enumerate(lock_top10):
+            rank = idx + 1
+            ob_pct = r["ob_pct"]
+            s1_pct = r["s1_pct"]
+            s3_pct = r["s3_pct"]
+            
+            ob_str = f"{r['ob_cnt']} ({ob_pct:.1f}%)"
+            s1_str = f"{r['s1_cnt']} ({s1_pct:.1f}%)"
+            s3_str = f"{r['s3_cnt']} ({s3_pct:.1f}%)"
+            
+            lines.append(
+                f"| **No.{rank}** | {r['symbol']} | `{r['chain']}` | {r['total_acc']} | {ob_str} | {r['ob_hp']:.2f}% | {s1_str} | {r['s1_hp']:.2f}% | {s3_str} | {r['s3_hp']:.2f}% |"
+            )
+        lines.append("")
+
     # ── 对比机制说明 ──
     lines.append("---")
     lines.append("")
@@ -267,3 +266,89 @@ def _build_md(
     lines.append(f"*生成时间: {datetime.now().isoformat()}*")
 
     return "\n".join(lines)
+
+
+def _fetch_global_lock_top10() -> list[dict]:
+    import sqlite3
+    db_path = "/opt/select-coin/data/select.db"
+    if not os.path.exists(db_path):
+        return []
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        # 1. Fetch active tokens
+        cursor.execute("SELECT DISTINCT chain, token_address FROM token_scores;")
+        candidates = cursor.fetchall()
+        
+        # 2. Fetch symbol mapping
+        cursor.execute("SELECT chain, token_address, symbol FROM token_names;")
+        token_symbols = {(r[0], r[1]): r[2] for r in cursor.fetchall()}
+        
+        stats = []
+        for c in candidates:
+            chain, token_addr = c[0], c[1]
+            
+            cursor.execute("SELECT MAX(snapshot_time) FROM bubblemap_holders WHERE chain = ? AND token_address = ?;", (chain, token_addr))
+            res = cursor.fetchone()
+            if not res or res[0] is None:
+                continue
+            max_time = res[0]
+            
+            cursor.execute("""
+                SELECT hold_percentage, buy_amt_usd, sell_amt_usd 
+                FROM bubblemap_holders 
+                WHERE chain = ? AND token_address = ? AND snapshot_time = ?
+                  AND is_cex = 0 AND is_dex = 0 AND is_contract = 0 AND is_supernode = 0 AND buy_amt_usd > 0;
+            """, (chain, token_addr, max_time))
+            holders = cursor.fetchall()
+            total_acc = len(holders)
+            if total_acc < 3:
+                continue
+                
+            ob_cnt = 0
+            ob_hp = 0.0
+            s1_cnt = 0
+            s1_hp = 0.0
+            s3_cnt = 0
+            s3_hp = 0.0
+            for h in holders:
+                hold_pct = h[0] if h[0] is not None else 0.0
+                buy_amt = h[1]
+                sell_amt = h[2] if h[2] is not None else 0.0
+                
+                if sell_amt == 0.0:
+                    ob_cnt += 1
+                    ob_hp += hold_pct
+                if sell_amt < buy_amt * 0.01:
+                    s1_cnt += 1
+                    s1_hp += hold_pct
+                if sell_amt < buy_amt * 0.03:
+                    s3_cnt += 1
+                    s3_hp += hold_pct
+                    
+            ob_pct = (ob_cnt / total_acc) * 100
+            s1_pct = (s1_cnt / total_acc) * 100
+            s3_pct = (s3_cnt / total_acc) * 100
+            symbol = token_symbols.get((chain, token_addr), "UNKNOWN")
+            
+            stats.append({
+                "chain": chain,
+                "token_address": token_addr,
+                "symbol": symbol,
+                "total_acc": total_acc,
+                "ob_cnt": ob_cnt,
+                "ob_pct": ob_pct,
+                "ob_hp": ob_hp,
+                "s1_cnt": s1_cnt,
+                "s1_pct": s1_pct,
+                "s1_hp": s1_hp,
+                "s3_cnt": s3_cnt,
+                "s3_pct": s3_pct,
+                "s3_hp": s3_hp
+            })
+        conn.close()
+        stats.sort(key=lambda x: (x["ob_pct"], x["total_acc"]), reverse=True)
+        return stats[:10]
+    except Exception as e:
+        return []
