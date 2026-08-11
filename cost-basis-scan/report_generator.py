@@ -81,7 +81,10 @@ def generate_report(
     report_dir = Path(config.REPORT_DIR)
     report_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M")
-    report_path = report_dir / f"cb_{ts}.md"
+    if len(results) == 1:
+        report_path = report_dir / "cb_diag.md"
+    else:
+        report_path = report_dir / f"cb_{ts}.md"
     report_path.write_text(md, encoding="utf-8")
     print(f"\n📄 报告: {report_path}")
 
