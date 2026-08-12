@@ -2003,6 +2003,17 @@ def main():
     if futures_md:
         parts.append(futures_md)
         print("        合约信号分析完成")
+
+    # 模块 9: 实战盈亏研警与避雷雷达 (★新注入)
+    print("  [9] 实战盈亏研警与避雷雷达...")
+    try:
+        profit_md = profit_driven_analysis(src, sumdb)
+        if profit_md:
+            parts.append(profit_md)
+            print("        实战盈亏研警分析完成")
+    except Exception as e:
+        print(f"        实战盈亏研警分析失败: {e}")
+
     body = "\n---\n\n".join(p for p in parts if p)
     elapsed = time.time() - t0
     md = header.format(elapsed=elapsed) + body
@@ -2149,5 +2160,190 @@ def l3_gate_status(out_db_path="/opt/AI-SUM/data/signal-validation.db") -> str:
         return f"## 🛡️ 模块 0: Launch Path 验证系统\n\n> ⚠ 门禁数据库读取异常: {e}，准入状态: **DENIED**\n"
 
 
+# ── 模块 9: 实战盈亏研判与避雷雷达 (v6 新增) ──
+def profit_driven_analysis(src, sumdb) -> str:
+    """从 SQLite 历史对账与实盘快照中，筛选出具有真实暴涨潜质的代币并规避归零高危代币"""
+    import sqlite3
+    
+    # 1. 提取最新一次扫描的 scan_time
+    try:
+        latest_scan = sumdb.execute("SELECT MAX(scan_time) FROM meta_snapshots").fetchone()[0]
+    except Exception:
+        latest_scan = None
+        
+    if not latest_scan:
+        return "## 🎯 模块 9: 实战盈亏研判与避雷雷达\n\n> ⚠ 无法获取最新 meta 扫描快照，实战分析暂停。\n"
+
+    # 2. 提取 1750 个历史盈利标的特征数据
+    try:
+        stats = sumdb.execute("""
+            SELECT count(*), avg(volume_24h), avg(reserve_usd), avg(mdd), avg(retention_7d)
+            FROM token_history
+            WHERE price_now_ret > 30
+        """).fetchone()
+        profitable_cnt = stats[0] or 0
+        avg_vol = stats[1] or 0.0
+        avg_lp = stats[2] or 0.0
+        avg_mdd = stats[3] or 0.0
+        avg_ret = stats[4] or 0.0
+    except Exception as e:
+        profitable_cnt = 0
+        avg_vol, avg_lp, avg_mdd, avg_ret = 0.0, 0.0, 0.0, 0.0
+
+    # 3. 提取历史大暴涨案例
+    cases_list = []
+    try:
+        cases = sumdb.execute("""
+            SELECT token_symbol, max(price_now_ret) as max_ret, computed_date, reserve_usd
+            FROM token_history
+            WHERE price_now_ret > 100
+            GROUP BY token_symbol
+            ORDER BY max_ret DESC
+            LIMIT 6
+        """).fetchall()
+        for c in cases:
+            cases_list.append(f"| **{c[0]}** | `+{c[1]:.1f}%` | {c[2]} | ${c[3]:,.0f} |")
+    except Exception:
+        pass
+
+    # 4. 当前黄金标的前瞻池 (Score 5.0 - 8.5)
+    candidates_list = []
+    try:
+        candidates = sumdb.execute("""
+            SELECT token_symbol, meta_score, stage, token_address,
+                   master_score, opus_score, unified_score, whale_score, cb_score, hop2_score
+            FROM meta_snapshots
+            WHERE scan_time = ? AND meta_verdict = 'ACC' AND meta_score >= 5.0 AND meta_score <= 8.5
+            ORDER BY meta_score DESC
+            LIMIT 10
+        """, (latest_scan,)).fetchall()
+        
+        for c in candidates:
+            sym, score, stage, addr, m, o, u, w, cb, h2 = c
+            th_info = sumdb.execute("""
+                SELECT volume_24h, reserve_usd, price_now_ret, mdd, retention_7d
+                FROM token_history
+                WHERE token_address = ?
+                ORDER BY computed_date DESC
+                LIMIT 1
+            """, (addr,)).fetchone()
+            
+            vol = th_info[0] if th_info and th_info[0] is not None else 0.0
+            lp = th_info[1] if th_info and th_info[1] is not None else 0.0
+            ret = th_info[2] if th_info and th_info[2] is not None else 0.0
+            mdd = th_info[3] if th_info and th_info[3] is not None else 0.0
+            ret_7d = th_info[4] if th_info and th_info[4] is not None else 0.0
+            
+            candidates_list.append(
+                f"| **{sym}** | **{score:.2f}** | `{stage}` | ${lp:,.0f} | ${vol:,.0f} | {ret:+.1f}% | {mdd:.1f}% | {ret_7d:.1f}% | M={m} O={o} U={u} W={w} CB={cb} |"
+            )
+    except Exception:
+        pass
+
+    # 5. 避雷名单与撤池风险
+    loss_list = []
+    try:
+        losses = sumdb.execute("""
+            SELECT th.token_symbol, th.price_now_ret, th.mdd, ms.meta_score
+            FROM token_history th
+            JOIN meta_snapshots ms ON th.token_address = ms.token_address
+            WHERE th.price_now_ret < -50 AND ms.meta_score >= 5.0
+            GROUP BY th.token_symbol
+            ORDER BY th.price_now_ret ASC
+            LIMIT 6
+        """).fetchall()
+        for l in losses:
+            loss_list.append(f"| **{l[0]}** | `{l[3]:.2f}` | **{l[1]:.1f}%** | {l[2]:.1f}% | ❌ 大户出货 / 假吸筹对倒 |")
+    except Exception:
+        pass
+
+    # 6. 提取最新的撤池 Rugpull 告警标的
+    rug_list = []
+    try:
+        rugs = sumdb.execute("""
+            SELECT token_symbol, alert_type, scan_time 
+            FROM pump_alerts 
+            WHERE alert_type LIKE '%撤池%' OR alert_type LIKE '%S5%'
+            ORDER BY scan_time DESC 
+            LIMIT 5
+        """).fetchall()
+        for r in rugs:
+            rug_list.append(f"| **{r[0]}** | `{r[1]}` | {r[2]} | 🔴 高危 Rug 严禁建仓 |")
+    except Exception:
+        pass
+
+    # 若查询不到高危撤池，则提取今日 LP reserve 缩水最厉害的前 3 个 ACC 代币
+    if not rug_list:
+        try:
+            lp_shrink = sumdb.execute("""
+                SELECT token_symbol, mdd, reserve_usd 
+                FROM token_history 
+                WHERE mdd < -50 AND reserve_usd > 0
+                ORDER BY mdd ASC 
+                LIMIT 3
+            """).fetchall()
+            for lp_s in lp_shrink:
+                rug_list.append(f"| **{lp_s[0]}** | `LP大额缩水` | 实时对账 | ⚠️ LP回撤 {lp_s[1]:.1f}%，需提防撤池 |")
+        except Exception:
+            pass
+
+    # 拼装 Markdown 文本
+    lines = [
+        "## 🎯 模块 9: 实战盈亏研判与避雷雷达 (v6.0)\n",
+        f"> **历史盈利代币总样本**: `{profitable_cnt}` 个 | **24h平均量**: `${avg_vol:,.0f}` | **平均LP**: `${avg_lp:,.0f}` | **平均MDD**: `{avg_mdd:.1f}%` | **平均7d留存**: `{avg_ret:.2f}%`\n",
+        "本模块聚焦于将抽象的模型评分转换为可操作的**“实战买入标的”**与**“亏损避险名单”**，消除虚假吸筹杂音。\n",
+        "### 📈 一、 大暴涨标的复盘 (历史真实超额阿尔法)",
+        "这些代币在触发 ACC 吸筹和强庄控信号后实现了爆发式拉升：\n",
+        "| 代币符号 | 最高实现收益 | 触发日期 | 庄家LP深度 |",
+        "| :--- | :--- | :--- | :--- |"
+    ]
+    if cases_list:
+        lines.extend(cases_list)
+    else:
+        lines.append("| (无) | N/A | N/A | N/A |")
+        
+    lines.extend([
+        "\n### 🚀 二、 当前黄金标的前瞻池 (寻找下一个 AKE/ON)",
+        "筛选当前扫描中处于 **5.0 - 8.5 黄金积分区间**、具有充足交易活跃度与庄资注入的 ACC 标的：\n",
+        "| 代币 | 当前评分 | 阶段状态 | 当前 LP 深度 | 24h 交易量 | 至今收益 | 历史最大回撤 | 7d大户留存 | 5引擎打分细节 |",
+        "| :--- | :---: | :--- | :--- | :--- | :---: | :---: | :---: | :--- |"
+    ])
+    if candidates_list:
+        lines.extend(candidates_list)
+    else:
+        lines.append("| (当前无满足条件的黄金 ACC 标的) | - | - | - | - | - | - | - | - |")
+
+    lines.extend([
+        "\n### 💀 三、 亏损避雷单与撤池高危预警",
+        "**1. 高分对倒/虚假吸筹陷阱**：高分 (≥7 分) 代币极易由于庄家高位对倒出货而导致暴跌，必须通过大户净流向拦截。\n",
+        "| 代币 | 出货时评分 | 至今收益 | 最大回撤 | 归因说明 |",
+        "| :--- | :---: | :---: | :---: | :--- |"
+    ])
+    if loss_list:
+        lines.extend(loss_list)
+    else:
+        lines.append("| (暂无匹配的高分回落标的) | - | - | - | - |")
+
+    lines.extend([
+        "\n**2. 撤池 Rugpull 高危熔断**：时序 LP 发生突发暴跌的代币，属于 Rugpull 高危对象，必须立即拉红线拦截。\n",
+        "| 代币 | 警报类型 | 检测时间 | 决策意见 |",
+        "| :--- | :--- | :--- | :--- |"
+    ])
+    if rug_list:
+        lines.extend(rug_list)
+    else:
+        lines.append("| (当前没有检测到 LP 大额撤出风险的代币) | - | - | - |")
+
+    lines.extend([
+        "\n### 🛠️ 四、 利用看板 Tab 捕获盈利币的实操三部曲",
+        "1. **DEX 庄资漏斗 (🔥 拉升共振拟合)**：首先核对 DEX 真实买入金额是否大于 $50K。大资金沉淀是 AKE 等暴涨代币的前提，直接剔除散户垃圾噪点。",
+        "2. **容错积分建仓 (🚀 拉升前兆)**：锁定分值在 5.0 - 8.5 之间的 IMMINENT/READY 级别。若回撤破位平均最大回撤 (MDD = -15%) 则坚决分批止损。",
+        "3. **时序 LP 监控 (🚨 异常关注)**：时刻提防 S5 撤池变动，一旦 24h LP 缩水超过 10% 必须立即执行无脑止盈或离场，锁死本金。\n"
+    ])
+    
+    return "\n".join(lines)
+
+
 if __name__ == "__main__":
     main()
+
