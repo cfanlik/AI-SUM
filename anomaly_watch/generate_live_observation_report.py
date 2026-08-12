@@ -361,7 +361,7 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
         
         if (as_of_dt - a_dt).total_seconds() >= 259200:
             target_time_3d = (a_dt + timedelta(days=3)).isoformat(sep=" ")
-            window_end_3d = (a_dt + timedelta(days=3, hours=4)).isoformat(sep=" ")
+            window_end_3d = (a_dt + timedelta(days=3, hours=24)).isoformat(sep=" ")
             
             exit_market_3d = select_conn.execute(
                 """SELECT price_usd FROM gecko_market_data
@@ -388,7 +388,7 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
         
         if (as_of_dt - a_dt).total_seconds() >= 604800:
             target_time_7d = (a_dt + timedelta(days=7)).isoformat(sep=" ")
-            window_end_7d = (a_dt + timedelta(days=7, hours=4)).isoformat(sep=" ")
+            window_end_7d = (a_dt + timedelta(days=7, hours=24)).isoformat(sep=" ")
             
             exit_market_7d = select_conn.execute(
                 """SELECT price_usd FROM gecko_market_data
