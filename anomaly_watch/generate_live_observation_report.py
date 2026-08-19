@@ -5,6 +5,12 @@ import os
 import hashlib
 import sys
 import argparse
+
+# 动态确保项目根目录位于 sys.path 顶部
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
 from datetime import datetime, timedelta, timezone
 from statistics import median
 from typing import Dict, List, Optional, Any
