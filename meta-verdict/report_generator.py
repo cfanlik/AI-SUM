@@ -141,6 +141,47 @@ def _build_md(
         "",
     ]
 
+    # ── 0. 置信度梯队与旗舰信号第一屏概览 ──
+    tier_counts = {"L1-Alpha": 0, "L1-Special": 0, "L1-Alpha-Unverified": 0, "L2-Bet": 0, "L3-Watch": 0, "DENIED": 0}
+    for r in acc_list + dist_list:
+        t = getattr(r, "confidence_tier", "L3-Watch")
+        tier_counts[t] = tier_counts.get(t, 0) + 1
+
+    l1_alphas = [r for r in acc_list if getattr(r, "confidence_tier", "") in ("L1-Alpha", "L1-Special", "L1-Alpha-Unverified")]
+    
+    lines += [
+        "## 💎 置信度等级与共振概览 (v2.2)",
+        "",
+        f"> **L1-Alpha (旗舰共振)**: `{tier_counts.get('L1-Alpha', 0)}` | "
+        f"**L1-Special (特异博弈)**: `{tier_counts.get('L1-Special', 0)}` | "
+        f"**L1-Unverified (新币共振)**: `{tier_counts.get('L1-Alpha-Unverified', 0)}` | "
+        f"**L2-Bet**: `{tier_counts.get('L2-Bet', 0)}` | "
+        f"**L3-Watch**: `{tier_counts.get('L3-Watch', 0)}`",
+        ""
+    ]
+
+    if l1_alphas:
+        lines += [
+            "### 🚀 L1 级核心聚焦标的",
+            "",
+            "| 代币 | 梯队 | 综合分 | 共振 | 抗跌韧性(Norm) | 现价 | 核心特征 |",
+            "|------|------|--------|------|----------------|------|----------|",
+        ]
+        for r in l1_alphas[:10]:
+            star = " ⭐5" if r.engine_hits >= 5 else ""
+            res_norm = f"{r.resilience_norm:.2f}" if getattr(r, "resilience_norm", None) is not None else "—"
+            feat = []
+            if getattr(r, "confidence_tier", "") == "L1-Special":
+                feat.append("⚡特异形态")
+            if r.cb_verdict in ("DEATH_SPIRAL", "SQUEEZE_ACC_HIGH"):
+                feat.append("脱水反转")
+            feat_str = " / ".join(feat) if feat else "强共振吸筹"
+            lines.append(
+                f"| **{r.token_symbol}** | `{r.confidence_tier}` | **{r.meta_score:.1f}** | {r.engine_hits}{star} "
+                f"| {res_norm} | ${format_price(r.cb_gecko_price)} | {feat_str} |"
+            )
+        lines += ["", "---", ""]
+
     # ── 1. 引擎健康 ──
     if health:
         lines += [
@@ -211,9 +252,9 @@ def _build_md(
     if acc_list:
         lines.append(f"## 🎯 吸筹排行 — {len(acc_list)} 个")
         lines.append("")
-        # 带 Δ 列
-        lines.append("| # | 代币 | 综合分 | Δ | 阶段 | master | opus | unified | whale | CB判定 | 现价 | 引擎数 |")
-        lines.append("|---|------|--------|---|------|--------|------|---------|-------|--------|------|--------|")
+        # 带置信度与抗跌韧性
+        lines.append("| # | 代币 | 置信度 | 综合分 | Δ | 阶段 | master | opus | unified | whale | CB判定 | 现价 | 共振 | 韧性 |")
+        lines.append("|---|------|--------|--------|---|------|--------|------|---------|-------|--------|------|------|------|")
 
         prev_delta = {}
         if trend and trend.has_prev:
@@ -228,11 +269,13 @@ def _build_md(
                 delta_str = "🆕"
             else:
                 delta_str = ""
+            star = "★5" if r.engine_hits >= 5 else str(r.engine_hits)
+            res_norm = f"{r.resilience_norm:.2f}" if getattr(r, "resilience_norm", None) is not None else "—"
             lines.append(
-                f"| {i} | {r.token_symbol} | **{r.meta_score:.1f}** | {delta_str} "
+                f"| {i} | {r.token_symbol} | `{getattr(r, 'confidence_tier', 'L3-Watch')}` | **{r.meta_score:.1f}** | {delta_str} "
                 f"| {STAGE_LABEL.get(r.stage, r.stage)} "
                 f"| {r.master_signal} | {r.opus_score:.1f} | {r.unified_signal} | {r.whale_level} "
-                f"| {r.cb_verdict} | ${format_price(r.cb_gecko_price)} | {r.engine_hits} |"
+                f"| {r.cb_verdict} | ${format_price(r.cb_gecko_price)} | {star} | {res_norm} |"
             )
         lines.append("")
 

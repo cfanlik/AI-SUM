@@ -3,6 +3,7 @@ meta-verdict 仲裁引擎
 5 引擎投票 → 加权积分 → 统一排名 + 生命周期状态机
 """
 from __future__ import annotations
+import math
 from dataclasses import dataclass, field
 import config
 import sqlite3
@@ -43,8 +44,22 @@ class MetaResult:
     cb_dist_pct:    float = 0.0
     cb_signals:     str   = ""
 
-    # 生命周期
+    # 生命周期与置信度梯队 (完全独立隔离)
     stage: str = ""   # ACCUMULATING / CONTROLLED / DISTRIBUTING / WATCHLIST / NEUTRAL
+    confidence_tier: str = "L3-Watch"   # L1-Alpha / L1-Special / L1-Alpha-Unverified / L2-Bet / L3-Watch / DENIED
+    resilience_index: float = 0.0       # 历史抗跌韧性原始分
+    resilience_norm: float = 0.5        # Sigmoid [0, 1] 稳健平滑分
+
+
+def calculate_resilience_norm(raw_val: float | None) -> float | None:
+    """Sigmoid 稳健归一化，消除离群极值影响，映射至 [0.0, 1.0]"""
+    if raw_val is None:
+        return None
+    try:
+        clipped = max(-2000.0, min(2000.0, float(raw_val)))
+        return round(1.0 / (1.0 + math.exp(-clipped / 200.0)), 4)
+    except Exception:
+        return 0.5
 
 
 def get_prev_consec_acc(conn: sqlite3.Connection, chain: str, token_address: str) -> int:
@@ -96,7 +111,7 @@ def _check_oscillation_suppression(conn: sqlite3.Connection, chain: str, token_a
 
 
 def arbitrate(data: TokenEngineData, hop2_pct: float = 0.0, conn: sqlite3.Connection = None, scan_time: str = None) -> MetaResult:
-    """5 引擎加权积分仲裁"""
+    """5 引擎加权积分仲裁与置信度门禁"""
     r = MetaResult(
         chain=data.chain,
         token_address=data.token_address,
@@ -115,7 +130,7 @@ def arbitrate(data: TokenEngineData, hop2_pct: float = 0.0, conn: sqlite3.Connec
         cb_signals=data.cb_signals,
     )
 
-    # ── Volume & LP Guard 绝对流动性门控 (一刀切退化死币) ──
+    # ── Volume & LP Guard 绝对流动性门控 (一刀切退化死币，阈值提升至 $50,000) ──
     volume_24h = 100000.0
     reserve_usd = 100000.0
     try:
@@ -132,7 +147,43 @@ def arbitrate(data: TokenEngineData, hop2_pct: float = 0.0, conn: sqlite3.Connec
     except Exception:
         pass
 
-    is_liquidity_dead = (volume_24h < 1000.0 or reserve_usd < 10000.0)
+    is_liquidity_dead = (volume_24h < 1000.0 or reserve_usd < 50000.0)
+
+    # ── 数据链路：从 token_history 查询最新抗跌韧性指标 ──
+    resilience_raw = None
+    if conn is not None:
+        try:
+            row = conn.execute(
+                "SELECT resilience_index FROM token_history WHERE LOWER(token_address) = ? ORDER BY computed_date DESC LIMIT 1",
+                (data.token_address.lower(),)
+            ).fetchone()
+            if row and row[0] is not None:
+                resilience_raw = float(row[0])
+        except Exception:
+            pass
+
+    resilience_norm = calculate_resilience_norm(resilience_raw)
+    r.resilience_index = resilience_raw or 0.0
+    r.resilience_norm = resilience_norm if resilience_norm is not None else 0.5
+
+    # ── 三级置信度决策状态机 (confidence_tier 判定) ──
+    is_squeeze = bool(data.cb_signals and "SQUEEZE" in data.cb_signals)
+    if is_liquidity_dead:
+        r.confidence_tier = "DENIED"
+    elif data.engine_hits >= 4:
+        if resilience_norm is None:
+            r.confidence_tier = "L1-Alpha-Unverified"
+        elif resilience_norm >= 0.60:
+            r.confidence_tier = "L1-Alpha"
+        else:
+            r.confidence_tier = "L2-Bet"
+    elif data.engine_hits >= 3 and (is_squeeze or data.cb_verdict in ("DEATH_SPIRAL", "SQUEEZE_ACC_HIGH")):
+        r.confidence_tier = "L1-Special"
+    elif data.engine_hits >= 3:
+        r.confidence_tier = "L2-Bet"
+    else:
+        r.confidence_tier = "L3-Watch"
+
     if is_liquidity_dead:
         r.meta_score = 0.0
         r.meta_score_smooth = 0.0
