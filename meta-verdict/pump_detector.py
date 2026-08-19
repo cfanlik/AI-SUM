@@ -408,24 +408,24 @@ def calc_pump_readiness(src, sumdb, token_address, token_symbol, scan_time):
             elif oi_chg >= -0.05:
                 d7_score = 2
 
-        # D8 FR (7分)
-        # 优化：修正语义不自洽。fr <= 0 才计分，正资金费率得分归零
+        # D8 FR (满分 12分 - 高拟合度资金流指标)
+        # 优化：修正语义不自洽。fr <= 0 才计分，负费率深度轧空计满分
         if fr <= -0.0003:
-            d8_score = 7
+            d8_score = 12
         elif fr <= -0.0001:
-            d8_score = 5
+            d8_score = 8
         elif fr <= 0:
-            d8_score = 3
+            d8_score = 4
         else:
             d8_score = 0
 
-        # D9 L/S (5分)
+        # D9 L/S (满分 10分 - 高拟合度异动多空比指标)
         if ls <= 0.6:
-            d9_score = 5
+            d9_score = 10
         elif ls <= 0.9:
-            d9_score = 3
+            d9_score = 6
         elif ls <= 1.2:
-            d9_score = 2
+            d9_score = 3
 
     # D10 Pool 稳定性 (8分)
     d10_score, lp_vol_pct, _, d10_txns = get_pool_stability_score(src, token_address, scan_time)

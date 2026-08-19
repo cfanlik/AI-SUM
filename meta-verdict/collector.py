@@ -354,6 +354,9 @@ def save_meta_result(conn: sqlite3.Connection, result: dict):
             whale_level    TEXT DEFAULT '',
             cb_verdict     TEXT DEFAULT '',
             stage          TEXT DEFAULT '',
+            confidence_tier TEXT DEFAULT 'L3-Watch',
+            resilience_index REAL DEFAULT 0,
+            resilience_norm  REAL DEFAULT 0.5,
             master_score   REAL DEFAULT 0,
             opus_score     REAL DEFAULT 0,
             unified_score  REAL DEFAULT 0,
@@ -363,20 +366,28 @@ def save_meta_result(conn: sqlite3.Connection, result: dict):
             UNIQUE(chain, token_address, scan_time)
         )
     """)
-    # 防御性 Alter 数据库增加 smoothed 分数物理字段，防老表崩溃
-    try:
-        conn.execute("ALTER TABLE meta_snapshots ADD COLUMN meta_score_smooth REAL DEFAULT 0")
-    except Exception:
-        pass
+    # 防御性 Alter 数据库增加新增字段，防老表崩溃
+    for col, typedef in [
+        ("meta_score_smooth", "REAL DEFAULT 0"),
+        ("resilience_index", "REAL DEFAULT 0"),
+        ("resilience_norm", "REAL DEFAULT 0.5"),
+        ("confidence_tier", "TEXT DEFAULT 'L3-Watch'")
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE meta_snapshots ADD COLUMN {col} {typedef}")
+        except Exception:
+            pass
         
     conn.execute("""
         INSERT OR REPLACE INTO meta_snapshots
         (scan_time, chain, token_address, token_symbol, meta_score, meta_score_smooth, meta_verdict,
          engine_hits, master_signal, opus_verdict, unified_signal, whale_level, cb_verdict, stage,
+         confidence_tier, resilience_index, resilience_norm,
          master_score, opus_score, unified_score, whale_score, cb_score, hop2_score)
         VALUES (:scan_time, :chain, :token_address, :token_symbol, :meta_score, :meta_score_smooth, :meta_verdict,
                 :engine_hits, :master_signal, :opus_verdict, :unified_signal, :whale_level,
                 :cb_verdict, :stage,
+                :confidence_tier, :resilience_index, :resilience_norm,
                 :master_score, :opus_score, :unified_score, :whale_score, :cb_score, :hop2_score)
     """, result)
     conn.commit()
