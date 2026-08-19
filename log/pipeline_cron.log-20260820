@@ -1,0 +1,32 @@
+=== 开始执行 AI-SUM 串行流水线 ===
+工作目录: /opt/AI-SUM
+日志文件: /opt/AI-SUM/log/pipeline.log
+-> 正在执行: master-scan ... 成功 (3034.2s)
+-> 正在执行: opus-scan ... 成功 (1164.0s)
+-> 正在执行: unified-scan ... 成功 (2013.7s)
+-> 正在执行: bigcoin ... 成功 (1096.9s)
+-> 正在执行: cost-basis-scan ... 成功 (36.2s)
+-> 正在执行: meta-verdict ... 成功 (1050.2s)
+-> 正在执行: history-report ... 成功 (53.3s)
+-> 正在执行: materialize-surge ... 成功 (12.5s)
+-> 正在执行: anomaly-surge-report ... 成功 (1.7s)
+
+✓ 流水线全部执行成功！总耗时: 8462.7s
+=== 开始执行 AI-SUM 串行流水线 ===
+工作目录: /opt/AI-SUM
+日志文件: /opt/AI-SUM/log/pipeline.log
+-> 正在执行: master-scan ... 成功 (2974.0s)
+-> 正在执行: opus-scan ... 成功 (1566.7s)
+-> 正在执行: unified-scan ... 成功 (1976.8s)
+-> 正在执行: bigcoin ... 成功 (1152.7s)
+-> 正在执行: cost-basis-scan ... 成功 (40.6s)
+-> 正在执行: meta-verdict ... 成功 (1279.0s)
+-> 正在执行: history-report ... 成功 (61.2s)
+-> 正在执行: materialize-surge ... 成功 (19.4s)
+-> 正在执行: anomaly-surge-report ... 成功 (1.8s)
+
+✓ 流水线全部执行成功！总耗时: 9072.0s
+=== 开始执行 AI-SUM 串行流水线 ===
+工作目录: /opt/AI-SUM
+日志文件: /opt/AI-SUM/log/pipeline.log
+-> 正在执行: master-scan ... 

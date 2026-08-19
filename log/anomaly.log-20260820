@@ -1,0 +1,84 @@
+已克隆现有隔离库进行增量同步
+  [Batch 1/1] 2026-08-17 00:15:02 至 2026-08-19 00:15:02 同步完成: 212 资产, 1060 快照, 耗时 67.8s
+同步成功 (run_id: 2a6a7635): 212 资产, 1060 快照, 0 钱包, 1060 价格, 耗时 68.12s
+📄 报告成功输出到: /opt/AI-SUM/report/anomaly/anomaly_intense_surge_0819_0021.md (5418 bytes, 耗时 0.77s)
+Executing Real-time Materialize Surge Sync...
+Executing DEX Penetration Analysis...
+PENETRATION_ANALYSIS_COMPLETED: Analyzed 30 tokens
+Executing Pump Resonance Fit Analysis...
+PUMP_RESONANCE_COMPLETED: Analyzed 86 tokens
+REPORT_A_GENERATED: /opt/AI-SUM/report/anomaly/anomaly_20260819_0021.md
+REPORT_B_GENERATED: /opt/AI-SUM/report/anomaly/anomaly_periodic_impulse_surge_20260819_002126.md
+Executing Anomaly Intense Surge Report...
+REPORT_PRUNING_COMPLETED: Deleted 6 old report files
+Executing Live Observation Report Generation...
+--- 启动当前市场观察与多维白盒判定报告生成 (Live Observation) ---
+数据时钟基线 (as_of_utc): 2026-08-18 19:20:59
+DEX 市场实时观察报告生成并发布成功。
+主报告: /opt/AI-SUM/report/anomaly/latest_实时信号验证报告_实盘观察.md
+历史报告: /opt/AI-SUM/report/anomaly/实时信号验证报告_实盘观察_0818_1920.md
+诊断副本: /tmp/0818/实时信号验证报告_实盘观察_1920.md
+REPORT_LIVE_OBSERVATION_GENERATED
+已克隆现有隔离库进行增量同步
+  [Batch 1/1] 2026-08-17 06:15:01 至 2026-08-19 06:15:01 同步完成: 212 资产, 1060 快照, 耗时 32.57s
+同步成功 (run_id: dd6a8c72): 212 资产, 1060 快照, 0 钱包, 1060 价格, 耗时 32.68s
+📄 报告成功输出到: /opt/AI-SUM/report/anomaly/anomaly_intense_surge_0819_0618.md (5428 bytes, 耗时 0.8s)
+Executing Real-time Materialize Surge Sync...
+Executing DEX Penetration Analysis...
+PENETRATION_ANALYSIS_COMPLETED: Analyzed 30 tokens
+Executing Pump Resonance Fit Analysis...
+PUMP_RESONANCE_COMPLETED: Analyzed 87 tokens
+REPORT_A_GENERATED: /opt/AI-SUM/report/anomaly/anomaly_20260819_0618.md
+REPORT_B_GENERATED: /opt/AI-SUM/report/anomaly/anomaly_periodic_impulse_surge_20260819_061847.md
+Executing Anomaly Intense Surge Report...
+REPORT_PRUNING_COMPLETED: Deleted 15 old report files
+Executing Live Observation Report Generation...
+--- 启动当前市场观察与多维白盒判定报告生成 (Live Observation) ---
+数据时钟基线 (as_of_utc): 2026-08-19 05:53:10
+DEX 市场实时观察报告生成并发布成功。
+主报告: /opt/AI-SUM/report/anomaly/latest_实时信号验证报告_实盘观察.md
+历史报告: /opt/AI-SUM/report/anomaly/实时信号验证报告_实盘观察_0819_0553.md
+诊断副本: /tmp/0819/实时信号验证报告_实盘观察_0553.md
+REPORT_LIVE_OBSERVATION_GENERATED
+已克隆现有隔离库进行增量同步
+  [Batch 1/1] 2026-08-17 12:15:02 至 2026-08-19 12:15:02 同步完成: 212 资产, 959 快照, 耗时 42.94s
+同步成功 (run_id: 288f34af): 212 资产, 959 快照, 0 钱包, 1060 价格, 耗时 43.27s
+📄 报告成功输出到: /opt/AI-SUM/report/anomaly/anomaly_intense_surge_0819_1221.md (5425 bytes, 耗时 1.13s)
+Executing Real-time Materialize Surge Sync...
+Executing DEX Penetration Analysis...
+PENETRATION_ANALYSIS_COMPLETED: Analyzed 30 tokens
+Executing Pump Resonance Fit Analysis...
+PUMP_RESONANCE_COMPLETED: Analyzed 91 tokens
+REPORT_A_GENERATED: /opt/AI-SUM/report/anomaly/anomaly_20260819_1221.md
+REPORT_B_GENERATED: /opt/AI-SUM/report/anomaly/anomaly_periodic_impulse_surge_20260819_122103.md
+Executing Anomaly Intense Surge Report...
+REPORT_PRUNING_COMPLETED: Deleted 7 old report files
+Executing Live Observation Report Generation...
+--- 启动当前市场观察与多维白盒判定报告生成 (Live Observation) ---
+数据时钟基线 (as_of_utc): 2026-08-19 05:53:10
+DEX 市场实时观察报告生成并发布成功。
+主报告: /opt/AI-SUM/report/anomaly/latest_实时信号验证报告_实盘观察.md
+历史报告: /opt/AI-SUM/report/anomaly/实时信号验证报告_实盘观察_0819_0553.md
+诊断副本: /tmp/0819/实时信号验证报告_实盘观察_0553.md
+REPORT_LIVE_OBSERVATION_GENERATED
+已克隆现有隔离库进行增量同步
+  [Batch 1/1] 2026-08-17 18:15:01 至 2026-08-19 18:15:01 同步完成: 212 资产, 1060 快照, 耗时 33.19s
+同步成功 (run_id: fe572ea1): 212 资产, 1060 快照, 0 钱包, 1060 价格, 耗时 33.44s
+📄 报告成功输出到: /opt/AI-SUM/report/anomaly/anomaly_intense_surge_0819_1819.md (5432 bytes, 耗时 0.48s)
+Executing Real-time Materialize Surge Sync...
+Executing DEX Penetration Analysis...
+PENETRATION_ANALYSIS_COMPLETED: Analyzed 30 tokens
+Executing Pump Resonance Fit Analysis...
+PUMP_RESONANCE_COMPLETED: Analyzed 92 tokens
+REPORT_A_GENERATED: /opt/AI-SUM/report/anomaly/anomaly_20260819_1819.md
+REPORT_B_GENERATED: /opt/AI-SUM/report/anomaly/anomaly_periodic_impulse_surge_20260819_181900.md
+Executing Anomaly Intense Surge Report...
+REPORT_PRUNING_COMPLETED: Deleted 15 old report files
+Executing Live Observation Report Generation...
+--- 启动当前市场观察与多维白盒判定报告生成 (Live Observation) ---
+数据时钟基线 (as_of_utc): 2026-08-19 15:34:49
+DEX 市场实时观察报告生成并发布成功。
+主报告: /opt/AI-SUM/report/anomaly/latest_实时信号验证报告_实盘观察.md
+历史报告: /opt/AI-SUM/report/anomaly/实时信号验证报告_实盘观察_0819_1534.md
+诊断副本: /tmp/0819/实时信号验证报告_实盘观察_1534.md
+REPORT_LIVE_OBSERVATION_GENERATED

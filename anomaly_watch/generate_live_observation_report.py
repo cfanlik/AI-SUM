@@ -250,6 +250,13 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
     sum_db = os.getenv("SUM_DB", "/opt/AI-SUM/select-sum.db")
     events_rows = []
 
+    def ensure_utc(v: Any) -> datetime:
+        if isinstance(v, datetime):
+            if v.tzinfo is None:
+                return v.replace(tzinfo=timezone.utc)
+            return v
+        return parse_dt(v)
+
     # 1. 尝试直接通过 audit_and_bind_identity 动态提取最新有效 A 信号
     try:
         from signal_validation.identity import audit_and_bind_identity
@@ -258,9 +265,9 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
             # 过滤 a_time <= as_of_dt 并且 identity_pass 为 True 的事件
             valid_events = [
                 ev for ev in raw_events 
-                if ev.get("identity_pass") and (ev["at"] <= as_of_dt if isinstance(ev["at"], datetime) else parse_dt(ev["at"]) <= as_of_dt)
+                if ev.get("identity_pass") and ensure_utc(ev["at"]) <= as_of_dt
             ]
-            valid_events.sort(key=lambda x: x["at"] if isinstance(x["at"], datetime) else parse_dt(x["at"]), reverse=True)
+            valid_events.sort(key=lambda x: ensure_utc(x["at"]), reverse=True)
             
             for ev in valid_events[:15]:
                 at_val = ev["at"].isoformat(sep=" ") if isinstance(ev["at"], datetime) else str(ev["at"])
