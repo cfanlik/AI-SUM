@@ -241,19 +241,80 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
         print(f"读取门禁清单异常，默认拦截: {e}")
         evaluation_reason = "INSUFFICIENT_TRAINING_SAMPLE"
 
+    sum_db = os.getenv("SUM_DB", "/opt/AI-SUM/select-sum.db")
+    events_rows = []
+
+    # 1. 尝试直接通过 audit_and_bind_identity 动态提取最新有效 A 信号
     try:
-        sum_conn = get_db_connection(validation_db)
-        events_rows = sum_conn.execute(
-            """SELECT DISTINCT chain, token_address, token_symbol, a_time, pool_address, event_id
-               FROM asset_identity
-               WHERE a_time <= ?
-               ORDER BY a_time DESC LIMIT 15""",
-            (as_of,)
-        ).fetchall()
-        sum_conn.close()
-    except Exception as e:
-        print(f"核验库事件联查异常，回退至 select.db 扫描事件: {e}")
-        events_rows = []
+        from signal_validation.identity import audit_and_bind_identity
+        raw_events = audit_and_bind_identity(sum_db, select_db)
+        if raw_events:
+            # 过滤 a_time <= as_of_dt 并且 identity_pass 为 True 的事件
+            valid_events = [
+                ev for ev in raw_events 
+                if ev.get("identity_pass") and (ev["at"] <= as_of_dt if isinstance(ev["at"], datetime) else parse_dt(ev["at"]) <= as_of_dt)
+            ]
+            valid_events.sort(key=lambda x: x["at"] if isinstance(x["at"], datetime) else parse_dt(x["at"]), reverse=True)
+            
+            for ev in valid_events[:15]:
+                at_val = ev["at"].isoformat(sep=" ") if isinstance(ev["at"], datetime) else str(ev["at"])
+                events_rows.append({
+                    "chain": ev["chain"],
+                    "token_address": ev["address"],
+                    "token_symbol": ev["symbol"],
+                    "a_time": at_val,
+                    "pool_address": ev.get("pool_address"),
+                    "event_id": ev.get("event_id")
+                })
+
+            # 同步增量刷新 backtest-validation.db 中的 asset_identity 表
+            try:
+                val_conn = get_db_connection(validation_db)
+                val_conn.execute("""
+                    CREATE TABLE IF NOT EXISTS asset_identity (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        chain TEXT, token_address TEXT, pool_address TEXT, token_symbol TEXT,
+                        a_time TEXT, a_stage TEXT, engine_hits INTEGER, chain_source TEXT,
+                        chain_confidence TEXT, identity_pass INTEGER, reason_code TEXT,
+                        candidate_pools TEXT, identity_conflict INTEGER DEFAULT 0,
+                        conflict_time TEXT, event_id TEXT
+                    )
+                """)
+                for ev in valid_events:
+                    at_str = ev["at"].isoformat(sep=" ") if isinstance(ev["at"], datetime) else str(ev["at"])
+                    val_conn.execute("""
+                        INSERT OR REPLACE INTO asset_identity (
+                            chain, token_address, pool_address, token_symbol, a_time, a_stage,
+                            engine_hits, chain_source, chain_confidence, identity_pass, reason_code,
+                            candidate_pools, identity_conflict, conflict_time, event_id
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        ev["chain"], ev["address"], ev.get("pool_address"), ev["symbol"], at_str, ev.get("stage"),
+                        ev.get("hits", 0), ev["chain"], ev.get("confidence", "high"), 1, "PASS",
+                        json.dumps(ev.get("candidate_pools", [])), 0, None, ev.get("event_id")
+                    ))
+                val_conn.commit()
+                val_conn.close()
+            except Exception as e_db:
+                print(f"增量同步核验库 asset_identity 提示: {e_db}")
+    except Exception as e_dynamic:
+        print(f"动态事件提取异常，回退至静态核验库查询: {e_dynamic}")
+
+    # 2. 回退机制：若动态提取失败，尝试从 validation_db 查询
+    if not events_rows:
+        try:
+            sum_conn = get_db_connection(validation_db)
+            events_rows = sum_conn.execute(
+                """SELECT DISTINCT chain, token_address, token_symbol, a_time, pool_address, event_id
+                   FROM asset_identity
+                   WHERE a_time <= ?
+                   ORDER BY a_time DESC LIMIT 15""",
+                (as_of,)
+            ).fetchall()
+            sum_conn.close()
+        except Exception as e:
+            print(f"核验库事件联查异常，回退至 select.db 扫描事件: {e}")
+            events_rows = []
 
     if not events_rows:
         has_token_names = False
