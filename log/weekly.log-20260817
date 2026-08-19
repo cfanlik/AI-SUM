@@ -1,0 +1,16 @@
+2026-08-16 01:30:02,100 [INFO] weekly_report: 生成weekly报告: 08-09 ~ 08-16
+2026-08-16 01:30:02,100 [INFO] market_context: 采集外部市场数据 (days=7)...
+2026-08-16 01:30:02,830 [INFO] httpx: HTTP Request: GET https://api.coingecko.com/api/v3/ping "HTTP/1.1 200 OK"
+2026-08-16 01:30:03,357 [INFO] httpx: HTTP Request: GET https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1w&limit=4 "HTTP/1.1 200 OK"
+2026-08-16 01:30:03,731 [INFO] httpx: HTTP Request: GET https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval=1w&limit=4 "HTTP/1.1 200 OK"
+2026-08-16 01:30:04,130 [INFO] httpx: HTTP Request: GET https://api.binance.com/api/v3/klines?symbol=BNBUSDT&interval=1w&limit=4 "HTTP/1.1 200 OK"
+2026-08-16 01:30:04,600 [INFO] httpx: HTTP Request: GET https://api.coingecko.com/api/v3/ping "HTTP/1.1 200 OK"
+2026-08-16 01:30:09,154 [INFO] httpx: HTTP Request: GET https://api.coingecko.com/api/v3/global "HTTP/1.1 400 Bad Request"
+2026-08-16 01:30:09,154 [ERROR] market_context: CoinGecko global: 'data'
+2026-08-16 01:30:09,419 [INFO] httpx: HTTP Request: GET https://api.coingecko.com/api/v3/ping "HTTP/1.1 200 OK"
+2026-08-16 01:30:11,766 [INFO] httpx: HTTP Request: GET https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=7&interval=daily "HTTP/1.1 200 OK"
+2026-08-16 01:30:12,197 [INFO] httpx: HTTP Request: GET https://api.coingecko.com/api/v3/ping "HTTP/1.1 200 OK"
+2026-08-16 01:30:15,904 [INFO] httpx: HTTP Request: GET https://api.alternative.me/fng/?limit=14 "HTTP/1.1 200 OK"
+2026-08-16 01:30:15,905 [INFO] market_context: 外部数据采集完成 (13.8s)
+2026-08-16 01:30:19,008 [INFO] weekly_report: 报告已生成: /opt/AI-SUM/report/weekly/week_2026W33.md (10863 bytes)
+完成: /opt/AI-SUM/report/weekly/week_2026W33.md (16.9s)

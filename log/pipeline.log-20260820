@@ -1,0 +1,687 @@
+
+
+========================================
+Pipeline started at 2026-08-19 00:00:01
+========================================
+
+[master-scan] START: python3 master-scan/run.py
+
+[AI-SUM V5] 全库扫描启动 — 2026-08-19 00:00:02
+  源库: /opt/select-coin/data/select.db
+  分析库: /opt/AI-SUM/select-sum.db
+  Step 1/5: 加载代币列表... 184 个代币
+  Step 2/5: 时序对齐（Δ diff 计算）...
+  时序对齐 0/184...  时序对齐 50/184...  时序对齐 100/184...  时序对齐 150/184...  时序对齐完成 183/184 代币有效            
+  -> 183 个代币有效（≥2 快照）
+  Step 3/5: 行为模式识别... 红色 7 | 黄色 27
+  Step 3.5/5: Gecko + G2/G3... G2=3 G3=2
+  Step 3.6/5: CEX-DEX 协同共振检测... 完成，触发 C10: 0 个
+  Step 4/5: 更新 Watchlist... 新增 0 / EXPIRED 3 / ACTIVE 77
+  Step 5/5: 生成雷达报...
+
+====================================================================================================
+  🛰  AI-SUM V8.2 — 高价值代币时效雷达报  |  2026-08-19 00:50
+  扫描总数: 183  |  💎钻石: 4  |  🔴红色: 7
+====================================================================================================
+
+  💎 钻石绞杀区（极低流通 + 真金吸筹） — 4 个
+  代币         链     级别                     触发模式                         机构占比       隐庄      真金率    吸筹数        LP($)   FDV/LP    V/L
+  --------------------------------------------------------------------------------------------------
+  CYS        bsc   💎 DIAMOND              E(DIAMOND)                  93.2%       1个    87.5%     16   $1,713,362     141x  15.27
+  UAI        bsc   💎 DIAMOND              E(DIAMOND)                  89.9%       0个    95.3%    106     $909,336     294x   0.63
+  SQD        bsc   💎 DIAMOND              E(DIAMOND)                  89.0%       3个    94.1%    204     $443,660       4x   0.50
+  TAKE       bsc   💎 DIAMOND              E(DIAMOND)                  85.2%       1个    91.3%    149     $344,037      10x   1.01
+
+  🔴 红色预警 — 7 个
+  代币         链     级别                     触发模式                         机构占比       隐庄      真金率    吸筹数        LP($)   FDV/LP    V/L
+  --------------------------------------------------------------------------------------------------
+  AEON       bsc   🔴 RED                  A(RED)                      95.4%       1个    45.7%    105   $1,717,194      53x  15.45
+  GRVT       bsc   🔴 RED                  A(RED)                      89.1%       1个    49.2%     67     $754,779       5x   0.75
+  GPS        bsc   🔴 RED                  A(RED)                      96.2%       1个    49.2%     65     $215,557      15x   9.26
+  DOS        bsc   🔴 RED                  A(RED)                      96.1%       2个    80.0%    175     $827,271       9x  17.29
+  Beat       bsc   🔴 RED                  A(RED)                      91.0%       0个    32.5%     40   $1,015,503     232x  19.60
+  XPIN       bsc   🔴 RED                  A(RED)                      84.8%       1个    61.1%     54     $816,144     152x   5.13
+  JCT        bsc   🔴 RED                  A(RED)                      95.1%       1个    71.6%     88     $591,237      45x   1.78
+
+====================================================================================================
+
+  报告已保存: /opt/AI-SUM/report/v5/radar_20260819_0050.md
+
+  ✓ 完成，耗时 3034.06s
+[master-scan] SUCCESS. Elapsed: 3034.2s
+
+[opus-scan] START: python3 opus-scan/run.py --offline
+
+[opus-scan] 全库扫描启动
+  源库: /opt/select-coin/data/select.db
+  模式: 纯离线
+  代币总数: 213
+  阶段1: DB 快筛... 213 个有效, 耗时 1088.8s
+
+==========================================================================================
+  🛰  opus-scan — 吸筹/出货双维度雷达  |  2026-08-19 01:10
+  扫描总数: 213  |  吸筹:10 出货:0 混合:0 中性:177  |  耗时: 1163.9s
+==========================================================================================
+
+  [92m🟢 吸筹 Top 10（置信度降序，已排除MIXED）[0m
+    排名  代币         链        置信度   acc数   acc占比   DEX真金   CEX变化   ΔCEX    LP(USD) 阶段      
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+     1  ROBO       bsc    81.0%    114    0.5%   85.7%  -28.2%    ↓流出   $812,602 ↑↑吸筹
+     2  SENT       bsc    66.7%     39    0.0%  100.0%   -1.8%    →稳定   $766,904 ↑↑吸筹
+     3  INX        bsc    66.7%    119   65.6%   80.0%   +0.9%    →稳定   $302,410 ↑↑↑加速
+     4  XAN        bsc    66.7%    104    2.3%   80.0%  +15.3%    ↑流入   $441,347 ↑↑吸筹
+     5  SKYAI      bsc    66.7%      4    0.6%  100.0%   +5.2%    ↑流入 $6,584,420 ↑↑吸筹
+     6  GPS        bsc    66.7%     65   13.5%   50.0%  -18.2%    ↓流出   $215,557 ↑↑吸筹
+     7  TAKE       bsc    66.7%    149    1.6%   83.3%  +22.1%    ↑流入   $344,037 ↑↑↑加速
+     8  SLX        bsc    61.9%    203    6.4%   64.3%  +12.1%    ↑流入   $872,081 ↑↑吸筹
+     9  BASED      bsc    61.9%    123   19.2%  100.0%   -9.3%    ↓流出 $1,205,357 ↑↑吸筹
+    10  CLO        bsc    61.9%     17    2.3%  100.0%  -20.6%    ↓流出 $1,402,220 ↗触顶
+
+  [91m🔴 出货 Top 10（置信度降序，已排除MIXED）[0m
+    排名  代币         链        置信度    出货者    出货占比   假鲸鱼   CEX变化   ΔCEX    LP(USD)  48h派发
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+==========================================================================================
+
+  报告已保存: /opt/AI-SUM/report/opus/opus_20260819_0110.md
+[opus] 已保存 36 条结果到 select-sum.db
+[opus-scan] SUCCESS. Elapsed: 1164.0s
+
+[unified-scan] START: python3 unified-scan/run.py
+
+[unified-scan] 全库扫描启动
+  源库: /opt/select-coin/data/select.db
+  模式: 联网(Gecko Pool)
+  代币总数: 182
+  进度: 50/182
+  进度: 100/182
+  进度: 150/182
+
+======================================================================
+  unified-scan 统一雷达报 — 2026-08-19 01:43
+  扫描: 182 | 有信号: 10 | 耗时: 2013.3s
+  💎 DIAMOND: 4 | 🐋 WHALE_DUMP: 1 | 🔴 SLOW_DISTRIBUTION: 3 | 🔵 MODERATE_ACC: 2
+======================================================================
+
+  💎 DIAMOND (4 个)
+  代币       链      ACC% DIST% STRUCT%  DEX真金    CEX      LP($)    V/L 信号
+  -----------------------------------------------------------------
+  CYS      bsc    30.8   0.0    25.0  87.5%  +0.8% A1(DIAMOND), S2(M/L=141.3x), S4(V/L=15.27)
+  UAI      bsc    30.8  26.7    25.0  95.3%  +0.5% A1(DIAMOND), D2(出货者), S2(M/L=293.7x)
+  SQD      bsc    30.8   0.0     0.0  94.1%  -1.9% A1(DIAMOND)
+  TAKE     bsc    30.8   0.0     0.0  91.3%  +4.0% A1(DIAMOND)
+
+  🐋 WHALE_DUMP (1 个)
+  代币       链      ACC% DIST% STRUCT%  DEX真金    CEX      LP($)    V/L 信号
+  -----------------------------------------------------------------
+  GWEI     bsc     0.0  40.0    31.2  72.5% -15.2% D3(被动漂移), S1(极端集中)
+
+  🔴 SLOW_DISTRIBUTION (3 个)
+  代币       链      ACC% DIST% STRUCT%  DEX真金    CEX      LP($)    V/L 信号
+  -----------------------------------------------------------------
+  O        bsc     0.0  66.7     0.0  61.3%  +1.2% D2(出货者), D3(被动漂移)
+  ACU      bsc     0.0  60.0     0.0  57.6% +15.7% D1(CEX流入), D2(出货者)
+  ARX      bsc    19.2  60.0     0.0  75.2% +15.7% A2(YELLOW), D1(CEX流入), D2(出货者)
+
+  🔵 MODERATE_ACC (2 个)
+  代币       链      ACC% DIST% STRUCT%  DEX真金    CEX      LP($)    V/L 信号
+  -----------------------------------------------------------------
+  ROBO     bsc    38.5   0.0     0.0  55.3% -15.3% A2(YELLOW), A4(CEX流出)
+  GPS      bsc    38.5   0.0     0.0  49.2% -15.8% A2(RED), A4(CEX流出)
+
+  报告已保存: /opt/AI-SUM/report/unified/unified_20260819_0143.md
+
+  持久化完成: unified_results + daily_summary
+[unified] 已保存 10 条结果到 select-sum.db
+[unified-scan] SUCCESS. Elapsed: 2013.7s
+
+[bigcoin] START: python3 bigcoin/run.py
+
+[whale-scan] 全库扫描启动
+  源库: /opt/select-coin/data/select.db
+  代币总数: 682
+  有效代币: 218, 耗时 1096.8s
+
+==========================================================================================
+ 🐋 庄控预警雷达 — 2026-08-19 02:01
+ 扫描 218 代币 | 🔴高危 0 | 🟠中危 4 | 🟡低危 53 | ✅安全 161
+ 耗时 1096.8s
+==========================================================================================
+
+🟠 中危观察 (≥50%)
+Rank Symbol      Conf%   Top2%   Top5%  Top10%   T2DEX    W1Δ   Prc24h      M/L  C95
+------------------------------------------------------------------------------------------
+   1 O           59.7%   56.6%   85.2%   95.8%    0.00  +12.2      -8%      32x   10
+   2 HOME        55.2%   59.3%   88.1%   96.3%     N/A  +37.8      -1%     917x    9
+   3 STABLE      50.7%   84.7%   90.8%   96.1%    0.00  +-0.7      +4%     842x    9
+   4 PROVE       50.7%   73.0%   94.6%   96.7%     N/A  +11.8      +6%     153x    6
+
+🟡 低危记录 (≥30%) — 前10
+Rank Symbol      Conf%   Top2%   Top5%  Top10%   T2DEX    W1Δ   Prc24h      M/L  C95
+------------------------------------------------------------------------------------------
+   1 TURTLE      49.3%   91.5%   95.9%   98.1%    0.00  +-3.2      -1%       4x    4
+   2 ROBO        49.3%   46.1%   80.5%   91.8%    0.00   +0.1      -4%      62x   14
+   3 TURTLE      49.3%   91.5%   95.9%   98.1%    0.00  +-3.2      -1%       4x    4
+   4 TAC         47.8%   60.4%   83.3%   91.7%     N/A  +41.5      -6%     422x   16
+   5 SHELL       46.3%   53.6%   82.9%   96.8%    0.00  +-1.5      -2%      45x    8
+   6 SHELL       46.3%   53.6%   82.9%   96.8%    0.00  +-1.5      -2%      45x    8
+   7 KGEN        44.8%   52.2%   86.4%   93.8%    0.00 +-13.4      +1%      49x   13
+   8 GWEI        44.8%   76.5%   94.2%   97.3%    0.00   +8.8      +0%      30x    6
+   9 BLESS       43.3%   59.1%   84.4%   92.3%     N/A   +9.8      -7%      72x   19
+  10 ZKP         43.3%   56.8%   80.2%   89.0%    0.00   +5.4      -2%      13x   19
+
+  报告已保存: /opt/AI-SUM/report/whale/whale_20260819_0201.md
+[whale] 已保存 57 条结果到 select-sum.db
+[bigcoin] SUCCESS. Elapsed: 1096.9s
+
+[cost-basis-scan] START: python3 cost-basis-scan/run.py
+2026-08-19 02:02:03,512 [INFO] cost-basis-scan: 加载 215 个代币
+2026-08-19 02:02:03,810 [INFO] cost-basis-scan: 进度: 20/215
+2026-08-19 02:02:04,205 [INFO] cost-basis-scan: 进度: 40/215
+2026-08-19 02:02:04,645 [INFO] cost-basis-scan: 进度: 60/215
+2026-08-19 02:02:04,726 [INFO] cost-basis-scan:   O: PROFIT_EXIT (ACC=29% DIST=69% CV=0.290 暴利=0.1% 信号=C1,C4,C8)
+2026-08-19 02:02:04,767 [INFO] gravity_tracker: watchlist 跃迁: bsc/0x5506599c722389a60580b5213ea1da60d64754a1 历史=RED + C1 水下加仓 → SQUEEZE_ACC
+2026-08-19 02:02:04,769 [INFO] cost-basis-scan:   ZEST: SQUEEZE_ACC_MED (ACC=29% DIST=0% CV=1.525 暴利=0.0% 信号=C1)
+2026-08-19 02:02:04,916 [INFO] cost-basis-scan:   BULLA: LIQUIDITY_CRISIS (ACC=0% DIST=44% CV=1.392 暴利=72.4% 信号=C4,C6)
+2026-08-19 02:02:04,941 [INFO] cost-basis-scan: 进度: 80/215
+2026-08-19 02:02:05,271 [INFO] cost-basis-scan: 进度: 100/215
+2026-08-19 02:02:09,967 [INFO] gravity_tracker: watchlist 跃迁: bsc/0x87acfa3fd7a6e0d48677d070644d76905c2bdc00 历史=RED + C4 暴利出逃 → DEATH_SPIRAL
+2026-08-19 02:02:10,080 [INFO] cost-basis-scan: 进度: 120/215
+2026-08-19 02:02:10,674 [INFO] gravity_tracker: watchlist 跃迁: bsc/0x9a4a67721573f2c9209dfff972c52be4e3f6642e 历史=RED + C4 暴利出逃 → DEATH_SPIRAL
+2026-08-19 02:02:10,676 [INFO] cost-basis-scan:   GPS: DEATH_SPIRAL (ACC=0% DIST=69% CV=0.296 暴利=21.0% 信号=C4,C8)
+2026-08-19 02:02:10,919 [INFO] cost-basis-scan: 进度: 140/215
+2026-08-19 02:02:11,077 [INFO] gravity_tracker: watchlist 跃迁: bsc/0xb0f09ea9ae0515c3551080d4a745c8115aa30e37 历史=RED + C1 水下加仓 → SQUEEZE_ACC
+2026-08-19 02:02:11,081 [INFO] cost-basis-scan:   DOS: SQUEEZE_ACC_MED (ACC=29% DIST=0% CV=0.318 暴利=0.0% 信号=C1)
+2026-08-19 02:02:19,100 [INFO] cost-basis-scan: 进度: 160/215
+2026-08-19 02:02:19,667 [INFO] cost-basis-scan: 进度: 180/215
+2026-08-19 02:02:19,697 [INFO] gravity_tracker: watchlist 跃迁: bsc/0xe50e3d1a46070444f44df911359033f2937fcc13 历史=DIAMOND + C4 暴利出逃 → DEATH_SPIRAL
+2026-08-19 02:02:19,699 [INFO] cost-basis-scan:   SQD: DEATH_SPIRAL (ACC=0% DIST=44% CV=0.375 暴利=0.1% 信号=C4,C7)
+2026-08-19 02:02:25,718 [INFO] cost-basis-scan: 进度: 200/215
+2026-08-19 02:02:26,970 [INFO] cost-basis-scan: 扫描完成: 142 有效结果
+
+======================================================================
+💰 cost-basis-scan | 2026-08-19 02:01:50
+   扫描 215 代币 | G1跳过 73 | G2跳过 0
+   有效 142 | 吸筹:0 出货:2 跃迁:4 中性:136
+======================================================================
+
+⚡ 状态跃迁预警 (4 个)
+代币       链     判定                           现价       VWAP     暴利区%         历史 信号          
+------------------------------------------------------------------------------------------
+ZEST     bsc   SQUEEZE_ACC_MED      $0.143152  $0.228493      0.0% RED/A(RED) C1          
+GPS      bsc   DEATH_SPIRAL         $0.017482  $0.011221     21.0% RED/A(RED) C4,C8       
+DOS      bsc   SQUEEZE_ACC_MED      $0.225773  $0.323342      0.0% RED/A(RED) C1          
+SQD      bsc   DEATH_SPIRAL         $0.039362  $0.135315      0.1% DIAMOND/E(DIAMOND) C4,C7       
+
+💀 出货信号 (2 个)
+代币       链     判定                    DIST%         现价       VWAP     暴利区%        LP($) 信号          
+----------------------------------------------------------------------------------------------------
+O        bsc   PROFIT_EXIT           68.8% $0.451109  $0.508072      0.1% $  2,229,927 C1,C4,C8    
+BULLA    bsc   LIQUIDITY_CRISIS      43.8% $0.017708  $0.054788     72.4% $    227,971 C4,C6       
+
+📄 报告: /opt/AI-SUM/report/cost-basis/cb_20260819_0202.md
+[cost-basis-scan] SUCCESS. Elapsed: 36.2s
+
+[meta-verdict] START: python3 meta-verdict/run.py
+2026-08-19 02:02:49,306 [INFO] meta-verdict: 收集到 204 个有信号代币（至少 1 个引擎命中）
+2026-08-19 02:18:17,219 [INFO] meta-verdict: [HOP2] hop2_tracking 写入 193/204 条
+2026-08-19 02:18:17,219 [INFO] meta-verdict: hop2_tracking 动态采集完成: 193 条
+2026-08-19 02:18:18,464 [INFO] meta-verdict: 趋势对比: vs 2026-08-18 14:05:49 | 新进0 退出104 ↑15 ↓5 →80 跃变12
+2026-08-19 02:18:18,472 [INFO] meta-verdict: 生命周期表已更新 100 条记录
+2026-08-19 02:19:57,123 [INFO] meta-verdict: pump_detector 完成: 180 代币, IMMINENT=17
+
+===========================================================================
+🔮 meta-verdict 综合仲裁 | 2026-08-19 02:02:27
+   有效代币: 204 | 🎯吸筹: 98 | 💀出货: 2
+===========================================================================
+
+🏥 引擎健康
+  ⚠ master: 9h前
+  ✅ opus: 0.9h前
+  ✅ whale: 0.0h前
+  ✅ cost-basis: 0.0h前
+  ✅ unified: 0.3h前
+
+📈 趋势 (vs 2026-08-18 14:05:49)
+  🆕 新进: 0 | 🔚 退出: 104
+  ⬆ 上升: 15 | ⬇ 下降: 5 | → 稳定: 80
+  ⚡ TAKE: 0.5→6.5 (+6.0) [CB:DEATH_SPIRAL→无]
+  ⚡ STO: 0.0→3.9 (+3.9) [积分微调]
+  ⚡ DOS: 3.5→7.1 (+3.5) [master:DIAMOND→YELLOW, CB:无→SQUEEZE_ACC_MED, unified:DIAMOND→无]
+  ⚡ AEON: 5.9→3.8 (-2.2) [CB:SQUEEZE_ACC_MED→无]
+  ⚡ BASED: 1.5→3.5 (+2.0) [CB:PROFIT_EXIT→无]
+  ⚡ TRIA: 5.5→3.9 (-1.6) [积分微调]
+  ⚡ CYS: 8.9→10.4 (+1.5) [积分微调]
+  ⚡ APR: 4.9→6.4 (+1.5) [积分微调]
+  ⚡ HEMI: 4.8→6.2 (+1.5) [积分微调]
+  ⚡ XPIN: 3.9→5.4 (+1.5) [积分微调]
+  ⚡ BTW: 6.4→4.9 (-1.5) [积分微调]
+  ⚡ LAB: 2.6→4.1 (+1.5) [积分微调]
+
+🎯 吸筹排行 Top 20
+代币      链       综合分    Δ阶段          master        opuswhale   CB判定                          价格      VWAP
+--------------------------------------------------------------------------------------------------------------
+CYS     bsc    10.4 +1.5ACC_ACCELERATINGDIAMOND       1.9 LOW                           $   0.5006 $        0
+UAI     bsc     7.6     🔒 极度控盘      DIAMOND       1.6                               $   0.2670 $        0
+DOS     bsc     7.1 +3.5ACC_ACCELERATINGYELLOW        1.6 LOW     SQUEEZE_ACC_MED       $   0.2258 $   0.3233
+TAKE    bsc     6.5 +6.0🔒 极度控盘      DIAMOND       2.5 LOW                           $   0.0475 $        0
+SKYAI   bsc     6.5 +0.6🎯 吸筹中       YELLOW        2.5 LOW     IRON_HOLD             $   0.3530 $   0.0421
+APR     bsc     6.4 +1.5ACC_ACCELERATINGRED           1.9 LOW                           $   0.1859 $        0
+HEMI    bsc     6.2 +1.5ACC_ACCELERATINGRED           1.8 LOW                           $0.0065915346 $        0
+ROBO    bsc     6.1     🎯 吸筹中       YELLOW        3.1 LOW                           $   0.0133 $        0
+XPIN    bsc     5.4 +1.5ACC_ACCELERATINGRED           1.9                               $0.0012394553 $        0
+JCT     bsc     5.1 +1.0🎯 吸筹中       RED           2.1 LOW                           $0.0026059579 $        0
+STABLE  bsc     4.9     🎯 吸筹中       YELLOW        1.9 MEDIUM                        $   0.0307 $        0
+HOME    bsc     4.9     🎯 吸筹中       YELLOW        1.9 MEDIUM                        $0.0069426339 $        0
+ZEST    bsc     4.9 +1.0🎯 吸筹中       YELLOW        1.9         SQUEEZE_ACC_MED       $   0.1432 $   0.2285
+PROVE   bsc     4.9     🎯 吸筹中       YELLOW        1.9 MEDIUM                        $   0.1579 $        0
+BTW     bsc     4.9 -1.5🎯 吸筹中       RED           1.9 LOW                           $   0.3693 $        0
+UB      bsc     4.7     🎯 吸筹中       YELLOW        1.2 LOW                           $   0.1160 $        0
+PROS    base    4.7     🎯 吸筹中       YELLOW        1.9 LOW                           $   0.3740 $        0
+XAN     bsc     4.5     🎯 吸筹中       YELLOW        2.5 LOW                           $   0.0108 $        0
+C       bsc     4.5     🎯 吸筹中       YELLOW        2.5 LOW                           $   0.0642 $        0
+VELVET  bsc     4.4     🎯 吸筹中       RED           1.4 LOW                           $   0.5411 $        0
+
+💀 出货预警 — 2 个
+  ARX       -3.3 DISTRIBUTING unified=SLOW_DIST cb=
+  NAORIS    -2.0 DISTRIBUTING unified=WHALE_DUMP cb=
+
+⚠ 引擎矛盾 — 2 个
+  [C1] UAI        master=DIAMOND 但 whale 无信号 → 庄控未验证
+  [C5] Beat       仅 1 引擎命中但 score=3.5 → 信号单薄
+
+📄 综合报告: /opt/AI-SUM/report/meta/meta_20260819_0218.md
+AI-SUM 拉升前兆扫描开始 (v4, 11维100分外挂集成版) | 2026-08-19 02:02:27
+  [DB] 保存 151 个告警代币, 其中 S11 静默建仓 16 个
+  [FILE] 报告生成: /opt/AI-SUM/report/pump/pump_20260819_0202.md (22456 bytes)
+AI-SUM 拉升前兆扫描完成
+
+[meta-verdict] SUCCESS. Elapsed: 1050.2s
+
+[history-report] START: python3 meta-verdict/history_report.py
+AI-SUM 长期分析报告 V5.0 | 2026-08-19 02:19
+  [1/7] 信号回测（1d/3d/7d/14d + MDD）...
+        171 个代币有回测数据
+  [2/7] holder 迁移（14d + 遗漏检测）...
+        213 个代币有迁移数据
+  [2.5/7] 大户行为追踪...
+          大户行为分析完成
+  [3/7] 积分时序...
+        194 个代币有时序数据
+  [4/7] 流动性健康度...
+        96 个ACC代币有流动性数据
+  [5/7] 信号质量评估...
+  [加载双轨指标] 获取最新浓度与大盘/精英分...
+        成功加载 214 个代币的双轨制指标
+  [6/7] ACC综合看板...
+  [DB] token_history 写入 172 行
+  [7/7] hop2 隐蔽吸筹分析...
+        hop2 分析完成
+  [7.5/7] 信号偏离度审计...
+          偏离度审计完成
+  [8] 合约信号总览...
+        合约信号分析完成
+  [9] 实战盈亏研警与避雷雷达...
+        实战盈亏研警分析完成
+
+📄 报告: /opt/AI-SUM/report/history/history_0819_0220.md (30372 bytes, 53.2s)
+[history-report] SUCCESS. Elapsed: 53.3s
+
+[materialize-surge] START: python3 meta-verdict/materialize_surge.py
+已克隆现有隔离库进行增量同步
+  [Batch 1/1] 2026-08-17 02:20:50 至 2026-08-19 02:20:50 同步完成: 212 资产, 948 快照, 耗时 12.3s
+同步成功 (run_id: 4ffbf233): 212 资产, 948 快照, 0 钱包, 1060 价格, 耗时 12.41s
+[materialize-surge] SUCCESS. Elapsed: 12.5s
+
+[anomaly-surge-report] START: python3 meta-verdict/anomaly_surge_report.py
+📄 报告成功输出到: /opt/AI-SUM/report/anomaly/anomaly_intense_surge_0819_0221.md (5418 bytes, 耗时 0.5s)
+[anomaly-surge-report] SUCCESS. Elapsed: 1.7s
+========================================
+Pipeline completed successfully. Total elapsed: 8462.7s
+
+
+========================================
+Pipeline started at 2026-08-19 12:00:01
+========================================
+
+[master-scan] START: python3 master-scan/run.py
+
+[AI-SUM V5] 全库扫描启动 — 2026-08-19 12:00:01
+  源库: /opt/select-coin/data/select.db
+  分析库: /opt/AI-SUM/select-sum.db
+  Step 1/5: 加载代币列表... 184 个代币
+  Step 2/5: 时序对齐（Δ diff 计算）...
+  时序对齐 0/184...  时序对齐 50/184...  时序对齐 100/184...  时序对齐 150/184...  时序对齐完成 183/184 代币有效            
+  -> 183 个代币有效（≥2 快照）
+  Step 3/5: 行为模式识别... 红色 0 | 黄色 22
+  Step 3.5/5: Gecko + G2/G3... G2=3 G3=0
+  Step 3.6/5: CEX-DEX 协同共振检测... 完成，触发 C10: 0 个
+  Step 4/5: 更新 Watchlist... 新增 0 / EXPIRED 4 / ACTIVE 74
+  Step 5/5: 生成雷达报...
+
+====================================================================================================
+  🛰  AI-SUM V8.2 — 高价值代币时效雷达报  |  2026-08-19 12:49
+  扫描总数: 183  |  💎钻石: 7  |  🔴红色: 0
+====================================================================================================
+
+  💎 钻石绞杀区（极低流通 + 真金吸筹） — 7 个
+  代币         链     级别                     触发模式                         机构占比       隐庄      真金率    吸筹数        LP($)   FDV/LP    V/L
+  --------------------------------------------------------------------------------------------------
+  CYS        bsc   💎 DIAMOND              E(DIAMOND)                  93.2%       1个   100.0%     12   $1,725,324     144x  13.89
+  AEON       bsc   💎 DIAMOND              E(DIAMOND)                  95.4%       1个    93.9%     49   $1,688,299      51x  18.89
+  UAI        bsc   💎 DIAMOND              E(DIAMOND)                  89.9%       0个    94.4%    108     $914,342     296x   0.68
+  DOS        bsc   💎 DIAMOND              E(DIAMOND)                  95.9%       2个    93.6%    141     $831,928       9x   9.25
+  Beat       bsc   💎 DIAMOND              E(DIAMOND)                  91.0%       0个   100.0%     13     $960,792     222x  19.30
+  SQD        bsc   💎 DIAMOND              E(DIAMOND)                  89.0%       3个    93.7%    205     $451,260       4x   0.52
+  TAKE       bsc   💎 DIAMOND              E(DIAMOND)                  85.3%       1个    90.6%    149     $347,825      10x   0.87
+
+  🔴 红色预警：无
+
+====================================================================================================
+
+  报告已保存: /opt/AI-SUM/report/v5/radar_20260819_1249.md
+
+  ✓ 完成，耗时 2973.80s
+[master-scan] SUCCESS. Elapsed: 2974.0s
+
+[opus-scan] START: python3 opus-scan/run.py --offline
+
+[opus-scan] 全库扫描启动
+  源库: /opt/select-coin/data/select.db
+  模式: 纯离线
+  代币总数: 213
+  阶段1: DB 快筛... 213 个有效, 耗时 1488.6s
+
+==========================================================================================
+  🛰  opus-scan — 吸筹/出货双维度雷达  |  2026-08-19 13:15
+  扫描总数: 213  |  吸筹:10 出货:0 混合:0 中性:176  |  耗时: 1566.5s
+==========================================================================================
+
+  [92m🟢 吸筹 Top 10（置信度降序，已排除MIXED）[0m
+    排名  代币         链        置信度   acc数   acc占比   DEX真金   CEX变化   ΔCEX    LP(USD) 阶段      
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+     1  ROBO       bsc    81.0%    113    0.5%   85.7%  -28.2%    ↓流出   $793,020 ↑↑吸筹
+     2  SENT       bsc    66.7%     38    0.0%  100.0%   -1.8%    →稳定   $758,187 ↑↑吸筹
+     3  XAN        bsc    66.7%    106    2.3%   80.0%  +17.1%    ↑流入   $437,944 ↑↑吸筹
+     4  SKYAI      bsc    66.7%      3    0.6%  100.0%   +5.4%    ↑流入 $5,830,441 ↑↑吸筹
+     5  GPS        bsc    66.7%     62   13.5%   50.0%  -18.1%    ↓流出   $216,117 ↑↑↑加速
+     6  TAKE       bsc    66.7%    149    1.5%   80.0%  +21.0%    ↑流入   $347,825 ↑↑吸筹
+     7  SLX        bsc    61.9%    203    6.4%   64.3%   +8.9%    ↑流入   $872,686 ↑↑吸筹
+     8  BASED      bsc    61.9%    123   19.2%  100.0%   -9.3%    ↓流出 $1,223,323 ↑↑吸筹
+     9  TRIA       bsc    57.1%     62    1.6%  100.0%  -69.6%    ↓流出   $607,208 ↓↓出货
+    10  CTR        base   52.4%     73    0.6%  100.0%  -17.5%    ↓流出   $464,647 ↓↓出货
+
+  [91m🔴 出货 Top 10（置信度降序，已排除MIXED）[0m
+    排名  代币         链        置信度    出货者    出货占比   假鲸鱼   CEX变化   ΔCEX    LP(USD)  48h派发
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+==========================================================================================
+
+  报告已保存: /opt/AI-SUM/report/opus/opus_20260819_1315.md
+[opus] 已保存 37 条结果到 select-sum.db
+[opus-scan] SUCCESS. Elapsed: 1566.7s
+
+[unified-scan] START: python3 unified-scan/run.py
+
+[unified-scan] 全库扫描启动
+  源库: /opt/select-coin/data/select.db
+  模式: 联网(Gecko Pool)
+  代币总数: 182
+  进度: 50/182
+  进度: 100/182
+  进度: 150/182
+
+======================================================================
+  unified-scan 统一雷达报 — 2026-08-19 13:48
+  扫描: 182 | 有信号: 10 | 耗时: 1976.1s
+  💎 DIAMOND: 5 | 🐋 WHALE_DUMP: 1 | 🔴 SLOW_DISTRIBUTION: 3 | 🔵 MODERATE_ACC: 1
+======================================================================
+
+  💎 DIAMOND (5 个)
+  代币       链      ACC% DIST% STRUCT%  DEX真金    CEX      LP($)    V/L 信号
+  -----------------------------------------------------------------
+  CYS      bsc    30.8   0.0    25.0 100.0%  +0.8% A1(DIAMOND), S2(M/L=143.8x), S4(V/L=13.89)
+  AEON     bsc    30.8   0.0    25.0  93.9%  -0.6% A1(DIAMOND), S2(M/L=51.4x), S4(V/L=18.89)
+  UAI      bsc    30.8  26.7    25.0  94.4%  +0.5% A1(DIAMOND), D2(出货者), S2(M/L=296.5x)
+  SQD      bsc    30.8   0.0     0.0  93.7%  -2.6% A1(DIAMOND)
+  TAKE     bsc    30.8   0.0     0.0  90.6%  +3.8% A1(DIAMOND)
+
+  🐋 WHALE_DUMP (1 个)
+  代币       链      ACC% DIST% STRUCT%  DEX真金    CEX      LP($)    V/L 信号
+  -----------------------------------------------------------------
+  GWEI     bsc     0.0  40.0    31.2  70.4% -15.2% D3(被动漂移), S1(极端集中)
+
+  🔴 SLOW_DISTRIBUTION (3 个)
+  代币       链      ACC% DIST% STRUCT%  DEX真金    CEX      LP($)    V/L 信号
+  -----------------------------------------------------------------
+  O        bsc     0.0  66.7     0.0  61.3%  +1.2% D2(出货者), D3(被动漂移)
+  ACU      bsc    19.2  60.0     0.0  56.2% +16.2% A2(YELLOW), D1(CEX流入), D2(出货者)
+  ARX      bsc     0.0  60.0     0.0  74.0% +15.7% D1(CEX流入), D2(出货者)
+
+  🔵 MODERATE_ACC (1 个)
+  代币       链      ACC% DIST% STRUCT%  DEX真金    CEX      LP($)    V/L 信号
+  -----------------------------------------------------------------
+  TRIA     bsc    38.5  26.7     0.0  80.6% -30.7% A2(YELLOW), A4(CEX流出), D2(出货者)
+
+  报告已保存: /opt/AI-SUM/report/unified/unified_20260819_1348.md
+
+  持久化完成: unified_results + daily_summary
+[unified] 已保存 10 条结果到 select-sum.db
+  新增预警: AEON(DIAMOND)
+[unified-scan] SUCCESS. Elapsed: 1976.8s
+
+[bigcoin] START: python3 bigcoin/run.py
+
+[whale-scan] 全库扫描启动
+  源库: /opt/select-coin/data/select.db
+  代币总数: 682
+  有效代币: 218, 耗时 1152.5s
+
+==========================================================================================
+ 🐋 庄控预警雷达 — 2026-08-19 14:07
+ 扫描 218 代币 | 🔴高危 0 | 🟠中危 4 | 🟡低危 53 | ✅安全 161
+ 耗时 1152.5s
+==========================================================================================
+
+🟠 中危观察 (≥50%)
+Rank Symbol      Conf%   Top2%   Top5%  Top10%   T2DEX    W1Δ   Prc24h      M/L  C95
+------------------------------------------------------------------------------------------
+   1 HOME        55.2%   77.3%   93.0%   97.3%     N/A  +58.7      -0%     914x    7
+   2 O           55.2%   56.6%   85.1%   95.7%    0.00  +12.2      +4%      33x   10
+   3 STABLE      50.7%   84.8%   90.7%   96.0%    0.00  +-0.6      +0%     849x    9
+   4 PROVE       50.7%   73.0%   94.6%   96.7%     N/A  +11.8      +4%     153x    6
+
+🟡 低危记录 (≥30%) — 前10
+Rank Symbol      Conf%   Top2%   Top5%  Top10%   T2DEX    W1Δ   Prc24h      M/L  C95
+------------------------------------------------------------------------------------------
+   1 TURTLE      49.3%   91.5%   95.9%   98.1%    0.00  +-3.2      -3%       4x    4
+   2 ROBO        49.3%   46.1%   80.5%   93.3%    0.00   +0.1      -3%      62x   12
+   3 TURTLE      49.3%   91.5%   95.9%   98.1%    0.00  +-3.2      -3%       4x    4
+   4 TAC         47.8%   60.4%   83.3%   91.7%     N/A  +41.8      -3%     420x   16
+   5 SHELL       46.3%   53.6%   82.9%   96.8%    0.00  +-1.5      -5%      44x    8
+   6 SHELL       46.3%   53.6%   82.9%   96.8%    0.00  +-1.5      -5%      44x    8
+   7 KGEN        44.8%   52.2%   86.4%   93.8%    0.00 +-13.4      -0%      48x   13
+   8 GWEI        44.8%   76.5%   95.5%   97.0%    0.00   +8.8     -10%      29x    5
+   9 BLESS       43.3%   59.2%   84.3%   92.3%     N/A   +9.8      -6%      71x   19
+  10 ZKP         43.3%   56.8%   80.2%   89.0%    0.00   +5.4      -2%      13x   19
+
+  报告已保存: /opt/AI-SUM/report/whale/whale_20260819_1407.md
+[whale] 已保存 57 条结果到 select-sum.db
+[bigcoin] SUCCESS. Elapsed: 1152.7s
+
+[cost-basis-scan] START: python3 cost-basis-scan/run.py
+2026-08-19 14:08:03,923 [INFO] cost-basis-scan: 加载 215 个代币
+2026-08-19 14:08:05,374 [INFO] cost-basis-scan: 进度: 20/215
+2026-08-19 14:08:06,645 [INFO] cost-basis-scan: 进度: 40/215
+2026-08-19 14:08:07,554 [INFO] gravity_tracker: watchlist 跃迁: bsc/0x40b8129b786d766267a7a118cf8c07e31cdb6fde 历史=RED + C4 暴利出逃 → DEATH_SPIRAL
+2026-08-19 14:08:07,556 [INFO] cost-basis-scan:   UB: DEATH_SPIRAL (ACC=0% DIST=44% CV=0.721 暴利=67.6% 信号=C4)
+2026-08-19 14:08:07,636 [INFO] cost-basis-scan: 进度: 60/215
+2026-08-19 14:08:08,225 [INFO] gravity_tracker: watchlist 跃迁: bsc/0x5506599c722389a60580b5213ea1da60d64754a1 历史=RED + C1 水下加仓 → SQUEEZE_ACC
+2026-08-19 14:08:08,228 [INFO] cost-basis-scan:   ZEST: SQUEEZE_ACC_MED (ACC=29% DIST=0% CV=1.550 暴利=0.1% 信号=C1)
+2026-08-19 14:08:08,666 [INFO] cost-basis-scan: 进度: 80/215
+2026-08-19 14:08:08,704 [INFO] gravity_tracker: watchlist 跃迁: bsc/0x5dbde81fce337ff4bcaaee4ca3466c00aecae274 历史=RED + C4 暴利出逃 → DEATH_SPIRAL
+2026-08-19 14:08:08,706 [INFO] cost-basis-scan:   AGT: DEATH_SPIRAL (ACC=21% DIST=44% CV=0.673 暴利=100.0% 信号=C3,C4)
+2026-08-19 14:08:09,002 [INFO] cost-basis-scan:   ACU: PROFIT_EXIT (ACC=0% DIST=69% CV=0.412 暴利=1.7% 信号=C4,C8)
+2026-08-19 14:08:09,281 [INFO] cost-basis-scan: 进度: 100/215
+2026-08-19 14:08:14,369 [INFO] gravity_tracker: watchlist 跃迁: bsc/0x87acfa3fd7a6e0d48677d070644d76905c2bdc00 历史=RED + C4 暴利出逃 → DEATH_SPIRAL
+2026-08-19 14:08:14,606 [INFO] cost-basis-scan: 进度: 120/215
+2026-08-19 14:08:15,950 [INFO] cost-basis-scan: 进度: 140/215
+2026-08-19 14:08:24,241 [INFO] cost-basis-scan: 进度: 160/215
+2026-08-19 14:08:24,965 [INFO] cost-basis-scan: 进度: 180/215
+2026-08-19 14:08:25,097 [INFO] gravity_tracker: watchlist 跃迁: bsc/0xea37a8de1de2d9d10772eeb569e28bfa5cb17707 历史=RED + C1 水下加仓 → SQUEEZE_ACC
+2026-08-19 14:08:25,098 [INFO] cost-basis-scan:   JCT: SQUEEZE_ACC_MED (ACC=29% DIST=0% CV=0.382 暴利=1.2% 信号=C1)
+2026-08-19 14:08:31,033 [INFO] cost-basis-scan: 进度: 200/215
+2026-08-19 14:08:32,316 [INFO] cost-basis-scan: 扫描完成: 143 有效结果
+
+======================================================================
+💰 cost-basis-scan | 2026-08-19 14:07:51
+   扫描 215 代币 | G1跳过 72 | G2跳过 0
+   有效 143 | 吸筹:0 出货:1 跃迁:4 中性:138
+======================================================================
+
+⚡ 状态跃迁预警 (4 个)
+代币       链     判定                           现价       VWAP     暴利区%         历史 信号          
+------------------------------------------------------------------------------------------
+UB       bsc   DEATH_SPIRAL         $0.119057  $0.076900     67.6% RED/A(RED) C4          
+ZEST     bsc   SQUEEZE_ACC_MED      $0.140346  $0.231921      0.1% RED/A(RED) C1          
+AGT      bsc   DEATH_SPIRAL         $0.016305  $0.003989    100.0% RED/A(RED) C3,C4       
+JCT      bsc   SQUEEZE_ACC_MED      $0.001771  $0.002918      1.2% RED/A(RED) C1          
+
+💀 出货信号 (1 个)
+代币       链     判定                    DIST%         现价       VWAP     暴利区%        LP($) 信号          
+----------------------------------------------------------------------------------------------------
+ACU      bsc   PROFIT_EXIT           68.8% $0.121553  $0.100510      1.7% $    948,193 C4,C8       
+
+📄 报告: /opt/AI-SUM/report/cost-basis/cb_20260819_1408.md
+[cost-basis-scan] SUCCESS. Elapsed: 40.6s
+
+[meta-verdict] START: python3 meta-verdict/run.py
+2026-08-19 14:09:00,835 [INFO] meta-verdict: 收集到 204 个有信号代币（至少 1 个引擎命中）
+2026-08-19 14:24:46,185 [INFO] meta-verdict: [HOP2] hop2_tracking 写入 193/204 条
+2026-08-19 14:24:46,186 [INFO] meta-verdict: hop2_tracking 动态采集完成: 193 条
+2026-08-19 14:24:47,842 [INFO] meta-verdict: 趋势对比: vs 2026-08-19 02:02:27 | 新进0 退出103 ↑7 ↓12 →82 跃变13
+2026-08-19 14:24:47,846 [WARNING] meta-verdict: 生命周期跃迁: UB ⚡ ACCUMULATING→DISTRIBUTING
+2026-08-19 14:24:47,846 [WARNING] meta-verdict: 生命周期跃迁: ACU ⚡ ACCUMULATING→DISTRIBUTING
+2026-08-19 14:24:47,847 [INFO] meta-verdict: 生命周期表已更新 101 条记录
+2026-08-19 14:29:51,066 [INFO] meta-verdict: pump_detector 完成: 180 代币, IMMINENT=17
+
+===========================================================================
+🔮 meta-verdict 综合仲裁 | 2026-08-19 14:08:32
+   有效代币: 204 | 🎯吸筹: 96 | 💀出货: 5
+===========================================================================
+
+🏥 引擎健康
+  ⚠ master: 10h前
+  ✅ opus: 0.9h前
+  ✅ whale: 0.0h前
+  ✅ cost-basis: 0.0h前
+  ✅ unified: 0.3h前
+
+📈 趋势 (vs 2026-08-19 02:02:27)
+  🆕 新进: 0 | 🔚 退出: 103
+  ⬆ 上升: 7 | ⬇ 下降: 12 | → 稳定: 82
+  ⚡ UB: 4.7→-2.8 (-7.5) [CB:无→DEATH_SPIRAL]
+  ⚡ SQD: -1.5→4.5 (+6.0) [CB:DEATH_SPIRAL→无]
+  ⚡ AGT: 2.2→-3.8 (-6.0) [CB:无→DEATH_SPIRAL]
+  ⚡ GPS: 1.0→5.5 (+4.5) [CB:DEATH_SPIRAL→无, unified:YELLOW→无]
+  ⚡ BULLA: -0.1→3.9 (+4.0) [CB:LIQUIDITY_CRISIS→无]
+  ⚡ HEMI: 6.2→3.0 (-3.2) [master:RED→YELLOW]
+  ⚡ AEON: 3.8→6.4 (+2.7) [master:RED→DIAMOND, unified:无→DIAMOND]
+  ⚡ APR: 6.4→3.9 (-2.5) [master:RED→YELLOW]
+  ⚡ DOS: 7.1→5.1 (-2.0) [master:YELLOW→DIAMOND, CB:SQUEEZE_ACC_MED→无]
+  ⚡ ACU: -0.6→-2.5 (-1.8) [master:RED→YELLOW, CB:无→PROFIT_EXIT]
+  ⚡ CYS: 10.4→8.9 (-1.5) [积分微调]
+  ⚡ XPIN: 5.4→3.9 (-1.5) [积分微调]
+  ⚡ IRYS: 2.1→3.6 (+1.5) [积分微调]
+
+🎯 吸筹排行 Top 20
+代币      链       综合分    Δ阶段          master        opuswhale   CB判定                          价格      VWAP
+--------------------------------------------------------------------------------------------------------------
+CYS     bsc     8.9 -1.5🔒 极度控盘      DIAMOND       1.9 LOW                           $   0.5133 $        0
+UAI     bsc     7.6     🔒 极度控盘      DIAMOND       1.6                               $   0.2711 $        0
+TAKE    bsc     6.5     🔒 极度控盘      DIAMOND       2.5 LOW                           $   0.0484 $        0
+SKYAI   bsc     6.5     🎯 吸筹中       YELLOW        2.5 LOW     IRON_HOLD             $   0.3530 $   0.0421
+AEON    bsc     6.4 +2.7ACC_ACCELERATINGDIAMOND       1.9                               $   0.0867 $        0
+JCT     bsc     6.1 +1.0🎯 吸筹中       YELLOW        2.1 LOW     SQUEEZE_ACC_MED       $0.001771353 $0.0029182282
+GPS     bsc     5.5 +4.5🎯 吸筹中       RED           2.5 LOW                           $   0.0179 $        0
+DOS     bsc     5.1 -2.0ACC_ACCELERATINGDIAMOND       1.6 LOW                           $   0.2284 $        0
+ROBO    bsc     5.1 -1.0🎯 吸筹中       YELLOW        3.1 LOW                           $   0.0130 $        0
+STABLE  bsc     4.9     🎯 吸筹中       YELLOW        1.9 MEDIUM                        $   0.0309 $        0
+ZEST    bsc     4.9     🎯 吸筹中       YELLOW        1.9         SQUEEZE_ACC_MED       $   0.1403 $   0.2319
+PROVE   bsc     4.9     🎯 吸筹中       YELLOW        1.9 MEDIUM                        $   0.1566 $        0
+BTW     bsc     4.9     🎯 吸筹中       RED           1.9 LOW                           $   0.4143 $        0
+PROS    base    4.7     🎯 吸筹中       YELLOW        1.9 LOW                           $   0.3792 $        0
+SQD     bsc     4.5 +6.0🔒 极度控盘      DIAMOND       0.5 LOW                           $   0.0408 $        0
+XAN     bsc     4.5     🎯 吸筹中       YELLOW        2.5 LOW                           $   0.0105 $        0
+C       bsc     4.5     🎯 吸筹中       YELLOW        2.5 LOW                           $   0.0632 $        0
+SLX     bsc     4.3     🎯 吸筹中       YELLOW        2.3 LOW                           $   0.0656 $        0
+TRIA    bsc     4.2 +0.3🎯 吸筹中       YELLOW        1.2 LOW                           $0.009957375 $        0
+PRL     bsc     4.1     🎯 吸筹中       YELLOW        2.1 LOW                           $   0.4493 $        0
+
+💀 出货预警 — 5 个
+  AGT       -3.8 DISTRIBUTING unified= cb=DEATH_SPIRAL
+  ARX       -3.3 DISTRIBUTING unified=SLOW_DIST cb=
+  UB        -2.8 DISTRIBUTING unified= cb=DEATH_SPIRAL
+  ACU       -2.5 DISTRIBUTING unified=SLOW_DIST cb=PROFIT_EXIT
+  NAORIS    -2.0 DISTRIBUTING unified=WHALE_DUMP cb=
+
+⚠ 引擎矛盾 — 3 个
+  [C1] UAI        master=DIAMOND 但 whale 无信号 → 庄控未验证
+  [C1] AEON       master=DIAMOND 但 whale 无信号 → 庄控未验证
+  [C1] Beat       master=DIAMOND 但 whale 无信号 → 庄控未验证
+
+📄 综合报告: /opt/AI-SUM/report/meta/meta_20260819_1424.md
+AI-SUM 拉升前兆扫描开始 (v4, 11维100分外挂集成版) | 2026-08-19 14:08:32
+  [DB] 保存 149 个告警代币, 其中 S11 静默建仓 8 个
+  [FILE] 报告生成: /opt/AI-SUM/report/pump/pump_20260819_1408.md (22270 bytes)
+AI-SUM 拉升前兆扫描完成
+
+[meta-verdict] SUCCESS. Elapsed: 1279.0s
+
+[history-report] START: python3 meta-verdict/history_report.py
+AI-SUM 长期分析报告 V5.0 | 2026-08-19 14:29
+  [1/7] 信号回测（1d/3d/7d/14d + MDD）...
+        171 个代币有回测数据
+  [2/7] holder 迁移（14d + 遗漏检测）...
+        213 个代币有迁移数据
+  [2.5/7] 大户行为追踪...
+          大户行为分析完成
+  [3/7] 积分时序...
+        194 个代币有时序数据
+  [4/7] 流动性健康度...
+        94 个ACC代币有流动性数据
+  [5/7] 信号质量评估...
+  [加载双轨指标] 获取最新浓度与大盘/精英分...
+        成功加载 214 个代币的双轨制指标
+  [6/7] ACC综合看板...
+  [DB] token_history 写入 172 行
+  [7/7] hop2 隐蔽吸筹分析...
+        hop2 分析完成
+  [7.5/7] 信号偏离度审计...
+          偏离度审计完成
+  [8] 合约信号总览...
+        合约信号分析完成
+  [9] 实战盈亏研警与避雷雷达...
+        实战盈亏研警分析完成
+
+📄 报告: /opt/AI-SUM/report/history/history_0819_1430.md (30004 bytes, 60.9s)
+[history-report] SUCCESS. Elapsed: 61.2s
+
+[materialize-surge] START: python3 meta-verdict/materialize_surge.py
+已克隆现有隔离库进行增量同步
+  [Batch 1/1] 2026-08-17 14:30:52 至 2026-08-19 14:30:52 同步完成: 212 资产, 961 快照, 耗时 19.21s
+同步成功 (run_id: 5fc5e88a): 212 资产, 961 快照, 0 钱包, 848 价格, 耗时 19.32s
+[materialize-surge] SUCCESS. Elapsed: 19.4s
+
+[anomaly-surge-report] START: python3 meta-verdict/anomaly_surge_report.py
+📄 报告成功输出到: /opt/AI-SUM/report/anomaly/anomaly_intense_surge_0819_1431.md (5426 bytes, 耗时 0.55s)
+[anomaly-surge-report] SUCCESS. Elapsed: 1.8s
+========================================
+Pipeline completed successfully. Total elapsed: 9072.0s
+
+
+========================================
+Pipeline started at 2026-08-20 00:00:01
+========================================
+
+[master-scan] START: python3 master-scan/run.py
