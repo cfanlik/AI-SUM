@@ -80,6 +80,8 @@ def evaluate(
     )
 
     # ── 吸筹置信度 ──
+    has_cex = (ts.cex_hold_earliest > 0 or ts.cex_hold_latest > 0)
+
     acc_checks = [
         ("acc_trend_up", 3,
          ts.acc_cnt_slope > 0,
@@ -105,10 +107,6 @@ def evaluate(
          hp.net_inflow_all_positive,
          f"吸筹者净流入{'全正' if hp.net_inflow_all_positive else '有负'}"),
 
-        ("cex_outflow", 3,
-         ts.cex_delta_pct < -3 and ts.cex_hold_slope < -0.2,
-         f"CEX {ts.cex_hold_earliest:.1f}%\u2192{ts.cex_hold_latest:.1f}% (\u659c\u7387{ts.cex_hold_slope:+.2f})"),
-
         ("price_not_pumped", 1,
          mc.price_change_24h is None or mc.price_change_24h < config.ACC_PRICE_PUMP_MAX,
          f"价格24h {mc.price_change_24h or 0:+.1f}%"),
@@ -119,14 +117,17 @@ def evaluate(
          f"买/卖人数比 {mc.buy_sell_person_ratio or 0:.1f}"),
     ]
 
+    if has_cex:
+        acc_checks.append((
+            "cex_outflow", 3,
+            ts.cex_delta_pct < -3 and ts.cex_hold_slope < -0.2,
+            f"CEX {ts.cex_hold_earliest:.1f}%\u2192{ts.cex_hold_latest:.1f}% (\u659c\u7387{ts.cex_hold_slope:+.2f})"
+        ))
+
     _calc_confidence(vr, acc_checks, is_acc=True)
 
     # ── 出货置信度 ──
     dist_checks = [
-        ("cex_inflow_heavy", 3,
-         ts.cex_delta_pct > 5 and ts.cex_hold_slope > 0.3,
-         f"CEX持续流入 {ts.cex_hold_earliest:.1f}%\u2192{ts.cex_hold_latest:.1f}% (斜率{ts.cex_hold_slope:+.2f})"),
-
         ("major_seller", 3,
          hp.seller_count > 0 and any(
              s.get("hold", 0) >= 1.0 for s in hp.sellers),
@@ -167,12 +168,20 @@ def evaluate(
 
         ("price_7d_drop", 1,
          mc.price_change_7d is not None and mc.price_change_7d < config.POOL_PRICE_7D_DROP_PCT,
-         f"7d\u4ef7\u683c {mc.price_change_7d or 0:+.1f}%"),
-
-        ("cex_inflow", 2,
-         ts.cex_delta_pct > 3 and ts.cex_hold_slope > 0.2,
-         f"CEX {ts.cex_hold_earliest:.1f}%\u2192{ts.cex_hold_latest:.1f}% (\u659c\u7387{ts.cex_hold_slope:+.2f})"),
+         f"7d价格 {mc.price_change_7d or 0:+.1f}%"),
     ]
+
+    if has_cex:
+        dist_checks.append((
+            "cex_inflow_heavy", 3,
+            ts.cex_delta_pct > 5 and ts.cex_hold_slope > 0.3,
+            f"CEX持续流入 {ts.cex_hold_earliest:.1f}%\u2192{ts.cex_hold_latest:.1f}% (斜率{ts.cex_hold_slope:+.2f})"
+        ))
+        dist_checks.append((
+            "cex_inflow", 2,
+            ts.cex_delta_pct > 3 and ts.cex_hold_slope > 0.2,
+            f"CEX {ts.cex_hold_earliest:.1f}%\u2192{ts.cex_hold_latest:.1f}% (斜率{ts.cex_hold_slope:+.2f})"
+        ))
 
     _calc_confidence(vr, dist_checks, is_acc=False)
 
