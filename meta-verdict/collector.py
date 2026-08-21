@@ -378,6 +378,33 @@ def save_meta_result(conn: sqlite3.Connection, result: dict):
         except Exception:
             pass
         
+    payload = {
+        "scan_time": "",
+        "chain": "bsc",
+        "token_address": "",
+        "token_symbol": "",
+        "meta_score": 0.0,
+        "meta_score_smooth": 0.0,
+        "meta_verdict": "NEUTRAL",
+        "engine_hits": 0,
+        "master_signal": "",
+        "opus_verdict": "",
+        "unified_signal": "",
+        "whale_level": "",
+        "cb_verdict": "",
+        "stage": "",
+        "confidence_tier": "L3-Watch",
+        "resilience_index": 0.0,
+        "resilience_norm": 0.5,
+        "master_score": 0.0,
+        "opus_score": 0.0,
+        "unified_score": 0.0,
+        "whale_score": 0.0,
+        "cb_score": 0.0,
+        "hop2_score": 0.0,
+    }
+    payload.update(result)
+
     conn.execute("""
         INSERT OR REPLACE INTO meta_snapshots
         (scan_time, chain, token_address, token_symbol, meta_score, meta_score_smooth, meta_verdict,
@@ -389,7 +416,7 @@ def save_meta_result(conn: sqlite3.Connection, result: dict):
                 :cb_verdict, :stage,
                 :confidence_tier, :resilience_index, :resilience_norm,
                 :master_score, :opus_score, :unified_score, :whale_score, :cb_score, :hop2_score)
-    """, result)
+    """, payload)
     conn.commit()
 
 
