@@ -63,6 +63,19 @@ def research(
         ctx.vl_ratio = gecko_db.get("vl_ratio") or 0
         ctx.mcap_liq_ratio = gecko_db.get("mcap_liq_ratio") or 0
 
+        # 从 gecko_db 恢复池买卖指标与 LP 门控
+        buyers = gecko_db.get("buyers_24h") or 0
+        sellers = gecko_db.get("sellers_24h") or 0
+        if buyers > 0 or sellers > 0:
+            ctx.pool_buyers_24h = buyers
+            ctx.pool_sellers_24h = sellers
+            ctx.buy_sell_person_ratio = round(buyers / max(sellers, 1), 2)
+
+        if ctx.lp_usd is not None:
+            ctx.pool_lp_usd = ctx.lp_usd
+            ctx.lp_thin = ctx.lp_usd < config.POOL_LP_THIN_USD
+            ctx.gecko_pool_ok = True
+
     # 2. 联网 GeckoTerminal API
     if online:
         # Token 基础信息

@@ -48,11 +48,14 @@ def print_leaderboard(results: list[VerdictResult], elapsed: float = 0):
 
     # 出货 Top N
     print(f"\n  {R}\U0001f534 出货 Top {config.TOP_N}（置信度降序，已排除MIXED）{E}")
-    print(f"  {'排名':>4}  {'代币':<10} {'链':<5} {'置信度':>6}  {'出货者':>5} {'出货占比':>7} {'假鲸鱼':>5} {'CEX变化':>7} {chr(0x394)+'CEX':>6} {'LP(USD)':>10} {'48h派发':>6}")
-    print(f"  {'─'*105}")
-    for i, r in enumerate(top_dist, 1):
-        lp_s = f"${r.lp_usd:,.0f}" if r.lp_usd else "-"
-        print(f"  {i:>4}  {r.symbol:<10} {r.chain:<5} {r.dist_confidence:>5.1f}%  {r.seller_count:>5} {r.seller_hold_pct:>6.1f}% {r.fake_whale_count:>5} {r.cex_delta_pct:>+6.1f}% {_cex_arrow(r.cex_delta_pct):>6} {lp_s:>10} {r.dist_48h_count:>4}个")
+    if top_dist:
+        print(f"  {'排名':>4}  {'代币':<10} {'链':<5} {'置信度':>6}  {'出货者':>5} {'出货占比':>7} {'假鲸鱼':>5} {'CEX变化':>7} {chr(0x394)+'CEX':>6} {'LP(USD)':>10} {'48h派发':>6}")
+        print(f"  {'─'*105}")
+        for i, r in enumerate(top_dist, 1):
+            lp_s = f"${r.lp_usd:,.0f}" if r.lp_usd else "-"
+            print(f"  {i:>4}  {r.symbol:<10} {r.chain:<5} {r.dist_confidence:>5.1f}%  {r.seller_count:>5} {r.seller_hold_pct:>6.1f}% {r.fake_whale_count:>5} {r.cex_delta_pct:>+6.1f}% {_cex_arrow(r.cex_delta_pct):>6} {lp_s:>10} {r.dist_48h_count:>4}个")
+    else:
+        print("  *当前扫描周期无代币满足出货判定门槛（置信度 ≥ 50%）*")
 
     # 混合信号（需人工研判）
     if mixed:
@@ -64,7 +67,6 @@ def print_leaderboard(results: list[VerdictResult], elapsed: float = 0):
             print(f"  {i:>4}  {r.symbol:<10} {r.chain:<5} {r.acc_confidence:>5.1f}% {r.dist_confidence:>5.1f}%  {r.acc_cnt:>5} {r.cex_delta_pct:>+6.1f}% {_cex_arrow(r.cex_delta_pct):>6} {lp_s:>10}")
 
     print(f"\n{sep}\n")
-
 
 
 def print_single_verdict(vr: VerdictResult):
@@ -139,16 +141,22 @@ def save_md_leaderboard(results: list[VerdictResult]) -> str:
             f"| {i} | {r.symbol} | {r.chain} | {r.acc_confidence:.1f}% | {r.acc_cnt} | {r.acc_hold_pct:.1f}% | {r.dex_verified_pct:.1f}% | {r.cex_delta_pct:+.1f}% | {_cex_arrow(r.cex_delta_pct)} | {lp_s} | {r.mcap_liq_ratio:.0f}x | {r.vl_ratio:.2f} | {PHASE_CN.get(r.phase, r.phase)} |"
         )
 
-    lines += [
-        "\n## \U0001f534 出货 Top 10（verdict=SLOW_DISTRIBUTION）\n",
-        "| 排名 | 代币 | 链 | 置信度 | 出货者 | 出货占比 | 假鲸鱼 | CEX变化 | LP(USD) | FDV/LP | V/L | 48h派发 |",
-        "|------|------|-----|--------|--------|----------|--------|---------|---------|---------| ",
-    ]
-    for i, r in enumerate(top_dist, 1):
-        lp_s = f"${r.lp_usd:,.0f}" if r.lp_usd else "-"
-        lines.append(
-            f"| {i} | {r.symbol} | {r.chain} | {r.dist_confidence:.1f}% | {r.seller_count} | {r.seller_hold_pct:.1f}% | {r.fake_whale_count} | {r.cex_delta_pct:+.1f}% | {lp_s} | {r.mcap_liq_ratio:.0f}x | {r.vl_ratio:.2f} | {r.dist_48h_count}个 |"
-        )
+    if top_dist:
+        lines += [
+            "\n## \U0001f534 出货 Top 10（verdict=SLOW_DISTRIBUTION）\n",
+            "| 排名 | 代币 | 链 | 置信度 | 出货者 | 出货占比 | 假鲸鱼 | CEX变化 | LP(USD) | FDV/LP | V/L | 48h派发 |",
+            "|------|------|-----|--------|--------|----------|--------|---------|---------|---------|------|---------|",
+        ]
+        for i, r in enumerate(top_dist, 1):
+            lp_s = f"${r.lp_usd:,.0f}" if r.lp_usd else "-"
+            lines.append(
+                f"| {i} | {r.symbol} | {r.chain} | {r.dist_confidence:.1f}% | {r.seller_count} | {r.seller_hold_pct:.1f}% | {r.fake_whale_count} | {r.cex_delta_pct:+.1f}% | {lp_s} | {r.mcap_liq_ratio:.0f}x | {r.vl_ratio:.2f} | {r.dist_48h_count}个 |"
+            )
+    else:
+        lines += [
+            "\n## \U0001f534 出货 Top 10（verdict=SLOW_DISTRIBUTION）\n",
+            "\n*当前扫描周期无代币满足出货判定门槛（置信度 ≥ 50%）*\n"
+        ]
 
     if mixed:
         lines += [
@@ -167,7 +175,6 @@ def save_md_leaderboard(results: list[VerdictResult]) -> str:
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
     return path
-
 
 
 def save_md_single(vr: VerdictResult) -> str:

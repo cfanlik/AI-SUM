@@ -63,11 +63,12 @@ def build_profile(
         addr_short = (h.get("wallet_address") or "?")[:12] + "..."
 
         # ── 出货者 ──
-        if sell > 0 and buy > 0 and sell / max(buy, 1) >= config.DIST_SELL_BUY_RATIO:
+        is_seller = (sell > 0 and buy == 0) or (sell > 0 and buy > 0 and sell / max(buy, 1) >= config.DIST_SELL_BUY_RATIO)
+        if is_seller:
             entry = {
                 "addr": addr_short, "hold": hold_pct,
                 "buy": buy, "sell": sell,
-                "ratio": round(sell / max(buy, 1), 1),
+                "ratio": round(sell / max(buy, 1), 1) if buy > 0 else 999.0,
                 "h48_out": h48_out,
             }
             profile.sellers.append(entry)
@@ -75,7 +76,7 @@ def build_profile(
 
         # ── 假鲸鱼 ──
         if (not is_infra and hold_pct >= 2.0
-                and dex_r >= 0 and dex_r < 0.05
+                and (dex_r < 0.05 or dex_r == -1)
                 and buy <= 1):
             entry = {
                 "addr": addr_short, "hold": hold_pct,
