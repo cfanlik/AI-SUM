@@ -21,42 +21,65 @@ def main():
         print(f"Warning: materialize_surge sync failed: {e}, continuing...")
 
     # 1. 运行伪流动性检测
-    anomaly_analyzer = AnomalyAnalyzer()
-    anomaly_results = anomaly_analyzer.analyze()
+    anomaly_results = []
+    try:
+        anomaly_analyzer = AnomalyAnalyzer()
+        anomaly_results = anomaly_analyzer.analyze()
+    except Exception as e:
+        print(f"Error in anomaly_analyzer: {e}")
 
     # 2. 运行周期性突发吸筹 60d 4阶动量分析
-    surge_analyzer = ImpulseSurgeAnalyzer()
-    surge_results = surge_analyzer.analyze()
+    surge_results = []
+    try:
+        surge_analyzer = ImpulseSurgeAnalyzer()
+        surge_results = surge_analyzer.analyze()
+    except Exception as e:
+        print(f"Error in surge_analyzer: {e}")
 
     # 3. 全库真实吸筹候选先计算持币证据，再质量门禁并排序 Top10。
-    accumulation_analyzer = AccumulationTop10Analyzer()
-    accumulation_run = accumulation_analyzer.analyze(
-        surge_results=surge_results,
-        fake_liq_results=anomaly_results,
-        persist=True,
-    )
+    accumulation_run = None
+    try:
+        accumulation_analyzer = AccumulationTop10Analyzer()
+        accumulation_run = accumulation_analyzer.analyze(
+            surge_results=surge_results,
+            fake_liq_results=anomaly_results,
+            persist=True,
+        )
+    except Exception as e:
+        print(f"Error in accumulation_analyzer: {e}")
 
     # 4. 运行 DEX 庄家资金穿透分析 (含 BUG-1~4 防错算法)
-    print("Executing DEX Penetration Analysis...")
-    pen_results = run_penetration_analysis()
-    print(f"PENETRATION_ANALYSIS_COMPLETED: Analyzed {len(pen_results)} tokens")
+    try:
+        print("Executing DEX Penetration Analysis...")
+        pen_results = run_penetration_analysis()
+        print(f"PENETRATION_ANALYSIS_COMPLETED: Analyzed {len(pen_results)} tokens")
+    except Exception as e:
+        print(f"Error in penetration_analysis: {e}")
 
     # 5. 运行拉升前兆共振拟合引擎 (3 维拟合降噪)
-    print("Executing Pump Resonance Fit Analysis...")
-    res_results = run_pump_fit_analysis()
-    print(f"PUMP_RESONANCE_COMPLETED: Analyzed {len(res_results)} tokens")
+    try:
+        print("Executing Pump Resonance Fit Analysis...")
+        res_results = run_pump_fit_analysis()
+        print(f"PUMP_RESONANCE_COMPLETED: Analyzed {len(res_results)} tokens")
+    except Exception as e:
+        print(f"Error in pump_fit_analysis: {e}")
 
     generator = AnomalyReportGenerator()
 
     # 落盘专报 A：《AI-SUM 伪流动性陷阱与四大物理维度风控专报》
-    rep_a = generator.generate_report(anomaly_results)
-    print("REPORT_A_GENERATED:", rep_a)
+    try:
+        rep_a = generator.generate_report(anomaly_results)
+        print("REPORT_A_GENERATED:", rep_a)
+    except Exception as e:
+        print(f"Error generating Report A: {e}")
 
     # 落盘专报 B：《周期性突发吸筹风控专报》
-    rep_b = generator.generate_periodic_impulse_surge_report(accumulation_run)
-    print("REPORT_B_GENERATED:", rep_b)
-
-
+    try:
+        if accumulation_run is not None:
+            rep_b = generator.generate_periodic_impulse_surge_report(accumulation_run)
+            print("REPORT_B_GENERATED:", rep_b)
+    except Exception as e:
+        print(f"Error generating Report B: {e}")
 
     # 运行新版 剧烈突发吸筹风控专报 生成器
     print("Executing Anomaly Intense Surge Report...")
@@ -66,16 +89,21 @@ def main():
         print(f"Error executing anomaly_surge_report: {e}")
 
     # 6. 全局物理专报上限清理 (每个分类最多保留 60 份)
-    from anomaly_watch.report_cleaner import prune_all_aisum_reports
-    deleted_cnt = prune_all_aisum_reports()
-    print(f"REPORT_PRUNING_COMPLETED: Deleted {deleted_cnt} old report files")
+    try:
+        from anomaly_watch.report_cleaner import prune_all_aisum_reports
+        deleted_cnt = prune_all_aisum_reports()
+        print(f"REPORT_PRUNING_COMPLETED: Deleted {deleted_cnt} old report files")
+    except Exception as e:
+        print(f"Error in report cleaner: {e}")
 
     # 7. 运行市场实时观察与多维白盒判定报告生成 (Live Observation)
-    print("Executing Live Observation Report Generation...")
-    from anomaly_watch.generate_live_observation_report import generate_report
-    generate_report()
-    print("REPORT_LIVE_OBSERVATION_GENERATED")
+    try:
+        print("Executing Live Observation Report Generation...")
+        from anomaly_watch.generate_live_observation_report import generate_report
+        generate_report()
+        print("REPORT_LIVE_OBSERVATION_GENERATED")
+    except Exception as e:
+        print(f"Error executing generate_live_observation_report: {e}")
 
 if __name__ == "__main__":
     main()
-
