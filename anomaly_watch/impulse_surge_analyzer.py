@@ -87,7 +87,8 @@ class ImpulseSurgeAnalyzer:
 
         s2_hit = (slope_7d is not None and slope_7d > 50.0)
         if s2_hit:
-            reasons.append(f"S2: 4阶PnL动量 (S7d={slope_7d:.1f}, S15d={slope_15d:.1f})")
+            s15d_str = f"{slope_15d:.1f}" if slope_15d is not None else "N/A"
+            reasons.append(f"S2: 4阶PnL动量 (S7d={slope_7d:.1f}, S15d={s15d_str})")
 
         # --- S3: 巨鲸净流入 ---
         cur.execute("""

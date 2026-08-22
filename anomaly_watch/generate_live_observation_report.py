@@ -369,12 +369,29 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
                 "event_id": ev_id
             })
 
+    # 计算最新 A 信号时效性 (Data Freshness)
+    max_signal_dt = None
+    if events_rows:
+        for ev in events_rows:
+            ev_dt = ensure_utc(ev["a_time"])
+            if max_signal_dt is None or ev_dt > max_signal_dt:
+                max_signal_dt = ev_dt
+
+    is_stale_signal = False
+    freshness_msg = "FRESH"
+    if max_signal_dt:
+        signal_age_hours = (as_of_dt - max_signal_dt).total_seconds() / 3600.0
+        if signal_age_hours > 48.0:
+            is_stale_signal = True
+            freshness_msg = f"STALE_WARNING (>48h: {signal_age_hours:.1f}h)"
+
     doc = {
         "report_metadata": {
             "report_generated_at_utc": datetime.now(timezone.utc).isoformat(timespec='seconds') + "Z",
             "as_of_utc": as_of,
             "evaluation_status": evaluation_status,
             "evaluation_reason": evaluation_reason,
+            "data_freshness_status": freshness_msg,
             "git_commit": git_commit,
             "config_hash": config_hash
         },
@@ -600,6 +617,7 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
         f"> 生成时间（UTC）：{doc['report_metadata']['report_generated_at_utc']}",
         f"> 数据源：SQLite 生产库只读对账；对账基线 (as_of_utc)：`{doc['report_metadata']['as_of_utc']}`",
         f"> 门禁状态：`{GATE_CN.get(doc['report_metadata']['evaluation_status'], doc['report_metadata']['evaluation_status'])}` | 原因码：`{doc['report_metadata']['evaluation_reason']}`",
+        f"> 数据时效：`{doc['report_metadata']['data_freshness_status']}`",
         f"> 软件版本：git_commit=`{doc['report_metadata']['git_commit']}` | config_hash=`{doc['report_metadata']['config_hash']}`",
         "",
         "## 一、 最终对准修正后的数据报告表 (Aligned Observation)",
