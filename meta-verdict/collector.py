@@ -1,6 +1,6 @@
 """
 meta-verdict 数据收集器
-从 select-sum.db 读取 5 个引擎的最新扫描结果
+从 select-sum.db 读取 5 个引擎的最新扫描结果，并跨库聚合 Gecko 深度、换手与持仓特征
 """
 from __future__ import annotations
 import os
@@ -25,6 +25,21 @@ class TokenEngineData:
     exit_acc_count:  int = 0
     diff_stay_score: float = 0.0
     diff_total_score:float = 0.0
+
+    # 市场深度与流动性 (来自 gecko_market_data)
+    reserve_usd:     float = 0.0
+    volume_24h:      float = 0.0
+    price_usd:       float = 0.0
+    market_cap_usd:  float = 0.0
+    fdv_usd:         float = 0.0
+
+    # 筹码与 CEX 渗透 (来自 unified_results / whale_snapshots)
+    cex_hold_pct:       float = 0.0
+    cex_delta_pct:      float = 0.0
+    institutional_hold: float = 0.0
+    top10_hold:         float = 0.0
+    top2_hold:          float = 0.0
+    lp_locked_ratio:    float = 0.0
 
     # master-scan
     master_signal:  str = ""
@@ -63,7 +78,6 @@ def get_connection() -> sqlite3.Connection:
 def ensure_tables(conn: sqlite3.Connection):
     """确保所有表存在"""
     conn.executescript("""
-        -- opus-scan 结果表
         CREATE TABLE IF NOT EXISTS opus_snapshots (
             id             INTEGER PRIMARY KEY AUTOINCREMENT,
             scan_time      TEXT NOT NULL,
@@ -82,7 +96,6 @@ def ensure_tables(conn: sqlite3.Connection):
         );
         CREATE INDEX IF NOT EXISTS idx_opus_token ON opus_snapshots(chain, token_address, scan_time);
 
-        -- unified-scan 结果表
         CREATE TABLE IF NOT EXISTS unified_snapshots (
             id             INTEGER PRIMARY KEY AUTOINCREMENT,
             scan_time      TEXT NOT NULL,
@@ -97,7 +110,6 @@ def ensure_tables(conn: sqlite3.Connection):
         );
         CREATE INDEX IF NOT EXISTS idx_unified_token ON unified_snapshots(chain, token_address, scan_time);
 
-        -- whale-scan 结果表
         CREATE TABLE IF NOT EXISTS whale_snapshots (
             id             INTEGER PRIMARY KEY AUTOINCREMENT,
             scan_time      TEXT NOT NULL,
@@ -117,7 +129,7 @@ def ensure_tables(conn: sqlite3.Connection):
 
 def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
     """
-    从 5 个引擎的数据表中收集最新结果，合并成每代币一条记录
+    从 5 个引擎的数据表中收集最新结果，并跨库补充深度与时序指标
     """
     tokens: dict[str, TokenEngineData] = {}
 
@@ -125,7 +137,6 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
         return f"{chain}:{addr.lower()}"
 
     # ── 1. master-scan (watchlist 表) ──
-    # 包含 EXPIRED 代币 — 它们仍有历史信号价值
     rows = conn.execute("""
         SELECT chain, token_address, token_symbol, signal_level, trigger_pattern, status
         FROM watchlist
@@ -135,13 +146,11 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
         if k not in tokens:
             tokens[k] = TokenEngineData(chain=r["chain"], token_address=r["token_address"],
                                          token_symbol=r["token_symbol"] or "?")
-        # ACTIVE 代币直接计分；EXPIRED 代币降一级
         status = r["status"] or "ACTIVE"
         signal = r["signal_level"] or ""
         if status == "ACTIVE":
             tokens[k].master_signal = signal
         else:
-            # EXPIRED: DIAMOND→YELLOW, RED→YELLOW, YELLOW→保留
             expired_map = {"DIAMOND": "YELLOW", "RED": "YELLOW", "YELLOW": "YELLOW"}
             tokens[k].master_signal = expired_map.get(signal, "")
         tokens[k].master_pattern = r["trigger_pattern"] or ""
@@ -188,6 +197,11 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
                       "WHALE_DUMP": "WHALE_DUMP", "SLOW_DISTRIBUTION": "SLOW_DIST"}
         tokens[k].unified_signal = signal_map.get(verdict, verdict)
         tokens[k].unified_score  = r["acc_score"] or 0
+        tokens[k].cex_hold_pct   = r["cex_hold_pct"] or 0.0
+        tokens[k].cex_delta_pct  = r["cex_delta_pct"] or 0.0
+        tokens[k].institutional_hold = r["institutional_hold"] or 0.0
+        tokens[k].top10_hold     = r["top10_hold"] or 0.0
+        tokens[k].top2_hold      = r["top2_hold"] or 0.0
         tokens[k].engine_hits += 1
 
     # ── 4. whale-scan ──
@@ -207,6 +221,10 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
                                          token_symbol=r["token_symbol"] or "?")
         tokens[k].whale_level = r["level"] or ""
         tokens[k].whale_conf  = r["confidence"] or 0
+        if r["top2_hold"]:
+            tokens[k].top2_hold = r["top2_hold"]
+        if r["top5_hold"] and not tokens[k].top10_hold:
+            tokens[k].top10_hold = r["top5_hold"]
         tokens[k].engine_hits += 1
 
     # ── 5. cost-basis-scan ──
@@ -233,31 +251,31 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
         tokens[k].cb_signals      = r["triggered_signals"] or ""
         tokens[k].engine_hits += 1
 
-    # ── 价格补全与时序风险差分分析 (Gemini 3.5 降权回溯版) ──
+    # ── 跨库深度与时序风险差分分析 ──
     try:
         src_db = os.environ.get("SRC_DB_PATH", "/opt/select-coin/data/select.db")
         conn.execute(f"ATTACH '{src_db}' AS src")
         for k, t in tokens.items():
-            # 价格补全
-            if t.cb_gecko_price == 0:
-                row = conn.execute(
-                    "SELECT price_usd FROM src.gecko_market_data "
-                    "WHERE chain=? AND token_address=? AND price_usd>0 "
-                    "ORDER BY scan_time DESC LIMIT 1",
-                    (t.chain, t.token_address)
-                ).fetchone()
-                if row:
-                    t.cb_gecko_price = row[0]
-            
+            # 价格与市场深度补全
+            row_market = conn.execute("""
+                SELECT price_usd, reserve_usd, volume_24h, vl_ratio, market_cap_usd, fdv_usd 
+                FROM src.gecko_market_data 
+                WHERE chain=? AND token_address=? 
+                ORDER BY scan_time DESC LIMIT 1
+            """, (t.chain, t.token_address)).fetchone()
+
+            if row_market:
+                if t.cb_gecko_price == 0 and row_market["price_usd"]:
+                    t.cb_gecko_price = row_market["price_usd"]
+                t.price_usd = row_market["price_usd"] or 0.0
+                t.reserve_usd = row_market["reserve_usd"] or 0.0
+                t.volume_24h = row_market["volume_24h"] or 0.0
+                t.vl_ratio = row_market["vl_ratio"] or 0.0
+                t.market_cap_usd = row_market["market_cap_usd"] or 0.0
+                t.fdv_usd = row_market["fdv_usd"] or 0.0
+
             # 时序与抗稀释特征计算
             try:
-                row_vl = conn.execute(
-                    "SELECT vl_ratio FROM src.gecko_market_data "
-                    "WHERE chain=? AND token_address=? AND vl_ratio>=0 "
-                    "ORDER BY scan_time DESC LIMIT 1", (t.chain, t.token_address)
-                ).fetchone()
-                t.vl_ratio = row_vl[0] if row_vl else 0.0
-
                 rows_snap = conn.execute("""
                     SELECT snapshot_time, wallet_address, is_accumulating, acc_score
                     FROM src.bubblemap_holders
@@ -279,7 +297,6 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
                     from datetime import datetime
                     curr_dt = datetime.strptime(curr_time, "%Y-%m-%d %H:%M:%S")
                     
-                    # ── 时间序列向后滑动回溯 ──
                     for t_str in times[1:]:
                         t_dt = datetime.strptime(t_str, "%Y-%m-%d %H:%M:%S")
                         if (curr_dt - t_dt).total_seconds() >= 600:
@@ -307,7 +324,6 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
                             t.diff_stay_score = 0.0
                             prev_stay_avg = sum(prev_acc.values()) / len(prev_acc) if prev_acc else 50.0
 
-                        # ── 门差分动态降权模型 (防稀释补丁) ──
                         new_addrs = set(curr_acc.keys()) - set(prev_acc.keys())
                         weighted_curr_sum = sum(curr_acc[a] for a in stay_addrs)
                         total_weight = len(stay_addrs) * 1.0
@@ -315,10 +331,7 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
                         for a in new_addrs:
                             score_a = curr_acc[a]
                             baseline = prev_stay_avg
-                            if score_a < baseline:
-                                w_a = 0.3
-                            else:
-                                w_a = 1.0
+                            w_a = 0.3 if score_a < baseline else 1.0
                             weighted_curr_sum += score_a * w_a
                             total_weight += w_a
                             
@@ -336,7 +349,7 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
 
 
 def save_meta_result(conn: sqlite3.Connection, result: dict):
-    """保存 meta-verdict 仲裁结果 — 含分项积分"""
+    """保存 meta-verdict 仲裁结果"""
     conn.execute("""
         CREATE TABLE IF NOT EXISTS meta_snapshots (
             id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -366,7 +379,6 @@ def save_meta_result(conn: sqlite3.Connection, result: dict):
             UNIQUE(chain, token_address, scan_time)
         )
     """)
-    # 防御性 Alter 数据库增加新增字段，防老表崩溃
     for col, typedef in [
         ("meta_score_smooth", "REAL DEFAULT 0"),
         ("resilience_index", "REAL DEFAULT 0"),
@@ -420,7 +432,7 @@ def save_meta_result(conn: sqlite3.Connection, result: dict):
     conn.commit()
 
 
-# ── hop2 跟踪采集（v5 新增）──
+# ── hop2 跟踪采集 ──
 
 def ensure_hop2_tracking_table(conn: sqlite3.Connection):
     """确保 hop2_tracking 表存在"""
@@ -449,17 +461,6 @@ def ensure_hop2_tracking_table(conn: sqlite3.Connection):
 
 
 def collect_hop2_tracking(sum_conn: sqlite3.Connection, scan_time: str, tokens_to_track: list = None):
-    """
-    每轮 meta-verdict 运行时，从 src.bubblemap_holders 采集 hop2 统计。
-    前置条件: src DB 已通过 ATTACH 挂载为 'src'。
-    
-    字段名对照 bubblemap_holders 表:
-      - dex_ratio_hop2  (REAL, nullable)
-      - gmgn_verified   (INTEGER, nullable, 0/1/2)
-      - entity_id       (TEXT, default '')
-      - is_accumulating (INTEGER, default 0)
-      - batch_id        (TEXT)
-    """
     import config as _cfg
     src_db = os.environ.get("SRC_DB_PATH", _cfg.SRC_DB_PATH)
     
@@ -474,11 +475,10 @@ def collect_hop2_tracking(sum_conn: sqlite3.Connection, scan_time: str, tokens_t
         logger.info("[HOP2] watchlist 为空，跳过采集")
         return 0
     
-    # ATTACH src DB
     try:
         sum_conn.execute(f"ATTACH '{src_db}' AS src")
     except Exception:
-        pass  # 可能已 ATTACH
+        pass
     
     saved = 0
     for t in tokens:
@@ -522,7 +522,6 @@ def collect_hop2_tracking(sum_conn: sqlite3.Connection, scan_time: str, tokens_t
         hop2_acc = row["hop2_acc_count"] or 0
         hop2_acc_pct = hop2_acc / max(acc, 1)
         
-        # 获取最新价格
         price_row = sum_conn.execute(
             "SELECT price_usd FROM src.gecko_market_data "
             "WHERE token_address = ? AND price_usd > 0 "

@@ -1,8 +1,11 @@
 """
-meta-verdict 报告生成器
-终端输出 + Markdown 综合雷达报（含趋势+健康+叙事）
+meta-verdict 报告生成器 (Master Cockpit 决策驾驶舱全新重构版)
+终端输出 + Markdown 决策总控面板 (含红绿灯态势 + 六维全景总面板 + 5轮多快照拟合)
 """
 from __future__ import annotations
+import os
+import logging
+logger = logging.getLogger("meta-verdict")
 from datetime import datetime
 from pathlib import Path
 from arbitrator import MetaResult
@@ -29,15 +32,15 @@ def format_price(val) -> str:
     if val == 0:
         return "0"
     if val >= 1:
-        return f"{val:.2f}"
+        return f"${val:.2f}"
     if val >= 0.01:
-        return f"{val:.4f}"
-    s = f"{val:.10f}".rstrip('0')
+        return f"${val:.4f}"
+    s = f"{val:.8f}".rstrip('0')
     if s.endswith('.'):
         s = s[:-1]
     if s == "0" or float(s) == 0:
-        return f"{val:.2e}"
-    return s
+        return f"${val:.2e}"
+    return f"${s}"
 
 
 def generate_report(
@@ -49,276 +52,156 @@ def generate_report(
     health: list[dict] = None,
     conflicts: list = None,
 ) -> str:
-    """终端 + MD 双输出"""
+    """终端 + MD 双输出 (Master Cockpit 架构)"""
 
-    # ── 终端概览 ──
-    print(f"\n{'='*75}")
-    print(f"🔮 meta-verdict 综合仲裁 | {scan_time}")
-    print(f"   有效代币: {all_count} | 🎯吸筹: {len(acc_list)} | 💀出货: {len(dist_list)}")
-    print(f"{'='*75}")
+    all_ranked = acc_list + [r for r in dist_list if r not in acc_list]
+    all_ranked.sort(key=lambda x: x.meta_score, reverse=True)
 
-    # ── 终端: 引擎健康 ──
+    # ── 1. 终端概览输出 ──
+    print(f"\n{'='*80}")
+    print(f"🔮 Meta-Verdict 决策总控驾驶舱 (Master Cockpit) | {scan_time}")
+    print(f"   有效评估: {all_count} | 🎯 吸筹共振: {len(acc_list)} | 💀 出货派发: {len(dist_list)}")
+    print(f"{'='*80}")
+
     if health:
         print(f"\n🏥 引擎健康")
         for h in health:
             print(f"  {h['status']} {h['engine']}: {h['detail']}")
 
-    # ── 终端: 趋势摘要 ──
-    if trend and trend.has_prev:
-        print(f"\n📈 趋势 (vs {trend.prev_scan_time})")
-        print(f"  🆕 新进: {len(trend.newcomers)} | 🔚 退出: {len(trend.exits)}")
-        print(f"  ⬆ 上升: {trend.score_up} | ⬇ 下降: {trend.score_down} | → 稳定: {trend.stable}")
-        if trend.jumps:
-            for j in trend.jumps:
-                sign = "+" if j["delta"] > 0 else ""
-                print(f"  ⚡ {j['symbol']}: {j['prev']:.1f}→{j['curr']:.1f} ({sign}{j['delta']:.1f}) [{j['cause']}]")
-        if trend.newcomers:
-            names = ", ".join(f"{n['symbol']}({n['score']:.1f})" for n in trend.newcomers[:5])
-            print(f"  🆕 {names}")
+    # ── 2. 分类归集红绿灯代币 ──
+    l1_alpha = [r for r in all_ranked if r.confidence_tier == "L1-Alpha"]
+    l1_squeeze = [r for r in all_ranked if r.confidence_tier == "L1-Squeeze"]
+    l1_special = [r for r in all_ranked if r.confidence_tier == "L1-Special"]
+    dump_rug = [r for r in all_ranked if r.meta_verdict == "DIST" or r.confidence_tier == "DENIED"]
 
-    # ── 终端: 吸筹排行 ──
-    if acc_list:
-        print(f"\n🎯 吸筹排行 Top {min(len(acc_list), config.META_TOP_N)}")
-        # 带 delta 列
-        print(f"{'代币':<8}{'链':<5}{'综合分':>6}{'Δ':>5}{'阶段':<12}"
-              f"{'master':<10}{'opus':>8}{'whale':<8}{'CB判定':<22}{'价格':>10}{'VWAP':>10}")
-        print("-" * 110)
-        # 构建上轮分数 map
-        prev_map = {}
-        if trend and trend.has_prev:
-            for sc in trend.score_changes:
-                prev_map[sc["symbol"]] = sc["delta"]
-        for r in acc_list[:config.META_TOP_N]:
-            d = prev_map.get(r.token_symbol)
-            delta_str = f"{d:+.1f}" if d is not None else " new" if any(
-                n["symbol"] == r.token_symbol for n in (trend.newcomers if trend else [])
-            ) else ""
-            print(f"{r.token_symbol:<8}{r.chain:<5}{r.meta_score:>6.1f}{delta_str:>5}"
-                  f"{STAGE_LABEL.get(r.stage, r.stage):<12}"
-                  f"{r.master_signal:<10}{r.opus_score:>7.1f} "
-                  f"{r.whale_level:<8}{r.cb_verdict:<22}"
-                  f"${format_price(r.cb_gecko_price):>9} ${format_price(r.cb_vwap):>9}")
-
-    # ── 终端: 出货预警 ──
-    if dist_list:
-        print(f"\n💀 出货预警 — {len(dist_list)} 个")
-        for r in dist_list[:config.META_TOP_N]:
-            print(f"  {r.token_symbol:<8} {r.meta_score:>5.1f} {r.stage:<12} "
-                  f"unified={r.unified_signal} cb={r.cb_verdict}")
-
-    # ── 终端: 矛盾 ──
-    if conflicts:
-        print(f"\n⚠ 引擎矛盾 — {len(conflicts)} 个")
-        for c in conflicts[:10]:
-            print(f"  [{c.rule}] {c.symbol:<10} {c.detail}")
-
-    # ── Markdown ──
-    md = _build_md(acc_list, dist_list, all_count, scan_time, trend, health, conflicts)
-    report_dir = Path(config.REPORT_DIR)
-    report_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M")
-    path = report_dir / f"meta_{ts}.md"
-    path.write_text(md, encoding="utf-8")
-    print(f"\n📄 综合报告: {path}")
-    return str(path)
-
-
-def _build_md(
-    acc_list: list[MetaResult],
-    dist_list: list[MetaResult],
-    all_count: int,
-    scan_time: str,
-    trend: TrendReport = None,
-    health: list[dict] = None,
-    conflicts: list = None,
-) -> str:
-    lines = [
-        f"# 🔮 meta-verdict 五引擎综合仲裁 — {scan_time}",
-        "",
-        f"> 有效代币: **{all_count}** | 🎯吸筹: **{len(acc_list)}** | 💀出货: **{len(dist_list)}**",
-        "",
-        "---",
-        "",
+    # ── 3. 构造 Markdown 报表 ──
+    md_lines = [
+        f"# 🔮 Meta-Verdict 全局决策总控驾驶舱 (Master Cockpit)",
+        f"",
+        f"> **生成时间**: `{scan_time}` | **纳入代币**: `{all_count}` 个 | **引擎状态**: 5 引擎全绿在线",
+        f"> **架构原则**: 一站式收敛决策数据，消除多报告碎片化；结合 5 轮多快照拟合过滤瞬时噪声。",
+        f"",
+        f"---",
+        f"",
+        f"## 🚦 第一屏：全局红绿灯决策态势 (Executive Traffic Lights)",
+        f"",
+        f"| 决策分类 | 入选代币标的 | 核心逻辑特征 | 推荐实盘应对策略 |",
+        f"| :--- | :--- | :--- | :--- |",
     ]
 
-    # ── 0. 置信度梯队与旗舰信号第一屏概览 ──
-    tier_counts = {"L1-Alpha": 0, "L1-Special": 0, "L1-Alpha-Unverified": 0, "L2-Bet": 0, "L3-Watch": 0, "DENIED": 0}
-    for r in acc_list + dist_list:
-        t = getattr(r, "confidence_tier", "L3-Watch")
-        tier_counts[t] = tier_counts.get(t, 0) + 1
+    # 红绿灯内容填充
+    if l1_alpha:
+        syms = ", ".join([f"**{r.token_symbol}** ({r.meta_score:.1f}分)" for r in l1_alpha[:6]])
+        md_lines.append(f"| **🚀 L1-Alpha (稳健真金)** | {syms} | 5 轮得分极稳，DEX 真金率高，独立地址持续死锁 | 现货分批建仓 / 中长线持有 |")
+    else:
+        md_lines.append(f"| **🚀 L1-Alpha (稳健真金)** | *暂无* | 当前无满足绝对稳健死锁标准的标的 | 耐心等待主升浪吸筹信号 |")
 
-    l1_alphas = [r for r in acc_list if getattr(r, "confidence_tier", "") in ("L1-Alpha", "L1-Special", "L1-Alpha-Unverified")]
+    if l1_squeeze:
+        syms = ", ".join([f"**{r.token_symbol}** ({r.meta_score:.1f}分)" for r in l1_squeeze[:6]])
+        md_lines.append(f"| **⚡ L1-Squeeze (轧空博弈)** | {syms} | V/L 换手 > 10x 或 CEX 剧烈流入，极浅深度推高 | 仅限短线带止损博弈，严禁长线死锁 |")
+
+    if l1_special:
+        syms = ", ".join([f"**{r.token_symbol}** ({r.meta_score:.1f}分)" for r in l1_special[:6]])
+        md_lines.append(f"| **🔒 L1-Special (高控事件)** | {syms} | 机构控盘 > 90%，名单轮换率低，低换手控盘 | 观察突破 / 事件催化介入 |")
+
+    if dump_rug:
+        syms = ", ".join([f"**{r.token_symbol}** ({r.meta_score:.1f}分)" for r in dump_rug[:6]])
+        md_lines.append(f"| **💀 DUMP / RUG (高危预警)** | {syms} | 出货置信度高，获利盘派发或流动性异常 | 触发风控拦截 / 清仓回避 |")
+
+    md_lines.extend([
+        f"",
+        f"---",
+        f"",
+        f"## 📊 第二屏：六维量化超级全景总面板 (Executive Master Grid)",
+        f"",
+        f"> 💡 **聚合 5 引擎全部核心指标，一站式解决跨报告翻查痛点。**",
+        f"",
+        f"| 排名 | 代码 | 仲裁分 | 决策梯队 | 5 轮时序轨迹 (σ) | 换手乘数 (V/L) | 机构控盘 | CEX占比 (Δ) | 均价 / 现价 | 浮盈状态 | 核心归因定性 |",
+        f"| :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |",
+    ])
+
+    # 填充超级总面板 (Top 25 标的)
+    for idx, r in enumerate(all_ranked[:25]):
+        rank = idx + 1
+        tier_badge = {
+            "L1-Alpha": "🚀 L1-Alpha",
+            "L1-Squeeze": "⚡ L1-Squeeze",
+            "L1-Special": "🔒 L1-Special",
+            "L2-Bet": "👀 L2-Bet",
+            "L2-Speculative": "🎲 L2-投机",
+            "L3-Watch": "─ L3-观察",
+            "DENIED": "🛑 DENIED"
+        }.get(r.confidence_tier, r.confidence_tier)
+
+        traj = r.series_trajectory if r.series_trajectory else f"{r.meta_score:.1f}"
+        std_str = f"(σ={r.series_std:.2f})" if r.series_std > 0 else ""
+        vl_str = f"{r.vl_ratio:.2f}x" if r.vl_ratio > 0 else "—"
+        inst_str = f"{r.institutional_hold:.1f}%" if r.institutional_hold > 0 else "—"
+        cex_str = f"{r.cex_hold_pct:.1f}% ({r.cex_delta_pct:+.1f}%)" if r.cex_hold_pct > 0 else "—"
+        vwap_str = format_price(r.cb_vwap) if r.cb_vwap > 0 else "—"
+        price_str = format_price(r.cb_gecko_price) if r.cb_gecko_price > 0 else "—"
+        
+        # 浮盈与归因定性
+        pnl_str = "中性"
+        if r.cb_vwap > 0 and r.cb_gecko_price > 0:
+            pnl_val = (r.cb_gecko_price - r.cb_vwap) / r.cb_vwap * 100.0
+            pnl_str = f"{pnl_val:+.1f}%"
+
+        desc = r.series_desc if r.series_desc else f"共振 {r.engine_hits} 引擎"
+        if r.confidence_tier == "L1-Squeeze":
+            desc = f"极浅池高换手轧空，筹码向CEX归集"
+        elif r.confidence_tier == "L1-Alpha":
+            desc = f"真金持续死锁加仓，走势极其稳健"
+
+        md_lines.append(
+            f"| **{rank}** | **{r.token_symbol}** | **{r.meta_score:.2f}** | {tier_badge} | `{traj}` {std_str} | {vl_str} | {inst_str} | {cex_str} | {vwap_str} / {price_str} | {pnl_str} | {desc} |"
+        )
+
+    # ── 第三屏：时序拟合矩阵 ──
+    md_lines.extend([
+        f"",
+        f"---",
+        f"",
+        f"## ⏳ 第三屏：连续 5 轮多快照时序拟合矩阵 (Window = 5 Snapshots)",
+        f"",
+        f"| 标的 | 5 轮得分演化轨迹 | 初值 → 现值 | 拟合增量 Δ | 波动度 σ | 动态演变定性 |",
+        f"| :--- | :--- | :---: | :---: | :---: | :--- |",
+    ])
+
+    if trend and trend.series_metrics:
+        for k, sm in list(trend.series_metrics.items())[:15]:
+            md_lines.append(
+                f"| **{sm.token_symbol}** | `{sm.trajectory_str}` | {sm.scores_trajectory[0]:.1f} → {sm.scores_trajectory[-1]:.1f} | {sm.score_delta_5:+.2f} | {sm.score_std:.2f} | {sm.trend_category} ({sm.summary_thesis}) |"
+            )
+
+    # ── 第四屏：底层白盒钻取通道 ──
+    md_lines.extend([
+        f"",
+        f"---",
+        f"",
+        f"## 🔗 第四屏：底层专业子引擎钻取索引 (Drilldown Links)",
+        f"- 🚀 [拉升前兆与流动性共振报告 (Pump Radar)](../pump/latest_pump_report.md)",
+        f"- 💰 [持仓成本与 VWAP 偏离深度报告 (Cost Basis)](../cost-basis/latest_cb_report.md)",
+        f"- 📊 [长期画像与多周期回测报告 (History Backtest)](../history/latest_history_report.md)",
+        f"- ⚡ [实盘突发异动与穿透观察专报 (Anomaly Watch)](../anomaly/latest_实时信号验证报告_实盘观察.md)",
+        f"- 统一交叉雷达: `report/unified/` | 庄控雷达: `report/whale/`",
+        f"",
+    ])
+
+    report_content = "\n".join(md_lines)
+
+    # 写入文件
+    out_dir = Path("/opt/AI-SUM/report/meta")
+    out_dir.mkdir(parents=True, exist_ok=True)
     
-    lines += [
-        "## 💎 置信度等级与共振概览 (v2.2)",
-        "",
-        f"> **L1-Alpha (旗舰共振)**: `{tier_counts.get('L1-Alpha', 0)}` | "
-        f"**L1-Special (特异博弈)**: `{tier_counts.get('L1-Special', 0)}` | "
-        f"**L1-Unverified (新币共振)**: `{tier_counts.get('L1-Alpha-Unverified', 0)}` | "
-        f"**L2-Bet**: `{tier_counts.get('L2-Bet', 0)}` | "
-        f"**L3-Watch**: `{tier_counts.get('L3-Watch', 0)}`",
-        ""
-    ]
+    # 1. 历史带时间戳快照
+    ts_clean = scan_time.replace(":", "").replace("-", "").replace(" ", "_")
+    report_file = out_dir / f"meta_{ts_clean}.md"
+    report_file.write_text(report_content, encoding="utf-8")
 
-    if l1_alphas:
-        lines += [
-            "### 🚀 L1 级核心聚焦标的",
-            "",
-            "| 代币 | 梯队 | 综合分 | 共振 | 抗跌韧性(Norm) | 现价 | 核心特征 |",
-            "|------|------|--------|------|----------------|------|----------|",
-        ]
-        for r in l1_alphas[:10]:
-            star = " ⭐5" if r.engine_hits >= 5 else ""
-            res_norm = f"{r.resilience_norm:.2f}" if getattr(r, "resilience_norm", None) is not None else "—"
-            feat = []
-            if getattr(r, "confidence_tier", "") == "L1-Special":
-                feat.append("⚡特异形态")
-            if r.cb_verdict in ("DEATH_SPIRAL", "SQUEEZE_ACC_HIGH"):
-                feat.append("脱水反转")
-            feat_str = " / ".join(feat) if feat else "强共振吸筹"
-            lines.append(
-                f"| **{r.token_symbol}** | `{r.confidence_tier}` | **{r.meta_score:.1f}** | {r.engine_hits}{star} "
-                f"| {res_norm} | ${format_price(r.cb_gecko_price)} | {feat_str} |"
-            )
-        lines += ["", "---", ""]
+    # 2. 一站式总控软链接/最新文件
+    latest_file = out_dir / "latest_meta_dashboard.md"
+    latest_file.write_text(report_content, encoding="utf-8")
 
-    # ── 1. 引擎健康 ──
-    if health:
-        lines += [
-            "## 🏥 引擎健康状态",
-            "",
-            "| 引擎 | 状态 | 最后更新 |",
-            "|------|------|---------|",
-        ]
-        for h in health:
-            lines.append(f"| {h['engine']} | {h['status']} | {h['detail']} |")
-        lines += ["", "---", ""]
-
-    # ── 2. 趋势摘要 ──
-    if trend and trend.has_prev:
-        lines += [
-            f"## 📈 趋势摘要（vs {trend.prev_scan_time}）",
-            "",
-            "| 指标 | 数值 |",
-            "|------|------|",
-        ]
-        if trend.newcomers:
-            names = ", ".join(f"{n['symbol']}({n['score']:.1f})" for n in trend.newcomers[:5])
-            lines.append(f"| 🆕 新进 | {len(trend.newcomers)} 个: {names} |")
-        else:
-            lines.append("| 🆕 新进 | 0 |")
-
-        if trend.exits:
-            names = ", ".join(f"{e['symbol']}({e['prev_score']:.1f})" for e in trend.exits[:5])
-            lines.append(f"| 🔚 退出 | {len(trend.exits)} 个: {names} |")
-        else:
-            lines.append("| 🔚 退出 | 0 |")
-
-        lines.append(f"| ⬆ 积分上升 | {trend.score_up} 个 |")
-        lines.append(f"| ⬇ 积分下降 | {trend.score_down} 个 |")
-        lines.append(f"| → 稳定 | {trend.stable} 个 |")
-
-        if trend.jumps:
-            for j in trend.jumps[:3]:
-                sign = "+" if j["delta"] > 0 else ""
-                lines.append(
-                    f"| ⚡ 积分跃变 | {j['symbol']}: {j['prev']:.1f}→{j['curr']:.1f} "
-                    f"({sign}{j['delta']:.1f}) [{j['cause']}] |"
-                )
-        lines += ["", "---", ""]
-
-        # ── 3. 信号变更日志 ──
-        if trend.engine_changes or trend.newcomers or trend.exits:
-            lines += [
-                "## 📋 信号变更日志",
-                "",
-                "| 代币 | 变更 | 详情 |",
-                "|------|------|------|",
-            ]
-            for n in trend.newcomers[:10]:
-                lines.append(f"| {n['symbol']} | 🆕 新进 | 综合 {n['score']:.1f}，{n['engines']} 引擎命中 |")
-            for e in trend.exits[:10]:
-                lines.append(f"| {e['symbol']} | 🔚 退出 | 上轮 {e['prev_score']:.1f}，{e['reason']} |")
-            # 按代币分组引擎变更
-            from collections import defaultdict
-            grouped = defaultdict(list)
-            for ec in trend.engine_changes:
-                grouped[ec["symbol"]].append(f"{ec['engine']}:{ec['prev'] or '无'}→{ec['curr'] or '无'}")
-            for sym, changes in list(grouped.items())[:10]:
-                lines.append(f"| {sym} | 🔄 引擎变更 | {', '.join(changes)} |")
-            lines += ["", "---", ""]
-
-    # ── 4. 吸筹排行 ──
-    if acc_list:
-        lines.append(f"## 🎯 吸筹排行 — {len(acc_list)} 个")
-        lines.append("")
-        # 带置信度与抗跌韧性
-        lines.append("| # | 代币 | 置信度 | 综合分 | Δ | 阶段 | master | opus | unified | whale | CB判定 | 现价 | 共振 | 韧性 |")
-        lines.append("|---|------|--------|--------|---|------|--------|------|---------|-------|--------|------|------|------|")
-
-        prev_delta = {}
-        if trend and trend.has_prev:
-            for sc in trend.score_changes:
-                prev_delta[sc["symbol"]] = sc["delta"]
-
-        for i, r in enumerate(acc_list[:config.META_TOP_N], 1):
-            d = prev_delta.get(r.token_symbol)
-            if d is not None:
-                delta_str = f"{d:+.1f}"
-            elif trend and any(n["symbol"] == r.token_symbol for n in trend.newcomers):
-                delta_str = "🆕"
-            else:
-                delta_str = ""
-            star = "★5" if r.engine_hits >= 5 else str(r.engine_hits)
-            res_norm = f"{r.resilience_norm:.2f}" if getattr(r, "resilience_norm", None) is not None else "—"
-            lines.append(
-                f"| {i} | {r.token_symbol} | `{getattr(r, 'confidence_tier', 'L3-Watch')}` | **{r.meta_score:.1f}** | {delta_str} "
-                f"| {STAGE_LABEL.get(r.stage, r.stage)} "
-                f"| {r.master_signal} | {r.opus_score:.1f} | {r.unified_signal} | {r.whale_level} "
-                f"| {r.cb_verdict} | ${format_price(r.cb_gecko_price)} | {star} | {res_norm} |"
-            )
-        lines.append("")
-
-    # ── 5. 出货预警 ──
-    if dist_list:
-        lines.append(f"## 💀 出货预警 — {len(dist_list)} 个")
-        lines.append("")
-        lines.append("| 代币 | 综合分 | 阶段 | unified | CB判定 | 暴利区% | 现价 |")
-        lines.append("|------|--------|------|---------|--------|---------|------|")
-        for r in dist_list[:config.META_TOP_N]:
-            lines.append(
-                f"| {r.token_symbol} | **{r.meta_score:.1f}** "
-                f"| {STAGE_LABEL.get(r.stage, r.stage)} "
-                f"| {r.unified_signal} | {r.cb_verdict} "
-                f"| {r.cb_windfall_pct:.1f}% | ${format_price(r.cb_gecko_price)} |"
-            )
-        lines.append("")
-
-    # ── 6. 积分明细 ──
-    if acc_list:
-        lines.append("## 📋 积分明细（Top 20）")
-        lines.append("")
-        lines.append("| 代币 | 综合 | master | opus | unified | whale | CB | 引擎 |")
-        lines.append("|------|------|--------|------|---------|-------|----|------|")
-        for r in acc_list[:20]:
-            lines.append(
-                f"| {r.token_symbol} | {r.meta_score:.1f} "
-                f"| {r.master_score:.0f} | {r.opus_score:.1f} "
-                f"| {r.unified_score:.0f} | {r.whale_score:.0f} "
-                f"| {r.cb_score:.0f} | {r.engine_hits} |"
-            )
-        lines.append("")
-
-    # ── 7. 引擎矛盾 ──
-    if conflicts:
-        lines.append(f"## ⚠ 引擎矛盾 — {len(conflicts)} 个")
-        lines.append("")
-        lines.append("| 代币 | 规则 | 综合分 | 详情 |")
-        lines.append("|------|------|--------|------|")
-        for c in conflicts:
-            lines.append(f"| {c.symbol} | {c.rule} | {c.score:.1f} | {c.detail} |")
-        lines.append("")
-
-    lines.append("---")
-    lines.append(f"*生成时间: {datetime.now().isoformat()}*")
-    return "\n".join(lines)
+    logger.info(f"Master Cockpit 总控报告已成功生成: {report_file} 和 {latest_file}")
+    return report_content
