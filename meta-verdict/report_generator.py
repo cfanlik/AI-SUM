@@ -1,17 +1,18 @@
 """
-meta-verdict 报告生成器 (Master Cockpit 决策驾驶舱全新重构版)
-终端输出 + Markdown 决策总控面板 (含红绿灯态势 + 六维全景总面板 + 5轮多快照拟合)
+meta-verdict 报告生成器 (Master Cockpit 决策总控驾驶舱精简版)
+四屏标准输出 (红绿灯态势 + 六维全景面板 + 5轮多快照拟合 + 全局 Tips 规范)
+支持代币点击无缝弹出【60天持币正相关性 (ρ)】详情抽屉
 """
 from __future__ import annotations
 import os
 import logging
-logger = logging.getLogger("meta-verdict")
 from datetime import datetime
 from pathlib import Path
 from arbitrator import MetaResult
 from trend_analyzer import TrendReport
 import config
 
+logger = logging.getLogger("meta-verdict")
 
 STAGE_LABEL = {
     "CONTROLLED":   "🔒 极度控盘",
@@ -52,23 +53,18 @@ def generate_report(
     health: list[dict] = None,
     conflicts: list = None,
 ) -> str:
-    """终端 + MD 双输出 (Master Cockpit 架构)"""
+    """终端 + MD 双输出 (精简版 Master Cockpit 决策驾驶舱)"""
 
     all_ranked = acc_list + [r for r in dist_list if r not in acc_list]
     all_ranked.sort(key=lambda x: x.meta_score, reverse=True)
 
-    # ── 1. 终端概览输出 ──
+    # ── 1. 终端概览 ──
     print(f"\n{'='*80}")
     print(f"🔮 Meta-Verdict 决策总控驾驶舱 (Master Cockpit) | {scan_time}")
     print(f"   有效评估: {all_count} | 🎯 吸筹共振: {len(acc_list)} | 💀 出货派发: {len(dist_list)}")
     print(f"{'='*80}")
 
-    if health:
-        print(f"\n🏥 引擎健康")
-        for h in health:
-            print(f"  {h['status']} {h['engine']}: {h['detail']}")
-
-    # ── 2. 分类归集红绿灯代币 ──
+    # ── 2. 分类红绿灯标的 ──
     l1_alpha = [r for r in all_ranked if r.confidence_tier == "L1-Alpha"]
     l1_squeeze = [r for r in all_ranked if r.confidence_tier == "L1-Squeeze"]
     l1_special = [r for r in all_ranked if r.confidence_tier == "L1-Special"]
@@ -76,9 +72,9 @@ def generate_report(
 
     # ── 3. 构造 Markdown 报表 ──
     md_lines = [
-        f"# 🔮 Meta-Verdict 全局决策总控驾驶舱 (Master Cockpit)",
+        f"# 🔮 Meta-Verdict 全局决策总控驾驶舱 (Master Cockpit) — {scan_time}",
         f"",
-        f"> **生成时间**: `{scan_time}` | **纳入代币**: `{all_count}` 个 | **引擎状态**: 5 引擎全绿在线",
+        f"> **全局概览**: 纳入评估代币 `{all_count}` 个 | 🎯 吸筹共振 `{len(acc_list)}` 个 | 💀 派发出货 `{len(dist_list)}` 个 | 🏥 5 引擎全部在线",
         f"> **架构原则**: 一站式收敛决策数据，消除多报告碎片化；结合 5 轮多快照拟合过滤瞬时噪声。",
         f"",
         f"---",
@@ -89,10 +85,10 @@ def generate_report(
         f"| :--- | :--- | :--- | :--- |",
     ]
 
-    # 红绿灯内容填充
+    # 第一屏填充
     if l1_alpha:
         syms = ", ".join([f"**{r.token_symbol}** ({r.meta_score:.1f}分)" for r in l1_alpha[:6]])
-        md_lines.append(f"| **🚀 L1-Alpha (稳健真金)** | {syms} | 5 轮得分极稳，DEX 真金率高，独立地址持续死锁 | 现货分批建仓 / 中长线持有 |")
+        md_lines.append(f"| **🚀 L1-Alpha (稳健真金)** | {syms} | 5 轮得分极稳，DEX 真金率高，独立地址持续死锁加仓 | 现货分批建仓 / 中长线持有 |")
     else:
         md_lines.append(f"| **🚀 L1-Alpha (稳健真金)** | *暂无* | 当前无满足绝对稳健死锁标准的标的 | 耐心等待主升浪吸筹信号 |")
 
@@ -114,13 +110,13 @@ def generate_report(
         f"",
         f"## 📊 第二屏：六维量化超级全景总面板 (Executive Master Grid)",
         f"",
-        f"> 💡 **聚合 5 引擎全部核心指标，一站式解决跨报告翻查痛点。**",
+        f"> 💡 **点击任意代币代码（如 `**BTR**`）可直接弹出查看【🔥 60天持币正相关性 (ρ)】演化面积图及积分时序。**",
         f"",
         f"| 排名 | 代码 | 仲裁分 | 决策梯队 | 5 轮时序轨迹 (σ) | 换手乘数 (V/L) | 机构控盘 | CEX占比 (Δ) | 均价 / 现价 | 浮盈状态 | 核心归因定性 |",
         f"| :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |",
     ])
 
-    # 填充超级总面板 (Top 25 标的)
+    # 第二屏填充 (Top 25 标的)
     for idx, r in enumerate(all_ranked[:25]):
         rank = idx + 1
         tier_badge = {
@@ -141,7 +137,6 @@ def generate_report(
         vwap_str = format_price(r.cb_vwap) if r.cb_vwap > 0 else "—"
         price_str = format_price(r.cb_gecko_price) if r.cb_gecko_price > 0 else "—"
         
-        # 浮盈与归因定性
         pnl_str = "中性"
         if r.cb_vwap > 0 and r.cb_gecko_price > 0:
             pnl_val = (r.cb_gecko_price - r.cb_vwap) / r.cb_vwap * 100.0
@@ -153,11 +148,12 @@ def generate_report(
         elif r.confidence_tier == "L1-Alpha":
             desc = f"真金持续死锁加仓，走势极其稳健"
 
+        # 重点：代码列严格使用 | **{r.token_symbol}** | 格式，保证前端 mdParser 触发 onSelectToken 打开详情抽屉
         md_lines.append(
             f"| **{rank}** | **{r.token_symbol}** | **{r.meta_score:.2f}** | {tier_badge} | `{traj}` {std_str} | {vl_str} | {inst_str} | {cex_str} | {vwap_str} / {price_str} | {pnl_str} | {desc} |"
         )
 
-    # ── 第三屏：时序拟合矩阵 ──
+    # ── 第三屏：5 轮时序拟合矩阵 ──
     md_lines.extend([
         f"",
         f"---",
@@ -174,18 +170,31 @@ def generate_report(
                 f"| **{sm.token_symbol}** | `{sm.trajectory_str}` | {sm.scores_trajectory[0]:.1f} → {sm.scores_trajectory[-1]:.1f} | {sm.score_delta_5:+.2f} | {sm.score_std:.2f} | {sm.trend_category} ({sm.summary_thesis}) |"
             )
 
-    # ── 第四屏：底层白盒钻取通道 ──
+    # ── 第四屏：报表说明与参数字典 (Tips) ──
     md_lines.extend([
-        f"",
-        f"---",
-        f"",
-        f"## 🔗 第四屏：底层专业子引擎钻取索引 (Drilldown Links)",
-        f"- 🚀 [拉升前兆与流动性共振报告 (Pump Radar)](../pump/latest_pump_report.md)",
-        f"- 💰 [持仓成本与 VWAP 偏离深度报告 (Cost Basis)](../cost-basis/latest_cb_report.md)",
-        f"- 📊 [长期画像与多周期回测报告 (History Backtest)](../history/latest_history_report.md)",
-        f"- ⚡ [实盘突发异动与穿透观察专报 (Anomaly Watch)](../anomaly/latest_实时信号验证报告_实盘观察.md)",
-        f"- 统一交叉雷达: `report/unified/` | 庄控雷达: `report/whale/`",
-        f"",
+        "",
+        "---",
+        "",
+        "## 📖 第四屏：报表说明与风控参数字典 (Tips)",
+        "",
+        "| 字段 / 参数 | 物理定义与算法规则 | 阈值标准与决策含义 |",
+        "| :--- | :--- | :--- |",
+        "| **换手乘数 (V/L)** | 24小时成交量与流动性池深度比值 (Volume / Liquidity) | `> 10.0x` 触发流动性挤压警报；`> 15.0x` 判定为短线轧空投机 |",
+        "| **CEX占比 (Δ)** | 交易所地址持仓占比及其相较于初始快照的增量 | `Δ > +20%` 表明链上筹码正快速向中心化交易所归集 |",
+        "| **波动度 (σ)** | 连续 5 轮仲裁得分的标准差 (StdDev) | `σ < 0.3` 为极度稳健吸筹；`σ > 2.0` 为多空剧烈拉锯博弈 |",
+        "| **拟合增量 (Δ)** | 连续 5 轮快照首尾仲裁得分净变化值 (Score_curr - Score_init) | `Δ > +2.0` 为加速爆发；`Δ < -1.5` 为资金动能衰减 |",
+        "| **🚀 L1-Alpha** | 顶级稳健真金共振标的（得分 >= 7.0 且换手正常） | 独立地址真金死锁加仓，适合现货中长线持有 |",
+        "| **⚡ L1-Squeeze** | 顶级流动性挤压与轧空博弈标的（得分 >= 7.0 但 V/L > 10x） | 极浅池推动的高风险博弈，仅限短线带止损操作 |",
+        "| **🔥 60天持币正相关性 (ρ)** | 固定吸筹地址队列 60 天持币量与时间的皮尔逊相关系数 | `ρ > 80%` 为极强正相关，反映核心主力筹码持续单调递增 |",
+        "",
+        "---",
+        "",
+        "## 🔗 底层专业子引擎钻取索引 (Drilldown Links)",
+        "- 🚀 [拉升前兆与流动性共振报告 (Pump Radar)](../pump/latest_pump_report.md)",
+        "- 💰 [持仓成本与 VWAP 偏离深度报告 (Cost Basis)](../cost-basis/latest_cb_report.md)",
+        "- 📊 [长期画像与多周期回测报告 (History Backtest)](../history/latest_history_report.md)",
+        "- ⚡ [实盘突发异动与穿透观察专报 (Anomaly Watch)](../anomaly/latest_实时信号验证报告_实盘观察.md)",
+        "",
     ])
 
     report_content = "\n".join(md_lines)
@@ -194,12 +203,10 @@ def generate_report(
     out_dir = Path("/opt/AI-SUM/report/meta")
     out_dir.mkdir(parents=True, exist_ok=True)
     
-    # 1. 历史带时间戳快照
     ts_clean = scan_time.replace(":", "").replace("-", "").replace(" ", "_")
     report_file = out_dir / f"meta_{ts_clean}.md"
     report_file.write_text(report_content, encoding="utf-8")
 
-    # 2. 一站式总控软链接/最新文件
     latest_file = out_dir / "latest_meta_dashboard.md"
     latest_file.write_text(report_content, encoding="utf-8")
 
