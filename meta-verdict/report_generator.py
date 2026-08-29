@@ -1,7 +1,7 @@
 """
-meta-verdict 报告生成器 (Master Cockpit 决策总控驾驶舱精简版)
-四屏标准输出 (红绿灯态势 + 六维全景面板 + 5轮多快照拟合 + 全局 Tips 规范)
-支持代币点击无缝弹出【60天持币正相关性 (ρ)】详情抽屉
+meta-verdict 报告生成器 (Master Cockpit 决策总控驾驶舱终极标准版)
+四屏标准输出 (红绿灯单行表格 + 六维全景面板 + 5轮多快照拟合 + 全局 Tips 规范)
+所有表格代币列统一命名为【代币】且单元格纯净输出，100% 触发前端【60天持币正相关性 (ρ)】详情抽屉
 """
 from __future__ import annotations
 import os
@@ -53,7 +53,7 @@ def generate_report(
     health: list[dict] = None,
     conflicts: list = None,
 ) -> str:
-    """终端 + MD 双输出 (精简版 Master Cockpit 决策驾驶舱)"""
+    """终端 + MD 双输出 (四屏标准决策驾驶舱)"""
 
     all_ranked = acc_list + [r for r in dist_list if r not in acc_list]
     all_ranked.sort(key=lambda x: x.meta_score, reverse=True)
@@ -75,34 +75,48 @@ def generate_report(
         f"# 🔮 Meta-Verdict 全局决策总控驾驶舱 (Master Cockpit) — {scan_time}",
         f"",
         f"> **全局概览**: 纳入评估代币 `{all_count}` 个 | 🎯 吸筹共振 `{len(acc_list)}` 个 | 💀 派发出货 `{len(dist_list)}` 个 | 🏥 5 引擎全部在线",
-        f"> **架构原则**: 一站式收敛决策数据，消除多报告碎片化；结合 5 轮多快照拟合过滤瞬时噪声。",
+        f"> **交互说明**: 点击任意表格中的【代币】名称，即可在右侧弹出查看 **🔥 60天持币正相关性 (ρ)** 真实面积图、生命周期及积分时序。",
         f"",
         f"---",
         f"",
         f"## 🚦 第一屏：全局红绿灯决策态势 (Executive Traffic Lights)",
         f"",
-        f"| 决策分类 | 入选代币标的 | 核心逻辑特征 | 推荐实盘应对策略 |",
-        f"| :--- | :--- | :--- | :--- |",
+        f"| 决策分类 | 代币 | 仲裁分 | 5 轮时序轨迹 (σ) | 换手乘数 (V/L) | 核心特征归因 | 推荐应对策略 |",
+        f"| :--- | :--- | :---: | :---: | :---: | :--- | :--- |",
     ]
 
-    # 第一屏填充
-    if l1_alpha:
-        syms = ", ".join([f"**{r.token_symbol}** ({r.meta_score:.1f}分)" for r in l1_alpha[:6]])
-        md_lines.append(f"| **🚀 L1-Alpha (稳健真金)** | {syms} | 5 轮得分极稳，DEX 真金率高，独立地址持续死锁加仓 | 现货分批建仓 / 中长线持有 |")
-    else:
-        md_lines.append(f"| **🚀 L1-Alpha (稳健真金)** | *暂无* | 当前无满足绝对稳健死锁标准的标的 | 耐心等待主升浪吸筹信号 |")
+    # 第一屏填充 (每行单标的标准表格，代币列为纯净 | **SYMBOL** |)
+    for r in l1_alpha[:5]:
+        traj = r.series_trajectory if r.series_trajectory else f"{r.meta_score:.1f}"
+        std_str = f"(σ={r.series_std:.2f})" if r.series_std > 0 else ""
+        vl_str = f"{r.vl_ratio:.2f}x" if r.vl_ratio > 0 else "—"
+        md_lines.append(
+            f"| **🚀 L1-Alpha (稳健真金)** | **{r.token_symbol}** | **{r.meta_score:.2f}** | `{traj}` {std_str} | {vl_str} | DEX 真金率高，独立地址持续死锁加仓 | 现货分批建仓 / 中长线持有 |"
+        )
 
-    if l1_squeeze:
-        syms = ", ".join([f"**{r.token_symbol}** ({r.meta_score:.1f}分)" for r in l1_squeeze[:6]])
-        md_lines.append(f"| **⚡ L1-Squeeze (轧空博弈)** | {syms} | V/L 换手 > 10x 或 CEX 剧烈流入，极浅深度推高 | 仅限短线带止损博弈，严禁长线死锁 |")
+    for r in l1_squeeze[:5]:
+        traj = r.series_trajectory if r.series_trajectory else f"{r.meta_score:.1f}"
+        std_str = f"(σ={r.series_std:.2f})" if r.series_std > 0 else ""
+        vl_str = f"{r.vl_ratio:.2f}x" if r.vl_ratio > 0 else "—"
+        md_lines.append(
+            f"| **⚡ L1-Squeeze (轧空博弈)** | **{r.token_symbol}** | **{r.meta_score:.2f}** | `{traj}` {std_str} | {vl_str} | 极浅深度高换手轧空，筹码向CEX归集 | 仅限短线带止损博弈，严禁长线死锁 |"
+        )
 
-    if l1_special:
-        syms = ", ".join([f"**{r.token_symbol}** ({r.meta_score:.1f}分)" for r in l1_special[:6]])
-        md_lines.append(f"| **🔒 L1-Special (高控事件)** | {syms} | 机构控盘 > 90%，名单轮换率低，低换手控盘 | 观察突破 / 事件催化介入 |")
+    for r in l1_special[:3]:
+        traj = r.series_trajectory if r.series_trajectory else f"{r.meta_score:.1f}"
+        std_str = f"(σ={r.series_std:.2f})" if r.series_std > 0 else ""
+        vl_str = f"{r.vl_ratio:.2f}x" if r.vl_ratio > 0 else "—"
+        md_lines.append(
+            f"| **🔒 L1-Special (高控事件)** | **{r.token_symbol}** | **{r.meta_score:.2f}** | `{traj}` {std_str} | {vl_str} | 机构控盘 > 90%，低换手死锁控盘 | 观察突破 / 事件催化介入 |"
+        )
 
-    if dump_rug:
-        syms = ", ".join([f"**{r.token_symbol}** ({r.meta_score:.1f}分)" for r in dump_rug[:6]])
-        md_lines.append(f"| **💀 DUMP / RUG (高危预警)** | {syms} | 出货置信度高，获利盘派发或流动性异常 | 触发风控拦截 / 清仓回避 |")
+    for r in dump_rug[:5]:
+        traj = r.series_trajectory if r.series_trajectory else f"{r.meta_score:.1f}"
+        std_str = f"(σ={r.series_std:.2f})" if r.series_std > 0 else ""
+        vl_str = f"{r.vl_ratio:.2f}x" if r.vl_ratio > 0 else "—"
+        md_lines.append(
+            f"| **💀 DUMP / RUG (高危预警)** | **{r.token_symbol}** | **{r.meta_score:.2f}** | `{traj}` {std_str} | {vl_str} | 出货置信度高，获利盘派发或流动性异常 | 触发风控拦截 / 清仓回避 |"
+        )
 
     md_lines.extend([
         f"",
@@ -110,13 +124,11 @@ def generate_report(
         f"",
         f"## 📊 第二屏：六维量化超级全景总面板 (Executive Master Grid)",
         f"",
-        f"> 💡 **点击任意代币代码（如 `**BTR**`）可直接弹出查看【🔥 60天持币正相关性 (ρ)】演化面积图及积分时序。**",
-        f"",
-        f"| 排名 | 代码 | 仲裁分 | 决策梯队 | 5 轮时序轨迹 (σ) | 换手乘数 (V/L) | 机构控盘 | CEX占比 (Δ) | 均价 / 现价 | 浮盈状态 | 核心归因定性 |",
+        f"| 排名 | 代币 | 仲裁分 | 决策梯队 | 5 轮时序轨迹 (σ) | 换手乘数 (V/L) | 机构控盘 | CEX占比 (Δ) | 均价 / 现价 | 浮盈状态 | 核心归因定性 |",
         f"| :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |",
     ])
 
-    # 第二屏填充 (Top 25 标的)
+    # 第二屏填充 (Top 25 标的，代币列固定为 | **SYMBOL** |)
     for idx, r in enumerate(all_ranked[:25]):
         rank = idx + 1
         tier_badge = {
@@ -148,19 +160,18 @@ def generate_report(
         elif r.confidence_tier == "L1-Alpha":
             desc = f"真金持续死锁加仓，走势极其稳健"
 
-        # 重点：代码列严格使用 | **{r.token_symbol}** | 格式，保证前端 mdParser 触发 onSelectToken 打开详情抽屉
         md_lines.append(
             f"| **{rank}** | **{r.token_symbol}** | **{r.meta_score:.2f}** | {tier_badge} | `{traj}` {std_str} | {vl_str} | {inst_str} | {cex_str} | {vwap_str} / {price_str} | {pnl_str} | {desc} |"
         )
 
-    # ── 第三屏：5 轮时序拟合矩阵 ──
+    # ── 第三屏：5 轮时序拟合矩阵 (代币列固定为 | **SYMBOL** |) ──
     md_lines.extend([
         f"",
         f"---",
         f"",
         f"## ⏳ 第三屏：连续 5 轮多快照时序拟合矩阵 (Window = 5 Snapshots)",
         f"",
-        f"| 标的 | 5 轮得分演化轨迹 | 初值 → 现值 | 拟合增量 Δ | 波动度 σ | 动态演变定性 |",
+        f"| 代币 | 5 轮得分演化轨迹 | 初值 → 现值 | 拟合增量 Δ | 波动度 σ | 动态演变定性 |",
         f"| :--- | :--- | :---: | :---: | :---: | :--- |",
     ])
 
