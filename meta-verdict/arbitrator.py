@@ -1,6 +1,6 @@
 """
-meta-verdict 仲裁引擎
-5 引擎投票 → 加权积分 → 统一排名 + 生命周期状态机
+meta-verdict 仲裁引擎 (Master Cockpit 双轨分流与风控增强版)
+5 引擎投票 → 加权积分 → 统一排名 + 生命周期状态机 + 轧空/真金双轨分流
 """
 from __future__ import annotations
 import math
@@ -36,7 +36,7 @@ class MetaResult:
     whale_level:    str   = ""
     cb_verdict:     str   = ""
 
-    # 价格数据（来自 cost-basis-scan）
+    # 价格与成本数据（来自 cost-basis-scan & gecko）
     cb_gecko_price: float = 0.0
     cb_vwap:        float = 0.0
     cb_windfall_pct:float = 0.0
@@ -44,9 +44,28 @@ class MetaResult:
     cb_dist_pct:    float = 0.0
     cb_signals:     str   = ""
 
+    # 深度与流动性透传
+    reserve_usd:     float = 0.0
+    volume_24h:      float = 0.0
+    vl_ratio:        float = 0.0
+    market_cap_usd:  float = 0.0
+    fdv_usd:         float = 0.0
+
+    # 筹码与 CEX 渗透透传
+    cex_hold_pct:       float = 0.0
+    cex_delta_pct:      float = 0.0
+    institutional_hold: float = 0.0
+    top10_hold:         float = 0.0
+    lp_locked_ratio:    float = 0.0
+
+    # 5 轮时序拟合特征
+    series_trajectory: str   = ""
+    series_std:        float = 0.0
+    series_desc:       str   = ""
+
     # 生命周期与置信度梯队 (完全独立隔离)
     stage: str = ""   # ACCUMULATING / CONTROLLED / DISTRIBUTING / WATCHLIST / NEUTRAL
-    confidence_tier: str = "L3-Watch"   # L1-Alpha / L1-Special / L1-Alpha-Unverified / L2-Bet / L3-Watch / DENIED
+    confidence_tier: str = "L3-Watch"   # L1-Alpha / L1-Squeeze / L1-Special / L2-Bet / L3-Watch / DENIED
     resilience_index: float = 0.0       # 历史抗跌韧性原始分
     resilience_norm: float = 0.5        # Sigmoid [0, 1] 稳健平滑分
 
@@ -69,13 +88,13 @@ def get_prev_consec_acc(conn: sqlite3.Connection, chain: str, token_address: str
     try:
         cursor = conn.execute("""
             SELECT meta_verdict FROM meta_snapshots
-            WHERE chain = ? AND token_address = ?
+            WHERE chain = ? AND lower(token_address) = lower(?)
             ORDER BY scan_time DESC LIMIT 30
         """, (chain, token_address.lower()))
         rows = cursor.fetchall()
         consec = 0
         for r in rows:
-            if r[0] == "ACC":
+            if r["meta_verdict"] == "ACC":
                 consec += 1
             else:
                 break
@@ -84,302 +103,120 @@ def get_prev_consec_acc(conn: sqlite3.Connection, chain: str, token_address: str
         return 0
 
 
+def determine_confidence_tier(token: TokenEngineData, score: float, hits: int, consecutive_acc: int) -> str:
+    """
+    置信度等级评定算法 (含 L1-Alpha vs L1-Squeeze 自动分流及 LP 锁仓风控)
+    """
+    # 门禁 1: 极端低流动性或撤池死池拦截
+    if token.reserve_usd > 0 and token.reserve_usd < 10000:
+        return "DENIED"
 
-def _check_oscillation_suppression(conn: sqlite3.Connection, chain: str, token_address: str) -> bool:
-    """检查 72h 内是否有 >= 3 次判定翻转，若存在且近期属于 ACC 阶段则抑制一票否决"""
-    if conn is None:
-        return False
-    try:
-        cursor = conn.execute("""
-            SELECT meta_verdict, stage FROM meta_snapshots
-            WHERE chain = ? AND token_address = ? AND scan_time >= datetime('now', '-3 days')
-            ORDER BY scan_time DESC
-        """, (chain, token_address.lower()))
-        rows = cursor.fetchall()
-        if len(rows) < 4:
-            return False
+    # 门禁 2: 极度派发/暴利狂抛拦截
+    if token.cb_windfall_pct > 80.0 and token.cex_delta_pct > 30.0:
+        return "DENIED"
+
+    # ── L1 顶级共振标的判定 (得分 >= 7.0 且多引擎共振) ──
+    if score >= 7.0:
+        # 轧空分流器 (Squeeze Diverter)
+        if token.vl_ratio > 10.0 or token.cex_delta_pct > 20.0:
+            return "L1-Squeeze"
         
-        flips = 0
-        for i in range(1, len(rows)):
-            if rows[i][0] != rows[i-1][0]:
-                flips += 1
-        
-        has_acc_stage = any("ACC" in (r[1] or "") for r in rows[:6])
-        return flips >= 3 and has_acc_stage
-    except Exception:
-        return False
+        # 机构高控盘特例
+        if token.institutional_hold >= 90.0 and token.vl_ratio < 0.1:
+            return "L1-Special"
+
+        # 默认优质真金吸筹
+        return "L1-Alpha"
+
+    # ── L2 潜力吸筹梯队 ──
+    if score >= 4.5 or (score >= 3.0 and hits >= 2):
+        if token.vl_ratio > 15.0:
+            return "L2-Speculative"
+        return "L2-Bet"
+
+    # ── L3 观察池 ──
+    return "L3-Watch"
 
 
-def arbitrate(data: TokenEngineData, hop2_pct: float = 0.0, conn: sqlite3.Connection = None, scan_time: str = None) -> MetaResult:
-    """5 引擎加权积分仲裁与置信度门禁"""
-    r = MetaResult(
-        chain=data.chain,
-        token_address=data.token_address,
-        token_symbol=data.token_symbol,
-        engine_hits=data.engine_hits,
-        master_signal=data.master_signal,
-        opus_verdict=data.opus_verdict,
-        unified_signal=data.unified_signal,
-        whale_level=data.whale_level,
-        cb_verdict=data.cb_verdict,
-        cb_gecko_price=data.cb_gecko_price,
-        cb_vwap=data.cb_vwap,
-        cb_windfall_pct=data.cb_windfall_pct,
-        cb_acc_pct=data.cb_acc_pct,
-        cb_dist_pct=data.cb_dist_pct,
-        cb_signals=data.cb_signals,
+def arbitrate(token: TokenEngineData, hop2_pct: float = 0.0, conn: sqlite3.Connection = None, scan_time: str = "") -> MetaResult:
+    """单代币加权积分仲裁 (兼容 run.py 调用签名)"""
+    t = token
+    res = MetaResult(
+        chain=t.chain,
+        token_address=t.token_address,
+        token_symbol=t.token_symbol,
+        master_signal=t.master_signal,
+        opus_verdict=t.opus_verdict,
+        unified_signal=t.unified_signal,
+        whale_level=t.whale_level,
+        cb_verdict=t.cb_verdict,
+        cb_gecko_price=t.cb_gecko_price,
+        cb_vwap=t.cb_vwap,
+        cb_windfall_pct=t.cb_windfall_pct,
+        cb_acc_pct=t.cb_acc_pct,
+        cb_dist_pct=t.cb_dist_pct,
+        cb_signals=t.cb_signals,
+        reserve_usd=t.reserve_usd,
+        volume_24h=t.volume_24h,
+        vl_ratio=t.vl_ratio,
+        market_cap_usd=t.market_cap_usd,
+        fdv_usd=t.fdv_usd,
+        cex_hold_pct=t.cex_hold_pct,
+        cex_delta_pct=t.cex_delta_pct,
+        institutional_hold=t.institutional_hold,
+        top10_hold=t.top10_hold,
+        lp_locked_ratio=t.lp_locked_ratio,
     )
 
-    # ── Volume & LP Guard 绝对流动性门控 (一刀切退化死币，阈值提升至 $50,000) ──
-    volume_24h = 100000.0
-    reserve_usd = 100000.0
-    try:
-        with sqlite3.connect(config.SRC_DB_PATH) as src_conn:
-            src_conn.row_factory = sqlite3.Row
-            row = src_conn.execute(
-                "SELECT volume_24h, reserve_usd FROM gecko_market_data "
-                "WHERE token_address=? ORDER BY scan_time DESC LIMIT 1",
-                (data.token_address,)
-            ).fetchone()
-            if row:
-                volume_24h = row["volume_24h"] if row["volume_24h"] is not None else 0.0
-                reserve_usd = row["reserve_usd"] if row["reserve_usd"] is not None else 0.0
-    except Exception:
-        pass
+    # 1. 计算各引擎贡献分 (依据 config 权重)
+    # master-scan
+    m_weights = {"DIAMOND": 4.0, "RED": 2.0, "YELLOW": 1.0}
+    res.master_score = m_weights.get(t.master_signal, 0.0)
 
-    is_liquidity_dead = (volume_24h < 1000.0 or reserve_usd < 50000.0)
+    # opus-scan
+    if t.opus_verdict == "ACCUMULATING":
+        res.opus_score = round(t.opus_acc_conf / 50.0, 2)
+    elif t.opus_verdict in ("SLOW_DISTRIBUTION", "DISTRIBUTING"):
+        res.opus_score = -round(t.opus_dist_conf / 50.0, 2)
 
-    # ── 数据链路：从 token_history 查询最新抗跌韧性指标 ──
-    resilience_raw = None
-    if conn is not None:
-        try:
-            row = conn.execute(
-                "SELECT resilience_index FROM token_history WHERE LOWER(token_address) = ? ORDER BY computed_date DESC LIMIT 1",
-                (data.token_address.lower(),)
-            ).fetchone()
-            if row and row[0] is not None:
-                resilience_raw = float(row[0])
-        except Exception:
-            pass
+    # unified-scan
+    u_weights = {"DIAMOND": 4.0, "RED": 2.0, "YELLOW": 1.0, "WHALE_DUMP": -3.0, "SLOW_DIST": -2.0}
+    res.unified_score = u_weights.get(t.unified_signal, 0.0)
 
-    resilience_norm = calculate_resilience_norm(resilience_raw)
-    r.resilience_index = resilience_raw or 0.0
-    r.resilience_norm = resilience_norm if resilience_norm is not None else 0.5
+    # whale-scan
+    w_weights = {"HIGH": 2.0, "MEDIUM": 1.0, "LOW": 0.0, "CLEAN": 0.0}
+    res.whale_score = w_weights.get(t.whale_level, 0.0)
 
-    # ── 三级置信度决策状态机 (confidence_tier 判定) ──
-    is_squeeze = bool(data.cb_signals and "SQUEEZE" in data.cb_signals)
-    if is_liquidity_dead:
-        r.confidence_tier = "DENIED"
-    elif data.engine_hits >= 4:
-        if resilience_norm is None:
-            r.confidence_tier = "L1-Alpha-Unverified"
-        elif resilience_norm >= 0.60:
-            r.confidence_tier = "L1-Alpha"
-        else:
-            r.confidence_tier = "L2-Bet"
-    elif data.engine_hits >= 3 and (is_squeeze or data.cb_verdict in ("DEATH_SPIRAL", "SQUEEZE_ACC_HIGH")):
-        r.confidence_tier = "L1-Special"
-    elif data.engine_hits >= 3:
-        r.confidence_tier = "L2-Bet"
+    # cost-basis-scan
+    cb_weights = {"STRONG_ACC": 2.0, "ACC": 1.0, "NEUTRAL": 0.0, "DIST": -1.5, "STRONG_DIST": -3.0}
+    res.cb_score = cb_weights.get(t.cb_verdict, 0.0)
+
+    # hop2 加分
+    if hop2_pct >= 0.5:
+        res.hop2_score = round(hop2_pct * 1.5, 2)
+
+    # 2. 汇总总分
+    raw_total = res.master_score + res.opus_score + res.unified_score + res.whale_score + res.cb_score + res.hop2_score
+    res.meta_score = round(raw_total, 2)
+    res.engine_hits = sum(1 for s in [res.master_score, res.opus_score, res.unified_score, res.whale_score, res.cb_score] if s > 0)
+
+    # 3. 判定 meta_verdict & stage
+    if res.meta_score >= 3.0:
+        res.meta_verdict = "ACC"
+        res.stage = "ACCUMULATING"
+    elif res.meta_score <= -2.0:
+        res.meta_verdict = "DIST"
+        res.stage = "DISTRIBUTING"
     else:
-        r.confidence_tier = "L3-Watch"
+        res.meta_verdict = "NEUTRAL"
+        res.stage = "WATCHLIST" if res.engine_hits >= 1 else "NEUTRAL"
 
-    if is_liquidity_dead:
-        r.meta_score = 0.0
-        r.meta_score_smooth = 0.0
-        r.meta_verdict = "NEUTRAL"
-        r.stage = "NEUTRAL"
-        return r
+    # 4. 连续 ACC 轮次与置信度梯队评定
+    consec = get_prev_consec_acc(conn, t.chain, t.token_address)
+    res.confidence_tier = determine_confidence_tier(t, res.meta_score, res.engine_hits, consec)
 
-    # ── consec_acc 持续期强校验 (降级单轮/偶发 DIAMOND 噪音) ──
-    prev_consec = get_prev_consec_acc(conn, data.chain, data.token_address)
-
-    # ── master-scan 积分 ──
-    master_map = {
-        "DIAMOND": config.MASTER_DIAMOND,
-        "RED":     config.MASTER_RED,
-        "YELLOW":  config.MASTER_YELLOW,
-    }
-    
-    # ── 假出货豁免 (套牢盘 RED 信号降级为 YELLOW) ──
-    pnl = None
-    if data.cb_vwap and data.cb_vwap > 0:
-        pnl = (data.cb_gecko_price - data.cb_vwap) / data.cb_vwap * 100
-        
-    is_underwater_resilient = (pnl is not None and pnl < -30.0)
-    
-    if r.master_signal == "RED" and is_underwater_resilient:
-        r.master_signal = "YELLOW"
-
-    if r.master_signal == "DIAMOND" and prev_consec < 5:
-        # 单轮或偶发 DIAMOND 降级为 YELLOW 积分
-        r.master_score = config.MASTER_YELLOW
-    else:
-        r.master_score = master_map.get(r.master_signal, 0)
-
-    # ── opus-scan 积分（正向吸筹 / 负向出货）──
-    r.opus_score = round(data.opus_acc_conf * config.OPUS_ACC_SCALE
-                         - data.opus_dist_conf * config.OPUS_DIST_SCALE, 2)
-
-    # ── unified-scan 积分（吸筹方向 + 出货方向）──
-    if data.unified_signal in config.UNIFIED_DIST_SCORE:
-        r.unified_score = config.UNIFIED_DIST_SCORE[data.unified_signal]
-    else:
-        r.unified_score = config.UNIFIED_SCORE.get(data.unified_signal, 0)
-
-    # ── whale-scan 积分 ──
-    whale_map = {
-        "HIGH":   config.WHALE_HIGH,
-        "MEDIUM": config.WHALE_MEDIUM,
-        "LOW":    config.WHALE_LOW,
-    }
-    r.whale_score = whale_map.get(data.whale_level, 0)
-
-    # ── cost-basis-scan 积分 ──
-    r.cb_score = config.CB_SCORE.get(data.cb_verdict, 0)
-
-    # ── hop2 积分贡献与成本价格联动 (大户大捷期清零吸筹) ──
-    if pnl is not None and pnl >= 50.0:
-        # 已暴涨 50% 以上，进入分发区，清空 hop2 贡献分
-        r.hop2_score = 0.0
-    else:
-        if hop2_pct >= 0.30:
-            r.hop2_score = 1.50
-        elif hop2_pct >= 0.15:
-            r.hop2_score = 0.80
-        else:
-            r.hop2_score = 0.0
-
-    # ── master/unified DIAMOND 信号去重（仅 DIAMOND 同源去重）──
-    if r.master_signal == "DIAMOND" and r.unified_signal == "DIAMOND":
-        r.unified_score = round(r.unified_score * 0.5, 2)
-
-    # ── 出货方向 master 抑制 ──
-    # 当 opus/unified 明确出货时，master 正分不应抵消出货积分
-    is_dist_signal = (
-        data.opus_verdict == "SLOW_DISTRIBUTION"
-        or data.unified_signal in ("SLOW_DIST", "WHALE_DUMP")
-        or data.cb_verdict in ("DEATH_SPIRAL", "LIQUIDITY_CRISIS")
-    )
-    if is_dist_signal and r.master_score > 0:
-        r.master_score = 0
-
-    # ── 综合积分 ──
-    r.meta_score = round(
-        r.master_score + r.opus_score + r.unified_score + r.whale_score + r.cb_score + r.hop2_score, 2
-    )
-
-    # ── EWMA_3 不对称平滑分 (防暴雷滞后) ──
-    history_scores = []
-    if conn is not None and scan_time:
-        try:
-            cursor = conn.execute("""
-                SELECT meta_score FROM meta_snapshots
-                WHERE chain = ? AND token_address = ? AND scan_time < ?
-                ORDER BY scan_time DESC LIMIT 2
-            """, (data.chain, data.token_address.lower(), scan_time))
-            history_scores = [row[0] for row in cursor.fetchall()]
-        except Exception:
-            pass
-
-    current_score = r.meta_score
-    r.meta_score_smooth = current_score
-
-    if len(history_scores) >= 1:
-        prev_score = history_scores[0]
-        # 不对称平滑熔断：跌幅超 1.5 分（约跌 20% 以上）则直接熔断平滑以防预警滞后
-        is_sudden_drop = (current_score < prev_score) and ((prev_score - current_score) >= 1.5)
-        
-        if not is_sudden_drop:
-            if len(history_scores) >= 2:
-                r.meta_score_smooth = round(0.6 * current_score + 0.3 * history_scores[0] + 0.1 * history_scores[1], 2)
-            else:
-                r.meta_score_smooth = round((0.6 * current_score + 0.3 * history_scores[0]) / 0.9, 2)
-        else:
-            r.meta_score_smooth = current_score
-
-    # ── 假说2: 加速吸筹防御性共振判定与加分 ──
-    is_accelerating = (
-        (data.diff_acc_count >= 5 or data.new_acc_count >= 5)
-        and (data.diff_acc_score >= 3.0 or data.diff_stay_score >= 2.0 or data.diff_total_score >= 200)
-        and data.vl_ratio >= 5.0
-    )
-    if is_accelerating:
-        r.meta_score = round(r.meta_score + 1.5, 2)
-        r.meta_score_smooth = round(r.meta_score_smooth + 1.5, 2)
-
-    # ── 洗盘换手惩罚 (防御情况1) ──
-    total_acc = (data.diff_acc_count + data.new_acc_count)  # 估算当前吸筹数
-    turnover_rate = data.new_acc_count / total_acc if total_acc > 0 else 0.0
-    
-    is_wash_trading = (
-        data.new_acc_count >= 2
-        and data.diff_acc_count <= 0
-        and turnover_rate >= 0.20
-        and total_acc >= 3
-    )
-
-    if is_wash_trading:
-        r.meta_score = round(r.meta_score - 1.5, 2)
-        r.meta_score_smooth = round(r.meta_score_smooth - 1.5, 2)
-
-    # ── 裁决 ──
-    if r.meta_score >= config.META_ACC_THRESHOLD:
-        r.meta_verdict = "ACC"
-    elif r.meta_score <= config.META_DIST_THRESHOLD:
-        r.meta_verdict = "DIST"
-    else:
-        r.meta_verdict = "NEUTRAL"
-
-    # ── 生命周期阶段 ──
-    r.stage = _infer_stage(r, data, is_accelerating, is_wash_trading)
-
-    return r
+    return res
 
 
-def _infer_stage(r: MetaResult, data: TokenEngineData, is_accelerating: bool = False, is_wash_trading: bool = False) -> str:
-    """推断代币生命周期阶段"""
-    if is_wash_trading:
-        return "DISTRIBUTING"
-
-    if is_accelerating:
-        return "ACC_ACCELERATING"
-
-    # 极度控盘：master DIAMOND + whale HIGH
-    if r.master_signal == "DIAMOND" and r.whale_level == "HIGH":
-        return "CONTROLLED"
-
-    # 出货末期
-    if r.cb_verdict in ("DEATH_SPIRAL", "LIQUIDITY_CRISIS"):
-        return "DISTRIBUTING"
-
-    # 主动派发
-    if r.meta_verdict == "DIST":
-        return "DISTRIBUTING"
-
-    # 吸筹阶段
-    if r.meta_verdict == "ACC":
-        if r.master_signal == "DIAMOND":
-            return "CONTROLLED"
-        return "ACCUMULATING"
-
-    # 有 master 信号但综合未达阈值 → 观察
-    if r.master_signal in ("RED", "YELLOW"):
-        return "WATCHLIST"
-
-    return "NEUTRAL"
-
-
-def run_arbitration(all_data: list[TokenEngineData]) -> tuple[list[MetaResult], list[MetaResult]]:
-    """批量仲裁，返回 (acc排行, dist预警)"""
-    results = [arbitrate(d) for d in all_data]
-
-    acc_list  = sorted(
-        [r for r in results if r.meta_verdict == "ACC"],
-        key=lambda r: r.meta_score, reverse=True
-    )
-    dist_list = sorted(
-        [r for r in results if r.meta_verdict == "DIST"],
-        key=lambda r: r.meta_score
-    )
-    return acc_list, dist_list
+# 兼容别名
+run_arbitration = arbitrate
