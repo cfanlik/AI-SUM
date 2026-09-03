@@ -202,9 +202,19 @@ def arbitrate(token: TokenEngineData, hop2_pct: float = 0.0, conn: sqlite3.Conne
     cb_weights = {"STRONG_ACC": 2.0, "ACC": 1.0, "NEUTRAL": 0.0, "DIST": -1.5, "STRONG_DIST": -3.0}
     res.cb_score = cb_weights.get(t.cb_verdict, 0.0)
 
-    # hop2 加分
-    if hop2_pct >= 0.5:
-        res.hop2_score = round(hop2_pct * 1.5, 2)
+    # hop2 加分 (含吸筹总数 >= 30 防小样本门禁与三档分级标准)
+    acc_count = getattr(t, "acc_count_latest", 0)
+    if acc_count >= 30:
+        if hop2_pct > 0.20:
+            res.hop2_score = 1.50
+        elif hop2_pct > 0.10:
+            res.hop2_score = 1.00
+        elif hop2_pct > 0.05:
+            res.hop2_score = 0.50
+        else:
+            res.hop2_score = 0.00
+    else:
+        res.hop2_score = 0.00
 
     # 2. 汇总总分
     raw_total = res.master_score + res.opus_score + res.unified_score + res.whale_score + res.cb_score + res.hop2_score
