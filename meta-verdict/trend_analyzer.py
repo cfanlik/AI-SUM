@@ -76,21 +76,34 @@ def compute_token_series(conn: sqlite3.Connection, chain: str, token_address: st
     # 时序特征定性
     if metric.score_std < 0.3:
         metric.trend_category = "极度稳健"
+    elif metric.score_delta_5 <= -2.5:
+        metric.trend_category = "断崖跳水"
     elif metric.score_delta_5 > 2.0:
         metric.trend_category = "加速爆发"
     elif metric.score_std > 2.0:
         metric.trend_category = "剧烈拉锯"
+    elif metric.score_delta_5 < -1.0:
+        metric.trend_category = "动能衰减"
     else:
         metric.trend_category = "温和演进"
 
-    # V/L 换手疲劳度检测 (如果有历史 V/L 数据)
+    # V/L 换手疲劳度检测及增量自洽定性 (彻底消除负分还判定为稳步递增的Bug)
+    delta = metric.score_delta_5
     if current_vl > 10.0:
         metric.vl_fatigue = True
         metric.summary_thesis = f"极端换手({current_vl:.1f}x)轧空博弈，多空拉锯"
     elif metric.trend_category == "极度稳健":
         metric.summary_thesis = "独立地址持续真金死锁，高确定性吸筹"
+    elif delta <= -3.0:
+        metric.summary_thesis = f"得分动能断崖跳水(Δ{delta:+.1f})"
+    elif delta < -1.0:
+        metric.summary_thesis = f"资金多头动能走弱(Δ{delta:+.1f})"
+    elif delta >= 2.0:
+        metric.summary_thesis = f"得分加速上攻爆发(Δ{delta:+.1f})"
+    elif delta > 0.5:
+        metric.summary_thesis = f"得分轨迹稳步攀升(Δ{delta:+.1f})"
     else:
-        metric.summary_thesis = f"得分轨迹稳步递增(Δ+{metric.score_delta_5:.1f})"
+        metric.summary_thesis = f"多空窄幅拉锯震荡(Δ{delta:+.1f})"
 
     return metric
 

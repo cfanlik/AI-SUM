@@ -44,6 +44,15 @@ def format_price(val) -> str:
     return f"${s}"
 
 
+def format_token_cell(symbol: str, chain: str) -> str:
+    """标准代币列格式化，兼顾 60天持币抽屉触发与跨链区分"""
+    sym = (symbol or "?").upper()
+    ch = (chain or "").lower()
+    if ch and ch != "bsc":
+        return f"**{sym} [{ch.upper()}]**"
+    return f"**{sym}**"
+
+
 def generate_report(
     acc_list: list[MetaResult],
     dist_list: list[MetaResult],
@@ -92,7 +101,7 @@ def generate_report(
         std_str = f"(σ={r.series_std:.2f})" if r.series_std > 0 else ""
         vl_str = f"{r.vl_ratio:.2f}x" if r.vl_ratio > 0 else "—"
         md_lines.append(
-            f"| **🚀 L1-Alpha (稳健真金)** | **{r.token_symbol}** | **{r.meta_score:.2f}** | `{traj}` {std_str} | {vl_str} | DEX 真金率高，独立地址持续死锁加仓 | 现货分批建仓 / 中长线持有 |"
+            f"| **🚀 L1-Alpha (稳健真金)** | {format_token_cell(r.token_symbol, r.chain)} | **{r.meta_score:.2f}** | `{traj}` {std_str} | {vl_str} | DEX 真金率高，独立地址持续死锁加仓 | 现货分批建仓 / 中长线持有 |"
         )
 
     for r in l1_squeeze[:5]:
@@ -100,7 +109,7 @@ def generate_report(
         std_str = f"(σ={r.series_std:.2f})" if r.series_std > 0 else ""
         vl_str = f"{r.vl_ratio:.2f}x" if r.vl_ratio > 0 else "—"
         md_lines.append(
-            f"| **⚡ L1-Squeeze (轧空博弈)** | **{r.token_symbol}** | **{r.meta_score:.2f}** | `{traj}` {std_str} | {vl_str} | 极浅深度高换手轧空，筹码向CEX归集 | 仅限短线带止损博弈，严禁长线死锁 |"
+            f"| **⚡ L1-Squeeze (轧空博弈)** | {format_token_cell(r.token_symbol, r.chain)} | **{r.meta_score:.2f}** | `{traj}` {std_str} | {vl_str} | 极浅深度高换手轧空，筹码向CEX归集 | 仅限短线带止损博弈，严禁长线死锁 |"
         )
 
     for r in l1_special[:3]:
@@ -108,15 +117,39 @@ def generate_report(
         std_str = f"(σ={r.series_std:.2f})" if r.series_std > 0 else ""
         vl_str = f"{r.vl_ratio:.2f}x" if r.vl_ratio > 0 else "—"
         md_lines.append(
-            f"| **🔒 L1-Special (高控事件)** | **{r.token_symbol}** | **{r.meta_score:.2f}** | `{traj}` {std_str} | {vl_str} | 机构控盘 > 90%，低换手死锁控盘 | 观察突破 / 事件催化介入 |"
+            f"| **🔒 L1-Special (高控事件)** | {format_token_cell(r.token_symbol, r.chain)} | **{r.meta_score:.2f}** | `{traj}` {std_str} | {vl_str} | 机构控盘 > 90%，低换手死锁控盘 | 观察突破 / 事件催化介入 |"
         )
 
     for r in dump_rug[:5]:
         traj = r.series_trajectory if r.series_trajectory else f"{r.meta_score:.1f}"
         std_str = f"(σ={r.series_std:.2f})" if r.series_std > 0 else ""
         vl_str = f"{r.vl_ratio:.2f}x" if r.vl_ratio > 0 else "—"
+        tok_str = format_token_cell(r.token_symbol, r.chain)
+
+        # 动态细分风险类型
+        if r.reserve_usd > 0 and r.reserve_usd < 10000:
+            category = "🛑 撤池死池 / RUG"
+            strategy = "死池警报 / 零流动性不可交易"
+        elif r.price_now_ret is not None and r.price_now_ret <= -70.0:
+            category = "💀 严重看涨误判"
+            strategy = "认亏止损 / 永久移出观察池"
+        elif r.dump_penalty >= 2.0 or (r.hold_delta_72h_pct is not None and r.hold_delta_72h_pct <= -15.0):
+            category = "🚨 主力集中出货"
+            strategy = "触发风控拦截 / 严禁做多抄底"
+        else:
+            category = "⚠️ 动能衰竭破位"
+            strategy = "暂停加仓 / 严格执行止损"
+
+        # 动态真实量化归因 (彻底废除死模板)
+        reason = r.dump_reasons if r.dump_reasons else r.series_desc
+        if not reason:
+            if r.price_now_ret is not None:
+                reason = f"信号首发至今累计跌幅 {r.price_now_ret:+.1f}%"
+            else:
+                reason = "仲裁分转负，多维度动能衰竭"
+
         md_lines.append(
-            f"| **💀 DUMP / RUG (高危预警)** | **{r.token_symbol}** | **{r.meta_score:.2f}** | `{traj}` {std_str} | {vl_str} | 出货置信度高，获利盘派发或流动性异常 | 触发风控拦截 / 清仓回避 |"
+            f"| **{category}** | {tok_str} | **{r.meta_score:.2f}** | `{traj}` {std_str} | {vl_str} | {reason} | {strategy} |"
         )
 
     md_lines.extend([
@@ -156,13 +189,16 @@ def generate_report(
             pnl_str = f"{pnl_val:+.1f}%"
 
         desc = r.series_desc if r.series_desc else f"共振 {r.engine_hits} 引擎"
-        if r.confidence_tier == "L1-Squeeze":
+        if r.confidence_tier == "DENIED" or r.meta_verdict == "DIST":
+            desc = r.dump_reasons if r.dump_reasons else r.series_desc
+        elif r.confidence_tier == "L1-Squeeze":
             desc = f"极浅池高换手轧空，筹码向CEX归集"
         elif r.confidence_tier == "L1-Alpha":
             desc = f"真金持续死锁加仓，走势极其稳健"
 
+        tok_str = format_token_cell(r.token_symbol, r.chain)
         md_lines.append(
-            f"| **{rank}** | **{r.token_symbol}** | **{r.meta_score:.2f}** | {tier_badge} | `{traj}` {std_str} | {vl_str} | {inst_str} | {cex_str} | {vwap_str} / {price_str} | {pnl_str} | {desc} |"
+            f"| **{rank}** | {tok_str} | **{r.meta_score:.2f}** | {tier_badge} | `{traj}` {std_str} | {vl_str} | {inst_str} | {cex_str} | {vwap_str} / {price_str} | {pnl_str} | {desc} |"
         )
 
     # ── 第三屏：5 轮时序拟合矩阵 (代币列固定为 | **SYMBOL** |) ──
@@ -182,30 +218,47 @@ def generate_report(
                 f"| **{sm.token_symbol}** | `{sm.trajectory_str}` | {sm.scores_trajectory[0]:.1f} → {sm.scores_trajectory[-1]:.1f} | {sm.score_delta_5:+.2f} | {sm.score_std:.2f} | {sm.trend_category} ({sm.summary_thesis}) |"
             )
 
-    # ── 第四屏：报表说明与参数字典 (Tips) ──
+    # ── 第四屏：报表说明与风控参数字典 (Tips) ──
     md_lines.extend([
         "",
         "---",
         "",
         "## 📖 第四屏：报表说明与风控参数字典 (Tips)",
         "",
+        "### 1. 核心量化指标字典",
         "| 字段 / 参数 | 物理定义与算法规则 | 阈值标准与决策含义 |",
         "| :--- | :--- | :--- |",
         "| **换手乘数 (V/L)** | 24小时成交量与流动性池深度比值 (Volume / Liquidity) | `> 10.0x` 触发流动性挤压警报；`> 15.0x` 判定为短线轧空投机 |",
         "| **CEX占比 (Δ)** | 交易所地址持仓占比及其相较于初始快照的增量 | `Δ > +20%` 表明链上筹码正快速向中心化交易所归集 |",
         "| **波动度 (σ)** | 连续 5 轮仲裁得分的标准差 (StdDev) | `σ < 0.3` 为极度稳健吸筹；`σ > 2.0` 为多空剧烈拉锯博弈 |",
-        "| **拟合增量 (Δ)** | 连续 5 轮快照首尾仲裁得分净变化值 (Score_curr - Score_init) | `Δ > +2.0` 为加速爆发；`Δ < -1.5` 为资金动能衰减 |",
-        "| **🚀 L1-Alpha** | 顶级稳健真金共振标的（得分 >= 7.0 且换手正常） | 独立地址真金死锁加仓，适合现货中长线持有 |",
-        "| **⚡ L1-Squeeze** | 顶级流动性挤压与轧空博弈标的（得分 >= 7.0 但 V/L > 10x） | 极浅池推动的高风险博弈，仅限短线带止损操作 |",
-        "| **🔥 60天持币正相关性 (ρ)** | 固定吸筹地址队列 60 天持币量与时间的皮尔逊相关系数 | `ρ > 80%` 为极强正相关，反映核心主力筹码持续单调递增 |",
+        "| **拟合增量 (Δ)** | 连续 5 轮快照首尾仲裁得分净变化值 (Score_curr - Score_init) | `Δ > +2.0` 加速爆发；`Δ < -2.0` 动能断崖跳水 |",
+        "",
+        "### 2. 置信梯队与风控分类标准",
+        "| 决策梯队 / 分类 | 触发门槛与判定规则 | 推荐应对处置策略 |",
+        "| :--- | :--- | :--- |",
+        "| **🚀 L1-Alpha (稳健真金)** | 仲裁分 >= 7.0，DEX 真金率高，独立地址持续死锁加仓 | 现货分批建仓 / 中长线持有 |",
+        "| **⚡ L1-Squeeze (轧空博弈)** | 仲裁分 >= 7.0 但换手 V/L > 10x 或 CEX 增量 > 20% | 极浅池推动的高风险博弈，仅限短线带止损操作 |",
+        "| **💀 严重看涨误判** | 信号首发至今累计价格收益率 `price_now_ret <= -70.0%` | 认亏止损，系统一票否决转入 DIST 与 DENIED |",
+        "| **🚨 主力集中出货** | 72h 吸筹队列持仓流失 > 15% 或 `opus-scan` 出货置信度 >= 50% | 触发风控拦截，严禁盲目做多抄底 |",
+        "| **🛑 撤池死池 / RUG** | 流动性池储备 `reserve_usd < $10,000` 或检测到撤池 | 零流动性不可交易，直接回避 |",
+        "",
+        "### 3. 核心认知盲区解答：为什么“60天持币量在涨”，系统却亮红灯高危预警？",
+        "> **微观悖论揭秘（局部散户套牢加仓 vs 宏观巨鲸疯狂砸盘）**：",
+        "> - **右侧抽屉 60 天持币图**: 仅统计固定的 100 余个吸筹地址。在阴跌趋势中，散户往往越跌越买被动套牢补仓，但这批地址持币总量通常**不足代币总供应量的 1%**（例如 GWEI 仅占 0.95%）；",
+        "> - **宏观巨鲸真实动向**: 全网前 3~5 个顶级巨鲸往往掌控全网 **70%~90% 以上** 的绝对筹码。当巨鲸在二级市场上以散户买入量数十倍的规模大额出货砸盘时，价格必然断崖暴跌 80% 以上；",
+        "> - **系统风控逻辑**: 决策总控驾驶舱不会被 1% 的局部散户加仓所蒙蔽，一旦发现二级市场价格严重背离（亏损 > 70%）或巨鲸大幅减仓，将**一票否决直接亮起高危红灯**，坚决保护用户本金免遭灭顶之灾。",
         "",
         "---",
     ])
 
     # ── 第五屏：暴跌出货与严重看涨误判专项风控看板 ──
     dump_pool = []
+    seen_tokens = set()
     if all_arbitrated:
         for r in all_arbitrated:
+            u_key = f"{r.chain}:{r.token_address.lower()}"
+            if u_key in seen_tokens:
+                continue
             has_dump_risk = (
                 r.dump_penalty > 0 or 
                 r.meta_verdict == "DIST" or 
@@ -213,6 +266,7 @@ def generate_report(
             )
             if has_dump_risk:
                 dump_pool.append(r)
+                seen_tokens.add(u_key)
         
         dump_pool.sort(key=lambda x: (x.price_now_ret if x.price_now_ret is not None else 0, x.meta_score))
 
@@ -232,12 +286,12 @@ def generate_report(
         for r in dump_pool[:25]:
             if r.price_now_ret is not None and r.price_now_ret <= -70.0:
                 cat = "💀 严重看涨误判"
-            elif r.dump_penalty >= 2.0:
-                cat = "⚠️ 强力出货派发"
+            elif r.dump_penalty >= 2.0 or (r.hold_delta_72h_pct is not None and r.hold_delta_72h_pct <= -15.0):
+                cat = "🚨 主力集中出货"
             elif r.price_now_ret is not None and r.price_now_ret <= -40.0:
                 cat = "📉 动能衰竭破位"
             else:
-                cat = "🛑 链上异动预警"
+                cat = "⚠️ 动能预警"
 
             ret_str = f"{r.price_now_ret:+.1f}%" if r.price_now_ret is not None else "—"
             hold_str = f"{r.hold_delta_72h_pct:+.1f}%" if r.hold_delta_72h_pct is not None else "—"
@@ -245,14 +299,15 @@ def generate_report(
             reasons = r.dump_reasons if r.dump_reasons else f"历史偏离亏损 {ret_str}"
             
             if r.price_now_ret is not None and r.price_now_ret <= -70.0:
-                strategy = "强制清仓回避 / 移出观察池"
+                strategy = "认亏止损 / 永久移出观察池"
             elif r.meta_verdict == "DIST":
-                strategy = "触发风控拦截 / 严禁做多"
+                strategy = "触发风控拦截 / 严禁做多抄底"
             else:
-                strategy = "暂停加仓 / 严控止损"
+                strategy = "暂停加仓 / 严格执行止损"
 
+            tok_str = format_token_cell(r.token_symbol, r.chain)
             md_lines.append(
-                f"| **{cat}** | **{r.token_symbol}** | **{r.meta_score:.2f}** | {ret_str} | {hold_str} | {penalty_str} | {reasons} | {strategy} |"
+                f"| **{cat}** | {tok_str} | **{r.meta_score:.2f}** | {ret_str} | {hold_str} | {penalty_str} | {reasons} | {strategy} |"
             )
 
     md_lines.extend([
