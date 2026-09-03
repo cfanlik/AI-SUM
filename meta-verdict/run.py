@@ -205,19 +205,22 @@ def _update_lifecycle(conn, results, scan_time: str):
         ).fetchone()
 
         if existing:
-            prev = existing["current_stage"]
-            since = existing["stage_since"] if r.stage == prev else scan_time
+            prev = existing[0] if isinstance(existing, tuple) else existing["current_stage"]
+            old_since = existing[1] if isinstance(existing, tuple) else existing["stage_since"]
+            since = old_since if r.stage == prev and old_since else scan_time
             transition = ""
             if prev in ("ACCUMULATING", "CONTROLLED") and r.stage == "DISTRIBUTING":
                 transition = f"⚡ {prev}→DISTRIBUTING"
                 logger.warning(f"生命周期跃迁: {r.token_symbol} {transition}")
+            elif prev and prev != r.stage:
+                transition = f"🔄 {prev}→{r.stage}"
             conn.execute("""
                 UPDATE token_lifecycle
                 SET current_stage=?, prev_stage=?, stage_since=?, last_updated=?,
                     meta_score=?, transition=?, token_symbol=?
-                WHERE chain=? AND token_address=?
+                WHERE chain=? AND lower(token_address)=?
             """, (r.stage, prev, since, scan_time, r.meta_score, transition,
-                  r.token_symbol, r.chain, r.token_address))
+                  r.token_symbol, r.chain, r.token_address.lower()))
         else:
             conn.execute("""
                 INSERT INTO token_lifecycle
