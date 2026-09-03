@@ -650,11 +650,11 @@ def collect_hop2_tracking(sum_conn: sqlite3.Connection, scan_time: str, tokens_t
                          THEN 1 ELSE 0 END)                                           AS tier_80_count,
                 AVG(CASE WHEN is_accumulating = 1 THEN dex_ratio_hop2 END)            AS hop2_avg
             FROM src.bubblemap_holders
-            WHERE token_address = ?
-              AND batch_id = (
-                  SELECT MAX(batch_id) FROM src.bubblemap_holders WHERE token_address = ?
+            WHERE chain = ? AND token_address = ?
+              AND snapshot_time = (
+                  SELECT MAX(snapshot_time) FROM src.bubblemap_holders WHERE chain = ? AND token_address = ?
               )
-        """, [addr, addr]).fetchone()
+        """, [chain, addr, chain, addr]).fetchone()
         
         if not row or (row["total_holders"] or 0) == 0:
             continue
