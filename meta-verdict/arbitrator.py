@@ -74,6 +74,7 @@ class MetaResult:
     dump_reasons:       str   = ""              # 出货与风控原因摘要
     price_now_ret:      float | None = None     # 信号首发至今收益率
     hold_delta_72h_pct: float | None = None     # 72h 持仓变动
+    acc_count_latest:   int = 0                 # 最新吸筹地址数量
 
 
 def calculate_resilience_norm(raw_val: float | None) -> float | None:
@@ -263,6 +264,7 @@ def arbitrate(token: TokenEngineData, hop2_pct: float = 0.0, conn: sqlite3.Conne
     # 透传偏离度数据供报告层展示
     res.price_now_ret = t.price_now_ret
     res.hold_delta_72h_pct = t.hold_delta_72h_pct
+    res.acc_count_latest = t.acc_count_latest
 
     # 3. 判定 meta_verdict & stage
     # 只要总分突破 -2.0 或 信号暴跌巨亏超 70%，一票否决强制评定为 DIST

@@ -269,27 +269,39 @@ def generate_report(
                 r.score_delta_5 = 0.0
                 r.trajectory_str = f"{r.meta_score:.1f}"
 
-            # 自洽准入门槛: 实质性出货风险 或 严重价格腰斩
+            # 全连续自洽风控准入门槛 (凡产生实质性风控暴露者均自洽准入)
+            h72 = r.hold_delta_72h_pct if r.hold_delta_72h_pct is not None else 0.0
+            acc_cnt = getattr(r, "acc_count_latest", 0)
             has_dump_risk = (
                 r.meta_verdict == "DIST" or 
-                r.dump_penalty >= 1.5 or 
-                (r.price_now_ret is not None and r.price_now_ret <= -50.0)
+                r.dump_penalty >= 0.5 or 
+                (h72 <= -5.0 and acc_cnt >= 10) or 
+                (r.price_now_ret is not None and r.price_now_ret <= -30.0)
             )
             if has_dump_risk:
                 dump_pool.append(r)
                 seen_tokens.add(u_key)
         
-        # 动静结合三元组纯量化自洽排序 (零单币特判)
-        # 第一主键: 仲裁总分 meta_score 升序 (负分越深越危险)
-        # 第二主键: 5 轮时序拟合净增量 score_delta_5 升序 (跳水恶化越猛越靠前)
-        # 第三主键: 信号至今收益率 price_now_ret 升序 (同等恶化下亏损越深越靠前)
-        dump_pool.sort(
-            key=lambda x: (
-                round(x.meta_score, 2),
-                round(getattr(x, "score_delta_5", 0.0), 2),
-                x.price_now_ret if x.price_now_ret is not None else 0.0
-            )
-        )
+        # 动静结合三主键纯量化自洽排序 (第一主键: 队列流失严重度优先置顶)
+        def get_dump_sort_key(x):
+            h = x.hold_delta_72h_pct if x.hold_delta_72h_pct is not None else 0.0
+            cnt = getattr(x, "acc_count_latest", 0)
+            is_cohort_dump = (h <= -5.0 and cnt >= 10)
+            
+            # 第一主键: 存在队列流失者赋予最高优先级 0 (无流失为 1)，内部按流失深度排序 (负值越深越靠前)
+            tier_priority = 0 if is_cohort_dump else 1
+            cohort_loss_depth = h if is_cohort_dump else 0.0
+            
+            # 第二主键: 仲裁总分 meta_score 升序 (负分越深越靠前)
+            score = round(x.meta_score, 2)
+            
+            # 第三主键: 5 轮时序恶化加速度 score_delta_5 与价格收益率 price_now_ret 升序
+            delta_5 = round(getattr(x, "score_delta_5", 0.0), 2)
+            ret = x.price_now_ret if x.price_now_ret is not None else 0.0
+            
+            return (tier_priority, cohort_loss_depth, score, delta_5, ret)
+
+        dump_pool.sort(key=get_dump_sort_key)
 
     if dump_pool:
         md_lines.extend([
@@ -337,7 +349,7 @@ def generate_report(
             elif i_whale >= 0.6:
                 cat = "🚨 巨鲸派发/转入CEX"
                 strategy = "触发风控拦截 / 严禁做多抄底"
-            elif i_cohort_dump >= 0.3:
+            elif i_cohort_dump > 0.0:
                 cat = "⚠️ 队列显著流失" if i_cohort_dump >= 0.5 else "⚠️ 队列持仓松动"
                 strategy = "严控多头仓位 / 暂停买入严密监控"
             elif r.meta_verdict == "DIST":
