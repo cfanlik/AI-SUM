@@ -309,15 +309,20 @@ def generate_report(
             delta_5 = getattr(r, "score_delta_5", 0.0)
             traj_str = f"`{r.trajectory_str}` (Δ{delta_5:+.1f})" if r.trajectory_str else f"`{r.meta_score:.1f}`"
 
-            # 动态精准分类: 优先识别历史看涨严重误判(亏损>70%)，其次识别动能断崖跳水与主力出货
+            # 动态精准分类 (优先级: 严重看涨误判 > 动能断崖跳水 > 吸筹队列自身抛售 > 全网巨鲸派发/流向CEX > 阴跌)
             if r.price_now_ret is not None and r.price_now_ret <= -70.0:
                 cat = "💀 严重看涨误判"
                 strategy = "认亏止损 / 永久移出观察池"
             elif delta_5 <= -3.0 or (r.dump_penalty >= 2.0 and r.meta_score <= -2.5):
                 cat = "🚨 动能断崖跳水"
                 strategy = "触发风控拦截 / 严禁做多抄底"
-            elif r.dump_penalty >= 1.5 or (r.hold_delta_72h_pct is not None and r.hold_delta_72h_pct <= -15.0):
-                cat = "🚨 主力集中出货"
+            elif r.hold_delta_72h_pct is not None and r.hold_delta_72h_pct <= -15.0:
+                # 修正口径后，仅在追踪的固定吸筹队列自身发生断崖抛盘时触发 (如 PRL)
+                cat = "🚨 吸筹队列抛售"
+                strategy = "触发风控拦截 / 严禁做多抄底"
+            elif r.dump_penalty >= 1.5:
+                # Opus 监测到全网假鲸鱼大额派发或筹码集中流向 CEX (如 SHELL)
+                cat = "🚨 巨鲸派发/转入CEX"
                 strategy = "触发风控拦截 / 严禁做多抄底"
             elif r.meta_verdict == "DIST":
                 cat = "🛑 持续阴跌出货"
