@@ -151,8 +151,8 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
         if status == "ACTIVE":
             tokens[k].master_signal = signal
         else:
-            expired_map = {"DIAMOND": "YELLOW", "RED": "YELLOW", "YELLOW": "YELLOW"}
-            tokens[k].master_signal = expired_map.get(signal, "")
+            # 连续无信号已过期代币，清空 master 信号，贡献分归零
+            tokens[k].master_signal = ""
         tokens[k].master_pattern = r["trigger_pattern"] or ""
         if tokens[k].master_signal:
             tokens[k].engine_hits += 1
@@ -166,6 +166,7 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
             FROM opus_snapshots GROUP BY chain, token_address
         ) m ON o.chain=m.chain AND o.token_address=m.token_address AND o.scan_time=m.latest
         WHERE o.verdict != 'NEUTRAL'
+          AND o.scan_time >= datetime('now', '-48 hours')
     """).fetchall()
     for r in rows:
         k = key(r["chain"], r["token_address"])

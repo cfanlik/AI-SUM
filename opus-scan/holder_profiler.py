@@ -62,13 +62,18 @@ def build_profile(
 
         addr_short = (h.get("wallet_address") or "?")[:12] + "..."
 
-        # ── 出货者 ──
-        is_seller = (sell > 0 and buy == 0) or (sell > 0 and buy > 0 and sell / max(buy, 1) >= config.DIST_SELL_BUY_RATIO)
+        # ── 出货者 ── (使用金额比与抛售量综合判定)
+        buy_usd = h.get("buy_amt_usd") or 0
+        sell_usd = h.get("sell_amt_usd") or 0
+        is_seller = (sell_usd > 0 and buy_usd == 0) or \
+                    (sell_usd > 0 and buy_usd > 0 and sell_usd / max(buy_usd, 1) >= 0.5) or \
+                    (sell > 0 and buy == 0) or \
+                    (h48_out > 0 and h48_in == 0 and (hold_pct >= 0.1 or h48_out >= 50000))
         if is_seller:
             entry = {
                 "addr": addr_short, "hold": hold_pct,
-                "buy": buy, "sell": sell,
-                "ratio": round(sell / max(buy, 1), 1) if buy > 0 else 999.0,
+                "buy": buy_usd, "sell": sell_usd,
+                "ratio": round(sell_usd / max(buy_usd, 1), 1) if buy_usd > 0 else 999.0,
                 "h48_out": h48_out,
             }
             profile.sellers.append(entry)
@@ -85,8 +90,8 @@ def build_profile(
             profile.fake_whales.append(entry)
             profile.fake_whale_hold_pct += hold_pct
 
-        # ── 48h 派发者 ──
-        if h48_out > 0 and h48_in == 0 and hold_pct >= 0.5:
+        # ── 48h 派发者 ── (放宽门槛，捕获中大户分散出货)
+        if h48_out > 0 and h48_in == 0 and (hold_pct >= 0.1 or h48_out >= 50000):
             profile.distributors_48h.append({
                 "addr": addr_short, "hold": hold_pct,
                 "h48_out": h48_out,
@@ -100,7 +105,7 @@ def build_profile(
                 acc_with_dex += 1
             if net <= 0:
                 acc_all_inflow_pos = False
-            if buy > sell * 3 and buy >= 10:
+            if buy > sell * 3 and buy >= 10 and not (h48_out > 0 and h48_in == 0):
                 strong_buyers += 1
             profile.real_accumulators.append({
                 "addr": addr_short, "hold": hold_pct,

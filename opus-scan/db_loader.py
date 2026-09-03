@@ -76,7 +76,7 @@ def load_top_holders(
     SELECT
         wallet_address, hold_percentage, acc_score,
         is_accumulating, is_cex, is_dex, is_contract, is_supernode,
-        buy_cnt, sell_cnt, net_inflow, dex_ratio, entity_id,
+        buy_cnt, sell_cnt, buy_amt_usd, sell_amt_usd, net_inflow, dex_ratio, entity_id,
         COALESCE(recent_48h_in, 0) AS recent_48h_in,
         COALESCE(recent_48h_out, 0) AS recent_48h_out,
         COALESCE(surge_ratio, 0) AS surge_ratio

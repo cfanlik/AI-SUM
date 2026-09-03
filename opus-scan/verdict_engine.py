@@ -129,8 +129,10 @@ def evaluate(
     # ── 出货置信度 ──
     dist_checks = [
         ("major_seller", 3,
-         hp.seller_count > 0 and any(
-             s.get("hold", 0) >= 1.0 for s in hp.sellers),
+         hp.seller_count > 0 and (
+             any(s.get("hold", 0) >= 1.0 for s in hp.sellers) or
+             (hp.seller_count >= 5 and hp.seller_hold_pct >= 2.0)
+         ),
          f"出货者 {hp.seller_count} 个, 持仓 {hp.seller_hold_pct:.1f}%"),
 
         ("fake_whales", 3,
@@ -172,14 +174,12 @@ def evaluate(
     ]
 
     if has_cex:
+        # CEX 流入出货检测 (分级单项检测，避免双重惩罚分母虚高)
+        is_heavy = (ts.cex_delta_pct > 5 and ts.cex_hold_slope > 0.3)
+        is_normal = (ts.cex_delta_pct > 3 and ts.cex_hold_slope > 0.2)
         dist_checks.append((
-            "cex_inflow_heavy", 3,
-            ts.cex_delta_pct > 5 and ts.cex_hold_slope > 0.3,
-            f"CEX持续流入 {ts.cex_hold_earliest:.1f}%\u2192{ts.cex_hold_latest:.1f}% (斜率{ts.cex_hold_slope:+.2f})"
-        ))
-        dist_checks.append((
-            "cex_inflow", 2,
-            ts.cex_delta_pct > 3 and ts.cex_hold_slope > 0.2,
+            "cex_inflow", 3 if is_heavy else 2,
+            is_heavy or is_normal,
             f"CEX {ts.cex_hold_earliest:.1f}%\u2192{ts.cex_hold_latest:.1f}% (斜率{ts.cex_hold_slope:+.2f})"
         ))
 

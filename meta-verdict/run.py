@@ -122,7 +122,7 @@ def main():
                      f"跃变{len(trend.jumps)}")
 
     # 更新生命周期表 (完美追踪完全体状态)
-    _update_lifecycle(conn, all_results, scan_time)
+    _update_lifecycle(conn, all_arbitrated, scan_time)
 
     # 生成报告（含趋势+健康+矛盾）
     generate_report(acc_list, dist_list, len(all_data), scan_time, trend, health, conflicts)

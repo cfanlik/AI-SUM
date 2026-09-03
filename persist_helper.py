@@ -75,8 +75,7 @@ def save_opus(results):
     conn = sqlite3.connect(SUM_DB)
     rows = []
     for r in results:
-        if r.verdict in ("NEUTRAL",):
-            continue
+        # 保留全量裁决记录，防止下游读取历史老旧快照产生僵尸得分
         rows.append((
             SCAN_TIME, r.chain, r.token_address, r.symbol,
             r.acc_confidence, r.dist_confidence, r.verdict,
