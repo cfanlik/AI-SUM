@@ -69,6 +69,12 @@ class MetaResult:
     resilience_index: float = 0.0       # 历史抗跌韧性原始分
     resilience_norm: float = 0.5        # Sigmoid [0, 1] 稳健平滑分
 
+    # 暴跌与风控扩展透传
+    hold_delta_72h_pct: float = 0.0
+    price_change_7d:    float = 0.0
+    dump_risk_level:    str   = "NORMAL"
+    dump_risk_detail:   str   = ""
+
 
 def calculate_resilience_norm(raw_val: float | None) -> float | None:
     """Sigmoid 稳健归一化，消除离群极值影响，映射至 [0.0, 1.0]"""
@@ -200,20 +206,48 @@ def arbitrate(token: TokenEngineData, hop2_pct: float = 0.0, conn: sqlite3.Conne
     res.meta_score = round(raw_total, 2)
     res.engine_hits = sum(1 for s in [res.master_score, res.opus_score, res.unified_score, res.whale_score, res.cb_score] if s > 0)
 
-    # 3. 判定 meta_verdict & stage
-    if res.meta_score >= 3.0:
-        res.meta_verdict = "ACC"
-        res.stage = "ACCUMULATING"
-    elif res.meta_score <= -2.0:
+    # 风控与暴跌审计字段透传
+    res.hold_delta_72h_pct = t.hold_delta_72h_pct
+    res.price_change_7d = t.price_change_7d
+    res.dump_risk_level = t.dump_risk_level
+    res.dump_risk_detail = t.dump_risk_detail
+
+    # ── 暴跌与出货风控惩罚 ──
+    # 1. 72h 吸筹队列持仓暴跌超 15% -> 扣减 1.5 分并标记 CRITICAL
+    if t.hold_delta_72h_pct <= -15.0:
+        res.meta_score = round(res.meta_score - 1.5, 2)
+        res.dump_risk_level = "CRITICAL"
+        res.dump_risk_detail = f"72h吸筹持仓断崖跳水 {t.hold_delta_72h_pct:+.1f}%"
+
+    # 2. opus-scan 明确判定为出货且置信度 >= 50% -> 扣减 1.0 分
+    if t.opus_verdict in ("SLOW_DISTRIBUTION", "DISTRIBUTING") and t.opus_dist_conf >= 50.0:
+        res.meta_score = round(res.meta_score - 1.0, 2)
+        if res.dump_risk_level != "CRITICAL":
+            res.dump_risk_level = "WARNING"
+            res.dump_risk_detail = f"opus出货置信度 {t.opus_dist_conf:.0f}%"
+
+    # 3. 7d 价格暴跌超 20% 且存在派发迹象 -> 扣减 1.0 分
+    if t.price_change_7d <= -20.0 and (t.opus_dist_conf >= 30.0 or res.meta_score <= 1.0):
+        res.meta_score = round(res.meta_score - 1.0, 2)
+        if res.dump_risk_level == "NORMAL":
+            res.dump_risk_level = "WARNING"
+            res.dump_risk_detail = f"7d价格暴跌 {t.price_change_7d:+.1f}%"
+
+    # 3. 判定 meta_verdict & stage (出货风控触发一票定性)
+    if res.dump_risk_level == "CRITICAL" or res.meta_score <= -2.0:
         res.meta_verdict = "DIST"
         res.stage = "DISTRIBUTING"
+        res.confidence_tier = "DENIED"
+    elif res.meta_score >= 3.0:
+        res.meta_verdict = "ACC"
+        res.stage = "ACCUMULATING"
+        # 4. 连续 ACC 轮次与置信度梯队评定
+        consec = get_prev_consec_acc(conn, t.chain, t.token_address)
+        res.confidence_tier = determine_confidence_tier(t, res.meta_score, res.engine_hits, consec)
     else:
         res.meta_verdict = "NEUTRAL"
         res.stage = "WATCHLIST" if res.engine_hits >= 1 else "NEUTRAL"
-
-    # 4. 连续 ACC 轮次与置信度梯队评定
-    consec = get_prev_consec_acc(conn, t.chain, t.token_address)
-    res.confidence_tier = determine_confidence_tier(t, res.meta_score, res.engine_hits, consec)
+        res.confidence_tier = "L3-Watch" if res.dump_risk_level == "NORMAL" else "DENIED"
 
     return res
 

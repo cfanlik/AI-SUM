@@ -68,7 +68,9 @@ def generate_report(
     l1_alpha = [r for r in all_ranked if r.confidence_tier == "L1-Alpha"]
     l1_squeeze = [r for r in all_ranked if r.confidence_tier == "L1-Squeeze"]
     l1_special = [r for r in all_ranked if r.confidence_tier == "L1-Special"]
-    dump_rug = [r for r in all_ranked if r.meta_verdict == "DIST" or r.confidence_tier == "DENIED"]
+    dump_rug = [r for r in all_ranked if r.meta_verdict == "DIST" or r.confidence_tier == "DENIED" or getattr(r, "dump_risk_level", "NORMAL") in ("CRITICAL", "WARNING")]
+    # 风险标的按分数从低到高排序 (最严重的排在最前)
+    dump_rug.sort(key=lambda x: x.meta_score)
 
     # ── 3. 构造 Markdown 报表 ──
     md_lines = [
@@ -207,6 +209,43 @@ def generate_report(
         "- ⚡ [实盘突发异动与穿透观察专报 (Anomaly Watch)](../anomaly/latest_实时信号验证报告_实盘观察.md)",
         "",
     ])
+
+    # ── 第五屏：暴跌出货与严重看涨误判专项风控看板 (Crash & Heavy Distribution Radar) ──
+    dump_radar_list = [
+        r for r in all_ranked
+        if getattr(r, "dump_risk_level", "NORMAL") in ("CRITICAL", "WARNING")
+           or r.meta_verdict == "DIST"
+           or getattr(r, "price_change_7d", 0) <= -20.0
+           or getattr(r, "hold_delta_72h_pct", 0) <= -15.0
+    ]
+    dump_radar_list.sort(key=lambda x: (x.meta_score, getattr(x, "price_change_7d", 0)))
+
+    md_lines.extend([
+        "",
+        "---",
+        "",
+        "## 🚨 第五屏：暴跌出货与严重看涨误判专项风控看板 (Crash & Heavy Distribution Radar)",
+        "",
+        "> **风控准则**: 针对 72h 吸筹队列持仓断崖跳水、7d 价格严重偏离暴跌、或出货引擎高置信度派发标的，启动物理风控阻断与清仓回避建议。",
+        "",
+        "| 风险等级 | 代币 | 仲裁分 | 7d 价格变动 | 72h 持仓变动 | 换手乘数 (V/L) | 核心风险定性与特征 | 推荐应对处置 |",
+        "| :---: | :--- | :---: | :---: | :---: | :---: | :--- | :--- |",
+    ])
+
+    if dump_radar_list:
+        for r in dump_radar_list[:15]:
+            risk_badge = "💀 极度高危" if getattr(r, "dump_risk_level", "NORMAL") == "CRITICAL" else "⚠️ 高危警示"
+            p7_str = f"{r.price_change_7d:+.1f}%" if getattr(r, "price_change_7d", 0) != 0 else "—"
+            h72_str = f"{r.hold_delta_72h_pct:+.1f}%" if getattr(r, "hold_delta_72h_pct", 0) != 0 else "—"
+            vl_str = f"{r.vl_ratio:.2f}x" if r.vl_ratio > 0 else "—"
+            detail_str = r.dump_risk_detail if getattr(r, "dump_risk_detail", "") else "链上抛售流出显著或价格深度走弱"
+            md_lines.append(
+                f"| **{risk_badge}** | **{r.token_symbol}** | **{r.meta_score:.2f}** | **{p7_str}** | **{h72_str}** | {vl_str} | {detail_str} | 立即清仓回避 / 移出观察池 |"
+            )
+    else:
+        md_lines.append(
+            "| ✅ 安全 | 全库暂无满足阈值的暴跌出货标的 | — | — | — | — | 全库运行稳健 | 维持现有监控 |"
+        )
 
     report_content = "\n".join(md_lines)
 

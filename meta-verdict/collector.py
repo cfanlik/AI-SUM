@@ -67,6 +67,12 @@ class TokenEngineData:
     cb_windfall_pct: float = 0.0
     cb_signals:      str   = ""
 
+    # 暴跌与风控扩展 (72h 吸筹持仓变动与 7d 价格偏离度)
+    hold_delta_72h_pct: float = 0.0
+    price_change_7d:    float = 0.0
+    dump_risk_level:    str   = "NORMAL"   # NORMAL / WARNING / CRITICAL
+    dump_risk_detail:   str   = ""
+
 
 def get_connection() -> sqlite3.Connection:
     import config
@@ -274,6 +280,41 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
                 t.vl_ratio = row_market["vl_ratio"] or 0.0
                 t.market_cap_usd = row_market["market_cap_usd"] or 0.0
                 t.fdv_usd = row_market["fdv_usd"] or 0.0
+
+            # 7d 价格偏离度计算
+            try:
+                from datetime import datetime, timedelta
+                d_roll_7d = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+                p_roll_row = conn.execute(
+                    "SELECT price_usd FROM src.gecko_market_data WHERE chain=? AND token_address=? AND scan_time>=? AND price_usd>0 ORDER BY scan_time LIMIT 1",
+                    (t.chain, t.token_address, d_roll_7d)
+                ).fetchone()
+                if p_roll_row and t.price_usd > 0 and p_roll_row[0] > 0:
+                    t.price_change_7d = round((t.price_usd - p_roll_row[0]) / p_roll_row[0] * 100, 1)
+            except Exception:
+                pass
+
+            # 72h 吸筹队列持仓衰减率计算
+            try:
+                latest_snap_row = conn.execute(
+                    "SELECT snapshot_time FROM src.bubblemap_holders WHERE chain=? AND token_address=? ORDER BY snapshot_time DESC LIMIT 1",
+                    (t.chain, t.token_address)
+                ).fetchone()
+                if latest_snap_row:
+                    ls_time = latest_snap_row[0]
+                    d_72h = (datetime.strptime(ls_time[:19], "%Y-%m-%d %H:%M:%S") - timedelta(hours=72)).strftime("%Y-%m-%d %H:%M:%S")
+                    prev_snap_row = conn.execute(
+                        "SELECT snapshot_time FROM src.bubblemap_holders WHERE chain=? AND token_address=? AND snapshot_time <= ? ORDER BY snapshot_time DESC LIMIT 1",
+                        (t.chain, t.token_address, d_72h)
+                    ).fetchone()
+                    if prev_snap_row:
+                        ps_time = prev_snap_row[0]
+                        curr_acc_amt = conn.execute("SELECT SUM(hold_amount) FROM src.bubblemap_holders WHERE chain=? AND token_address=? AND snapshot_time=? AND is_accumulating=1", (t.chain, t.token_address, ls_time)).fetchone()[0] or 0
+                        prev_acc_amt = conn.execute("SELECT SUM(hold_amount) FROM src.bubblemap_holders WHERE chain=? AND token_address=? AND snapshot_time=? AND is_accumulating=1", (t.chain, t.token_address, ps_time)).fetchone()[0] or 0
+                        if prev_acc_amt > 0:
+                            t.hold_delta_72h_pct = round((curr_acc_amt - prev_acc_amt) / prev_acc_amt * 100, 1)
+            except Exception:
+                pass
 
             # 时序与抗稀释特征计算
             try:
