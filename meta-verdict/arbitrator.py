@@ -214,25 +214,36 @@ def arbitrate(token: TokenEngineData, hop2_pct: float = 0.0, conn: sqlite3.Conne
     _dump_penalty = 0.0
     _dump_reasons = []
 
-    # 维度 A: opus-scan 出货判定联动
-    if t.opus_verdict in ("SLOW_DISTRIBUTION", "DISTRIBUTING") and t.opus_dist_conf >= 50.0:
-        _dump_penalty += 1.5
-        _dump_reasons.append(f"opus出货({t.opus_verdict},{t.opus_dist_conf:.0f}%)")
-
-    # 维度 B: 72h 吸筹持仓断崖衰减 (增加样本量 >= 10 防误杀门禁)
-    if t.hold_delta_72h_pct is not None and t.hold_delta_72h_pct <= -15.0:
-        if t.acc_count_latest >= 10:
-            _dump_penalty += 1.5
-            _dump_reasons.append(f"72h持仓衰减({t.hold_delta_72h_pct:+.1f}%)")
-
-    # 维度 C: 信号首发至今价格严重偏离 (归零与暴跌惩罚)
-    if t.price_now_ret is not None:
-        if t.price_now_ret <= -70.0:
-            _dump_penalty += 3.0
+    # ── 维度 A: 价格偏离连续平滑惩罚算子 (Continuous Piecewise Linear: -30% ~ -70% -> 1.0 ~ 3.0) ──
+    if t.price_now_ret is not None and t.price_now_ret <= -30.0:
+        p_loss = abs(t.price_now_ret)
+        ratio = min(1.0, (p_loss - 30.0) / (70.0 - 30.0))
+        p_pen = round(1.0 + 2.0 * ratio, 2)
+        _dump_penalty += p_pen
+        if p_pen >= 2.5:
             _dump_reasons.append(f"信号暴跌巨亏({t.price_now_ret:+.1f}%)")
-        elif t.price_now_ret <= -50.0:
-            _dump_penalty += 2.0
+        else:
             _dump_reasons.append(f"严重价格偏离({t.price_now_ret:+.1f}%)")
+
+    # ── 维度 B: 72h 同源队列持仓衰减连续平滑算子 (-5% ~ -15% -> 0.5 ~ 1.5，防误杀 acc_count >= 10) ──
+    if t.hold_delta_72h_pct is not None and t.acc_count_latest >= 10 and t.hold_delta_72h_pct <= -5.0:
+        h_loss = abs(t.hold_delta_72h_pct)
+        ratio = min(1.0, (h_loss - 5.0) / (15.0 - 5.0))
+        c_pen = round(0.5 + 1.0 * ratio, 2)
+        _dump_penalty += c_pen
+        if c_pen >= 1.3:
+            _dump_reasons.append(f"72h持仓断崖抛售({t.hold_delta_72h_pct:+.1f}%)")
+        elif c_pen >= 0.9:
+            _dump_reasons.append(f"72h持仓显著流失({t.hold_delta_72h_pct:+.1f}%)")
+        else:
+            _dump_reasons.append(f"72h持仓轻度松动({t.hold_delta_72h_pct:+.1f}%)")
+
+    # ── 维度 C: Opus 出货置信度连续平滑算子 (30% ~ 60% -> 0.5 ~ 1.5) ──
+    if t.opus_verdict in ("SLOW_DISTRIBUTION", "DISTRIBUTING") and t.opus_dist_conf >= 30.0:
+        ratio = min(1.0, (t.opus_dist_conf - 30.0) / (60.0 - 30.0))
+        o_pen = round(0.5 + 1.0 * ratio, 2)
+        _dump_penalty += o_pen
+        _dump_reasons.append(f"opus出货({t.opus_verdict},{t.opus_dist_conf:.0f}%)")
 
     # ── 维度 D: 诱多套牢背离算子 (Bull-Trap Divergence, BDC, 零硬编码) ──
     # 当局部持仓未流失甚至微增(ΔH >= 0)，但二级市场价格严重破位(ΔP <= -50%)且伴随出货时

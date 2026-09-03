@@ -309,22 +309,37 @@ def generate_report(
             delta_5 = getattr(r, "score_delta_5", 0.0)
             traj_str = f"`{r.trajectory_str}` (Δ{delta_5:+.1f})" if r.trajectory_str else f"`{r.meta_score:.1f}`"
 
-            # 动态精准分类 (第一性链上事实优先: 严重看涨误判 > 吸筹队列自身抛售 > 动能断崖跳水 > 巨鲸派发/流向CEX > 阴跌)
-            if r.price_now_ret is not None and r.price_now_ret <= -70.0:
+            # ── 主导风险张量分类器 (Dominant Risk Tensor Classifier, 零阶跃悬崖) ──
+            ret = r.price_now_ret if r.price_now_ret is not None else 0.0
+            h72 = r.hold_delta_72h_pct if r.hold_delta_72h_pct is not None else 0.0
+            dump_pen = getattr(r, "dump_penalty", 0.0)
+
+            # 各维度归一化风险暴露强度 I_k in [0, 1]
+            i_collapse = min(1.0, max(0.0, (abs(ret) - 40.0) / 25.0)) if ret <= -40.0 else 0.0
+            i_cohort_dump = min(1.0, max(0.0, (abs(h72) - 5.0) / 10.0)) if h72 <= -5.0 else 0.0
+            i_momentum = min(1.0, max(0.0, (abs(delta_5) - 1.0) / 2.0)) if delta_5 <= -1.0 else 0.0
+            if dump_pen >= 2.0 and r.meta_score <= -2.5:
+                i_momentum = max(i_momentum, 0.8)
+            i_whale = 0.0
+            if "opus出货" in getattr(r, "dump_reasons", ""):
+                i_whale = min(1.0, max(0.0, dump_pen / 1.5))
+
+            # 自适应平滑分流
+            if i_collapse >= 0.8:
                 cat = "💀 严重看涨误判"
                 strategy = "认亏止损 / 永久移出观察池"
-            elif r.hold_delta_72h_pct is not None and r.hold_delta_72h_pct <= -15.0:
-                # 第一性链上物理事实: 底座追踪的固定吸筹队列自身发生断崖抛盘 (如 PRL，72h流失-18.5%)
+            elif i_cohort_dump >= 0.8:
                 cat = "🚨 吸筹队列抛售"
-                strategy = "触发风控拦截 / 严禁做多抄底"
-            elif delta_5 <= -3.0 or (r.dump_penalty >= 2.0 and r.meta_score <= -2.5):
-                # 衍生综合指标: 动能剧烈恶化或多重出货击穿，但追踪队列未大幅流失 (如 BILL)
+                strategy = "触发物理阻断 / 严禁做多抄底"
+            elif i_momentum >= 0.6:
                 cat = "🚨 动能断崖跳水"
                 strategy = "触发风控拦截 / 严禁做多抄底"
-            elif r.dump_penalty >= 1.5:
-                # Opus 监测到全网假鲸鱼大额派发或筹码集中流向 CEX，但追踪队列持仓未流失 (如 SHELL)
+            elif i_whale >= 0.6:
                 cat = "🚨 巨鲸派发/转入CEX"
                 strategy = "触发风控拦截 / 严禁做多抄底"
+            elif i_cohort_dump >= 0.3:
+                cat = "⚠️ 队列显著流失" if i_cohort_dump >= 0.5 else "⚠️ 队列持仓松动"
+                strategy = "严控多头仓位 / 暂停买入严密监控"
             elif r.meta_verdict == "DIST":
                 cat = "🛑 持续阴跌出货"
                 strategy = "触发风控拦截 / 严禁做多抄底"
