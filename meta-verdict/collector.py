@@ -280,7 +280,7 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
                 t.market_cap_usd = row_market["market_cap_usd"] or 0.0
                 t.fdv_usd = row_market["fdv_usd"] or 0.0
 
-            # 72h 固定队列吸筹持仓衰减率与最新吸筹数计算 (利用 idx_bm_snapshot 毫秒级极速索引)
+            # 72h 同源固定队列吸筹持仓衰减率与最新吸筹数计算 (同源口径，与抽屉 100% 对齐，零动态拼接)
             try:
                 row_t_latest = conn.execute("""
                     SELECT snapshot_time FROM src.bubblemap_holders
@@ -290,15 +290,20 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
 
                 if row_t_latest and row_t_latest[0]:
                     latest_snap_time = row_t_latest[0]
-                    row_curr = conn.execute("""
-                        SELECT SUM(hold_amount), COUNT(*) FROM src.bubblemap_holders
-                        WHERE chain = ? AND token_address = ? AND snapshot_time = ? AND is_accumulating = 1
-                    """, (t.chain, t.token_address, latest_snap_time)).fetchone()
 
-                    if row_curr and row_curr[0] and float(row_curr[0]) > 0:
-                        curr_hold = float(row_curr[0])
-                        t.acc_count_latest = int(row_curr[1] or 0)
+                    # Step 1: 提取当前快照吸筹地址集合与持币 (固定 3 参数预编译查询)
+                    curr_wallets_rows = conn.execute("""
+                        SELECT wallet_address, hold_amount FROM src.bubblemap_holders
+                        WHERE chain = ? AND token_address = ? AND snapshot_time = ?
+                          AND is_accumulating = 1
+                    """, (t.chain, t.token_address, latest_snap_time)).fetchall()
 
+                    if curr_wallets_rows:
+                        curr_hold = sum(float(r[1] or 0) for r in curr_wallets_rows)
+                        t.acc_count_latest = len(curr_wallets_rows)
+                        cohort_wallets = {r[0] for r in curr_wallets_rows}
+
+                        # Step 2: 定位 72h 前快照时间
                         row_t_72h = conn.execute("""
                             SELECT snapshot_time FROM src.bubblemap_holders
                             WHERE chain = ? AND token_address = ?
@@ -309,14 +314,22 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
 
                         if row_t_72h and row_t_72h[0]:
                             snap_72h_time = row_t_72h[0]
-                            row_prev = conn.execute("""
-                                SELECT SUM(hold_amount) FROM src.bubblemap_holders
-                                WHERE chain = ? AND token_address = ? AND snapshot_time = ? AND is_accumulating = 1
-                            """, (t.chain, t.token_address, snap_72h_time)).fetchone()
 
-                            if row_prev and row_prev[0] and float(row_prev[0]) > 0:
-                                prev_hold = float(row_prev[0])
-                                t.hold_delta_72h_pct = round((curr_hold - prev_hold) / prev_hold * 100.0, 2)
+                            # Step 3: 读取 72h 前快照全量 holder，利用 set 内存交集求和 (单次 < 0.3ms，零长 SQL)
+                            prev_rows = conn.execute("""
+                                SELECT wallet_address, hold_amount FROM src.bubblemap_holders
+                                WHERE chain = ? AND token_address = ? AND snapshot_time = ?
+                            """, (t.chain, t.token_address, snap_72h_time)).fetchall()
+
+                            prev_hold = sum(
+                                float(r[1] or 0) for r in prev_rows
+                                if r[0] in cohort_wallets
+                            )
+
+                            if prev_hold > 0:
+                                t.hold_delta_72h_pct = round(
+                                    (curr_hold - prev_hold) / prev_hold * 100.0, 2
+                                )
             except Exception as _e72:
                 logger.debug("%s 72h持仓分析跳过: %s", t.token_symbol, _e72)
 
