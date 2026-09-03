@@ -69,6 +69,12 @@ class MetaResult:
     resilience_index: float = 0.0       # 历史抗跌韧性原始分
     resilience_norm: float = 0.5        # Sigmoid [0, 1] 稳健平滑分
 
+    # ── 新增: P2 出货风控结果透传 ──
+    dump_penalty:       float = 0.0             # 累计出货风控扣分
+    dump_reasons:       str   = ""              # 出货与风控原因摘要
+    price_now_ret:      float | None = None     # 信号首发至今收益率
+    hold_delta_72h_pct: float | None = None     # 72h 持仓变动
+
 
 def calculate_resilience_norm(raw_val: float | None) -> float | None:
     """Sigmoid 稳健归一化，消除离群极值影响，映射至 [0.0, 1.0]"""
@@ -107,6 +113,10 @@ def determine_confidence_tier(token: TokenEngineData, score: float, hits: int, c
     """
     置信度等级评定算法 (含 L1-Alpha vs L1-Squeeze 自动分流及 LP 锁仓风控)
     """
+    # 门禁 0: 命中出货判定或严重负分，物理阻断降为 DENIED (防止 DIST + L2-Bet 矛盾)
+    if score <= -2.0:
+        return "DENIED"
+
     # 门禁 1: 极端低流动性或撤池死池拦截
     if token.reserve_usd > 0 and token.reserve_usd < 10000:
         return "DENIED"
@@ -200,20 +210,58 @@ def arbitrate(token: TokenEngineData, hop2_pct: float = 0.0, conn: sqlite3.Conne
     res.meta_score = round(raw_total, 2)
     res.engine_hits = sum(1 for s in [res.master_score, res.opus_score, res.unified_score, res.whale_score, res.cb_score] if s > 0)
 
+    # ── 2.1 P2 三维出货风控与看涨纠偏雷达 ──
+    _dump_penalty = 0.0
+    _dump_reasons = []
+
+    # 维度 A: opus-scan 出货判定联动
+    if t.opus_verdict in ("SLOW_DISTRIBUTION", "DISTRIBUTING") and t.opus_dist_conf >= 50.0:
+        _dump_penalty += 1.5
+        _dump_reasons.append(f"opus出货({t.opus_verdict},{t.opus_dist_conf:.0f}%)")
+
+    # 维度 B: 72h 吸筹持仓断崖衰减 (增加样本量 >= 10 防误杀门禁)
+    if t.hold_delta_72h_pct is not None and t.hold_delta_72h_pct <= -15.0:
+        if t.acc_count_latest >= 10:
+            _dump_penalty += 1.5
+            _dump_reasons.append(f"72h持仓衰减({t.hold_delta_72h_pct:+.1f}%)")
+
+    # 维度 C: 信号首发至今价格严重偏离 (归零与暴跌惩罚)
+    if t.price_now_ret is not None:
+        if t.price_now_ret <= -70.0:
+            _dump_penalty += 3.0
+            _dump_reasons.append(f"信号暴跌巨亏({t.price_now_ret:+.1f}%)")
+        elif t.price_now_ret <= -50.0:
+            _dump_penalty += 2.0
+            _dump_reasons.append(f"严重价格偏离({t.price_now_ret:+.1f}%)")
+
+    if _dump_penalty > 0:
+        res.meta_score = round(res.meta_score - _dump_penalty, 2)
+        res.dump_penalty = round(_dump_penalty, 2)
+        res.dump_reasons = "; ".join(_dump_reasons)
+
+    # 透传偏离度数据供报告层展示
+    res.price_now_ret = t.price_now_ret
+    res.hold_delta_72h_pct = t.hold_delta_72h_pct
+
     # 3. 判定 meta_verdict & stage
-    if res.meta_score >= 3.0:
+    # 只要总分突破 -2.0 或 信号暴跌巨亏超 70%，一票否决强制评定为 DIST
+    is_force_dist = (t.price_now_ret is not None and t.price_now_ret <= -70.0)
+    if res.meta_score >= 3.0 and not is_force_dist:
         res.meta_verdict = "ACC"
         res.stage = "ACCUMULATING"
-    elif res.meta_score <= -2.0:
+    elif res.meta_score <= -2.0 or is_force_dist:
         res.meta_verdict = "DIST"
         res.stage = "DISTRIBUTING"
     else:
         res.meta_verdict = "NEUTRAL"
         res.stage = "WATCHLIST" if res.engine_hits >= 1 else "NEUTRAL"
 
-    # 4. 连续 ACC 轮次与置信度梯队评定
-    consec = get_prev_consec_acc(conn, t.chain, t.token_address)
-    res.confidence_tier = determine_confidence_tier(t, res.meta_score, res.engine_hits, consec)
+    # 4. 连续 ACC 轮次与置信度梯队评定 (DIST 绝对阻断为 DENIED)
+    if res.meta_verdict == "DIST":
+        res.confidence_tier = "DENIED"
+    else:
+        consec = get_prev_consec_acc(conn, t.chain, t.token_address)
+        res.confidence_tier = determine_confidence_tier(t, res.meta_score, res.engine_hits, consec)
 
     return res
 
