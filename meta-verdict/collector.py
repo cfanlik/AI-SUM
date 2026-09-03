@@ -407,6 +407,66 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
     return list(tokens.values())
 
 
+
+def _sync_token_lifecycle_atomic(conn: sqlite3.Connection, r: dict):
+    """单源物化生命周期写穿引擎：严格随 meta_snapshots 落库原子推进状态转移"""
+    chain = r.get("chain", "bsc")
+    token_address = (r.get("token_address") or "").lower()
+    token_symbol = r.get("token_symbol", "")
+    current_stage = r.get("stage", "") or "NEUTRAL"
+    meta_score = r.get("meta_score", 0.0)
+    scan_time = r.get("scan_time", "")
+
+    if not token_address or not scan_time:
+        return
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS token_lifecycle (
+            chain          TEXT NOT NULL,
+            token_address  TEXT NOT NULL,
+            token_symbol   TEXT,
+            current_stage  TEXT DEFAULT 'NEUTRAL',
+            prev_stage     TEXT DEFAULT '',
+            stage_since    TEXT,
+            last_updated   TEXT,
+            meta_score     REAL DEFAULT 0,
+            transition     TEXT DEFAULT '',
+            PRIMARY KEY (chain, token_address)
+        )
+    """)
+
+    existing = conn.execute(
+        "SELECT current_stage, stage_since FROM token_lifecycle WHERE chain=? AND lower(token_address)=?",
+        (chain, token_address)
+    ).fetchone()
+
+    if existing:
+        prev = existing[0] if isinstance(existing, tuple) else existing["current_stage"]
+        old_since = existing[1] if isinstance(existing, tuple) else existing["stage_since"]
+        since = old_since if current_stage == prev and old_since else scan_time
+        transition = ""
+        if prev in ("ACCUMULATING", "CONTROLLED") and current_stage == "DISTRIBUTING":
+            transition = f"⚡ {prev}→DISTRIBUTING"
+        elif prev and prev != current_stage:
+            transition = f"🔄 {prev}→{current_stage}"
+
+        conn.execute("""
+            UPDATE token_lifecycle
+            SET current_stage=?, prev_stage=?, stage_since=?, last_updated=?,
+                meta_score=?, transition=?, token_symbol=?
+            WHERE chain=? AND lower(token_address)=?
+        """, (current_stage, prev, since, scan_time, meta_score, transition,
+              token_symbol, chain, token_address))
+    else:
+        conn.execute("""
+            INSERT OR REPLACE INTO token_lifecycle
+            (chain, token_address, token_symbol, current_stage, prev_stage,
+             stage_since, last_updated, meta_score, transition)
+            VALUES (?,?,?,?,?,?,?,?,?)
+        """, (chain, token_address, token_symbol, current_stage, "",
+              scan_time, scan_time, meta_score, ""))
+
+
 def save_meta_result(conn: sqlite3.Connection, result: dict):
     """保存 meta-verdict 仲裁结果"""
     conn.execute("""
@@ -496,6 +556,7 @@ def save_meta_result(conn: sqlite3.Connection, result: dict):
                 :confidence_tier, :resilience_index, :resilience_norm,
                 :master_score, :opus_score, :unified_score, :whale_score, :cb_score, :hop2_score, :dump_penalty, :dump_reasons, :price_now_ret, :hold_delta_72h_pct)
     """, payload)
+    _sync_token_lifecycle_atomic(conn, payload)
     conn.commit()
 
 

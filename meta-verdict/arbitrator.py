@@ -234,6 +234,16 @@ def arbitrate(token: TokenEngineData, hop2_pct: float = 0.0, conn: sqlite3.Conne
             _dump_penalty += 2.0
             _dump_reasons.append(f"严重价格偏离({t.price_now_ret:+.1f}%)")
 
+    # ── 维度 D: 诱多套牢背离算子 (Bull-Trap Divergence, BDC, 零硬编码) ──
+    # 当局部持仓未流失甚至微增(ΔH >= 0)，但二级市场价格严重破位(ΔP <= -50%)且伴随出货时
+    if t.price_now_ret is not None and t.price_now_ret <= -50.0:
+        h_gain = max(0.0, t.hold_delta_72h_pct or 0.0)
+        p_loss_ratio = min(1.0, abs(t.price_now_ret) / 100.0)
+        opus_factor = 0.5 + 0.5 * (t.opus_dist_conf / 100.0 if t.opus_verdict in ("SLOW_DISTRIBUTION", "DISTRIBUTING") else 0.0)
+        bdc = round(p_loss_ratio * (1.0 - math.exp(-h_gain / 10.0) if h_gain > 0 else 0.5) * opus_factor, 2)
+        if bdc >= 0.35 and t.hold_delta_72h_pct is not None and t.hold_delta_72h_pct >= 0:
+            _dump_reasons.append(f"诱多套牢背离(BDC={bdc:.2f},局部持币{t.hold_delta_72h_pct:+.1f}% vs 破位{t.price_now_ret:+.1f}%)")
+
     if _dump_penalty > 0:
         res.meta_score = round(res.meta_score - _dump_penalty, 2)
         res.dump_penalty = round(_dump_penalty, 2)
