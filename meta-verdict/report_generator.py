@@ -251,7 +251,7 @@ def generate_report(
         "---",
     ])
 
-    # ── 第五屏：暴跌出货与严重看涨误判专项风控看板 ──
+    # ── 第五屏：暴跌出货与严重看涨误判专项风控看板 (动静结合自洽时序风控雷达) ──
     dump_pool = []
     seen_tokens = set()
     if all_arbitrated:
@@ -259,16 +259,37 @@ def generate_report(
             u_key = f"{r.chain}:{r.token_address.lower()}"
             if u_key in seen_tokens:
                 continue
+
+            # 挂载 5 轮时序拟合轨迹与加速度增量
+            if trend and hasattr(trend, "series_metrics") and u_key in trend.series_metrics:
+                sm = trend.series_metrics[u_key]
+                r.score_delta_5 = sm.score_delta_5
+                r.trajectory_str = sm.trajectory_str
+            else:
+                r.score_delta_5 = 0.0
+                r.trajectory_str = f"{r.meta_score:.1f}"
+
+            # 自洽准入门槛: 实质性出货风险 或 严重价格腰斩
             has_dump_risk = (
-                r.dump_penalty > 0 or 
                 r.meta_verdict == "DIST" or 
-                (r.price_now_ret is not None and r.price_now_ret <= -40.0)
+                r.dump_penalty >= 1.5 or 
+                (r.price_now_ret is not None and r.price_now_ret <= -50.0)
             )
             if has_dump_risk:
                 dump_pool.append(r)
                 seen_tokens.add(u_key)
         
-        dump_pool.sort(key=lambda x: (x.price_now_ret if x.price_now_ret is not None else 0, x.meta_score))
+        # 动静结合三元组纯量化自洽排序 (零单币特判)
+        # 第一主键: 仲裁总分 meta_score 升序 (负分越深越危险)
+        # 第二主键: 5 轮时序拟合净增量 score_delta_5 升序 (跳水恶化越猛越靠前)
+        # 第三主键: 信号至今收益率 price_now_ret 升序 (同等恶化下亏损越深越靠前)
+        dump_pool.sort(
+            key=lambda x: (
+                round(x.meta_score, 2),
+                round(getattr(x, "score_delta_5", 0.0), 2),
+                x.price_now_ret if x.price_now_ret is not None else 0.0
+            )
+        )
 
     if dump_pool:
         md_lines.extend([
@@ -277,37 +298,42 @@ def generate_report(
             "",
             "## 🚨 第五屏：暴跌出货与严重看涨误判专项风控看板 (Crash & Heavy Distribution Radar)",
             "",
-            "> **风控说明**: 汇集链上主力出货、72h 持仓断崖流失或历史回测出现巨额看涨误判（亏损 > 40%）的高危标的。点击【代币】可查看详细持币图解。",
+            "> **风控总则**: 融合截面绝对负分与 5 轮时序恶化加速度（跳水越快越危险）进行动静双轮驱动排序。汇集链上主力砸盘、72h 持仓断崖跳水及历史严重看涨误判标的。点击【代币】可查看详细持币图解。",
             "",
-            "| 风险分类 | 代币 | 仲裁分 | 信号至今收益 | 72h 持仓变动 | 累计惩罚 | 核心风险归因 | 推荐处置策略 |",
-            "| :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |",
+            "| 风险分类 | 代币 | 仲裁分 | 5 轮得分演化轨迹 (Δ5) | 信号至今收益 | 72h 持仓变动 | 累计惩罚 | 核心风险归因 | 推荐处置策略 |",
+            "| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :--- | :--- |",
         ])
 
-        for r in dump_pool[:25]:
+        # 扩充容量，保障全量 DIST 标的 100% 完整覆盖展示
+        for r in dump_pool[:40]:
+            delta_5 = getattr(r, "score_delta_5", 0.0)
+            traj_str = f"`{r.trajectory_str}` (Δ{delta_5:+.1f})" if r.trajectory_str else f"`{r.meta_score:.1f}`"
+
+            # 动态精准分类: 优先识别历史看涨严重误判(亏损>70%)，其次识别动能断崖跳水与主力出货
             if r.price_now_ret is not None and r.price_now_ret <= -70.0:
                 cat = "💀 严重看涨误判"
-            elif r.dump_penalty >= 2.0 or (r.hold_delta_72h_pct is not None and r.hold_delta_72h_pct <= -15.0):
+                strategy = "认亏止损 / 永久移出观察池"
+            elif delta_5 <= -3.0 or (r.dump_penalty >= 2.0 and r.meta_score <= -2.5):
+                cat = "🚨 动能断崖跳水"
+                strategy = "触发风控拦截 / 严禁做多抄底"
+            elif r.dump_penalty >= 1.5 or (r.hold_delta_72h_pct is not None and r.hold_delta_72h_pct <= -15.0):
                 cat = "🚨 主力集中出货"
-            elif r.price_now_ret is not None and r.price_now_ret <= -40.0:
-                cat = "📉 动能衰竭破位"
+                strategy = "触发风控拦截 / 严禁做多抄底"
+            elif r.meta_verdict == "DIST":
+                cat = "🛑 持续阴跌出货"
+                strategy = "触发风控拦截 / 严禁做多抄底"
             else:
-                cat = "⚠️ 动能预警"
+                cat = "⚠️ 动能衰竭破位"
+                strategy = "暂停加仓 / 严格执行止损"
 
             ret_str = f"{r.price_now_ret:+.1f}%" if r.price_now_ret is not None else "—"
             hold_str = f"{r.hold_delta_72h_pct:+.1f}%" if r.hold_delta_72h_pct is not None else "—"
             penalty_str = f"-{r.dump_penalty:.1f}" if r.dump_penalty > 0 else "0.0"
             reasons = r.dump_reasons if r.dump_reasons else f"历史偏离亏损 {ret_str}"
-            
-            if r.price_now_ret is not None and r.price_now_ret <= -70.0:
-                strategy = "认亏止损 / 永久移出观察池"
-            elif r.meta_verdict == "DIST":
-                strategy = "触发风控拦截 / 严禁做多抄底"
-            else:
-                strategy = "暂停加仓 / 严格执行止损"
 
             tok_str = format_token_cell(r.token_symbol, r.chain)
             md_lines.append(
-                f"| **{cat}** | {tok_str} | **{r.meta_score:.2f}** | {ret_str} | {hold_str} | {penalty_str} | {reasons} | {strategy} |"
+                f"| **{cat}** | {tok_str} | **{r.meta_score:.2f}** | {traj_str} | {ret_str} | {hold_str} | {penalty_str} | {reasons} | {strategy} |"
             )
 
     md_lines.extend([
