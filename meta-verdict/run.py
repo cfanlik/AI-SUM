@@ -125,7 +125,7 @@ def main():
     _update_lifecycle(conn, all_arbitrated, scan_time)
 
     # 生成报告（含趋势+健康+矛盾）
-    generate_report(acc_list, dist_list, len(all_data), scan_time, trend, health, conflicts)
+    generate_report(acc_list, dist_list, len(all_data), scan_time, trend, health, conflicts, all_arbitrated=all_arbitrated)
 
     # ── 拉升前兆扫描 ──
     try:

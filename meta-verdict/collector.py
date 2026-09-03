@@ -67,6 +67,11 @@ class TokenEngineData:
     cb_windfall_pct: float = 0.0
     cb_signals:      str   = ""
 
+    # ── 新增: P2 出货风控与偏离度透传 ──
+    hold_delta_72h_pct: float | None = None    # 72h 固定吸筹队列持仓变化率 (%)
+    acc_count_latest:   int = 0                 # 最新快照吸筹地址数 (防误杀门禁)
+    price_now_ret:      float | None = None     # 信号首发至今价格收益率 (%)
+
 
 def get_connection() -> sqlite3.Connection:
     import config
@@ -275,6 +280,46 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
                 t.market_cap_usd = row_market["market_cap_usd"] or 0.0
                 t.fdv_usd = row_market["fdv_usd"] or 0.0
 
+            # 72h 固定队列吸筹持仓衰减率与最新吸筹数计算 (利用 idx_bm_snapshot 毫秒级极速索引)
+            try:
+                row_t_latest = conn.execute("""
+                    SELECT snapshot_time FROM src.bubblemap_holders
+                    WHERE chain = ? AND token_address = ?
+                    ORDER BY snapshot_time DESC LIMIT 1
+                """, (t.chain, t.token_address)).fetchone()
+
+                if row_t_latest and row_t_latest[0]:
+                    latest_snap_time = row_t_latest[0]
+                    row_curr = conn.execute("""
+                        SELECT SUM(hold_amount), COUNT(*) FROM src.bubblemap_holders
+                        WHERE chain = ? AND token_address = ? AND snapshot_time = ? AND is_accumulating = 1
+                    """, (t.chain, t.token_address, latest_snap_time)).fetchone()
+
+                    if row_curr and row_curr[0] and float(row_curr[0]) > 0:
+                        curr_hold = float(row_curr[0])
+                        t.acc_count_latest = int(row_curr[1] or 0)
+
+                        row_t_72h = conn.execute("""
+                            SELECT snapshot_time FROM src.bubblemap_holders
+                            WHERE chain = ? AND token_address = ?
+                              AND snapshot_time <= datetime('now', '-70 hours')
+                              AND snapshot_time >= datetime('now', '-120 hours')
+                            ORDER BY snapshot_time DESC LIMIT 1
+                        """, (t.chain, t.token_address)).fetchone()
+
+                        if row_t_72h and row_t_72h[0]:
+                            snap_72h_time = row_t_72h[0]
+                            row_prev = conn.execute("""
+                                SELECT SUM(hold_amount) FROM src.bubblemap_holders
+                                WHERE chain = ? AND token_address = ? AND snapshot_time = ? AND is_accumulating = 1
+                            """, (t.chain, t.token_address, snap_72h_time)).fetchone()
+
+                            if row_prev and row_prev[0] and float(row_prev[0]) > 0:
+                                prev_hold = float(row_prev[0])
+                                t.hold_delta_72h_pct = round((curr_hold - prev_hold) / prev_hold * 100.0, 2)
+            except Exception as _e72:
+                logger.debug("%s 72h持仓分析跳过: %s", t.token_symbol, _e72)
+
             # 时序与抗稀释特征计算
             try:
                 rows_snap = conn.execute("""
@@ -343,6 +388,19 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
                 logger.debug("token time-series analysis failed: %s", _fe)
 
         conn.execute("DETACH src")
+
+        # 价格偏离度与历史回测收益补全 (查主库 token_history，兼容 chain 为空情况)
+        try:
+            for k, t in tokens.items():
+                row_th = conn.execute("""
+                    SELECT price_now_ret FROM token_history
+                    WHERE lower(token_address) = lower(?)
+                    ORDER BY computed_date DESC LIMIT 1
+                """, (t.token_address,)).fetchone()
+                if row_th and row_th["price_now_ret"] is not None:
+                    t.price_now_ret = round(float(row_th["price_now_ret"]), 2)
+        except Exception as _eth:
+            logger.debug("token_history 收益补全异常: %s", _eth)
     except Exception as _e:
         logger.warning(f"价格补全与时序分析失败: {_e}")
 
@@ -384,7 +442,11 @@ def save_meta_result(conn: sqlite3.Connection, result: dict):
         ("meta_score_smooth", "REAL DEFAULT 0"),
         ("resilience_index", "REAL DEFAULT 0"),
         ("resilience_norm", "REAL DEFAULT 0.5"),
-        ("confidence_tier", "TEXT DEFAULT 'L3-Watch'")
+        ("confidence_tier", "TEXT DEFAULT 'L3-Watch'"),
+        ("dump_penalty", "REAL DEFAULT 0"),
+        ("dump_reasons", "TEXT DEFAULT ''"),
+        ("price_now_ret", "REAL DEFAULT NULL"),
+        ("hold_delta_72h_pct", "REAL DEFAULT NULL")
     ]:
         try:
             conn.execute(f"ALTER TABLE meta_snapshots ADD COLUMN {col} {typedef}")
@@ -415,6 +477,10 @@ def save_meta_result(conn: sqlite3.Connection, result: dict):
         "whale_score": 0.0,
         "cb_score": 0.0,
         "hop2_score": 0.0,
+        "dump_penalty": 0.0,
+        "dump_reasons": "",
+        "price_now_ret": None,
+        "hold_delta_72h_pct": None,
     }
     payload.update(result)
 
@@ -423,12 +489,12 @@ def save_meta_result(conn: sqlite3.Connection, result: dict):
         (scan_time, chain, token_address, token_symbol, meta_score, meta_score_smooth, meta_verdict,
          engine_hits, master_signal, opus_verdict, unified_signal, whale_level, cb_verdict, stage,
          confidence_tier, resilience_index, resilience_norm,
-         master_score, opus_score, unified_score, whale_score, cb_score, hop2_score)
+         master_score, opus_score, unified_score, whale_score, cb_score, hop2_score, dump_penalty, dump_reasons, price_now_ret, hold_delta_72h_pct)
         VALUES (:scan_time, :chain, :token_address, :token_symbol, :meta_score, :meta_score_smooth, :meta_verdict,
                 :engine_hits, :master_signal, :opus_verdict, :unified_signal, :whale_level,
                 :cb_verdict, :stage,
                 :confidence_tier, :resilience_index, :resilience_norm,
-                :master_score, :opus_score, :unified_score, :whale_score, :cb_score, :hop2_score)
+                :master_score, :opus_score, :unified_score, :whale_score, :cb_score, :hop2_score, :dump_penalty, :dump_reasons, :price_now_ret, :hold_delta_72h_pct)
     """, payload)
     conn.commit()
 
