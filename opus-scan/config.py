@@ -26,7 +26,7 @@ Path(SUM_DB_PATH).parent.mkdir(parents=True, exist_ok=True)
 
 # ── 吸筹评分阈值 ──
 ACC_HOLD_GROWTH_MIN    = 10.0
-ACC_DEX_RATE_MIN       = 70.0
+ACC_DEX_RATE_MIN       = 35.0
 ACC_STRONG_BUYER_MIN   = 5
 ACC_CEX_STABLE_RANGE   = 10.0
 ACC_PRICE_PUMP_MAX     = 30.0
@@ -60,7 +60,7 @@ REPORT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "report", 
 Path(REPORT_DIR).mkdir(parents=True, exist_ok=True)
 TOP_N = 10
 MIN_SNAPSHOTS = 3
-TOP_HOLDERS_N = 30
+TOP_HOLDERS_N = 100
 
 # ═══ LP/VL 增强 (E1~E4) ═══
 S4_VL_HIGH_THRESHOLD: float = 10.0    # V/L > 10 → 极端换手标记
