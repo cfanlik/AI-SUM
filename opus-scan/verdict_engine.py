@@ -82,10 +82,15 @@ def evaluate(
     # ── 吸筹置信度 ──
     has_cex = (ts.cex_hold_earliest > 0 or ts.cex_hold_latest > 0)
 
+    # 动静双模态算子: 动态加速通道 (k > 0) OR 静态龙头沉淀通道 (N >= 80 且 相对周期衰减率 >= -2.0%)
+    rel_slope = (ts.acc_cnt_slope / max(ts.acc_cnt_latest, 1)) * 100.0
+    is_trend_expanding = ts.acc_cnt_slope > 0
+    is_mature_steady = (ts.acc_cnt_latest >= 80 and rel_slope >= -2.0)
+
     acc_checks = [
         ("acc_trend_up", 3,
-         ts.acc_cnt_slope > 0,
-         f"acc_cnt 斜率={ts.acc_cnt_slope:+.2f}"),
+         is_trend_expanding or is_mature_steady,
+         f"acc趋势: {'动态加速(k>0)' if is_trend_expanding else ('龙头沉淀(N>=80)' if is_mature_steady else f'衰减(k={ts.acc_cnt_slope:+.2f},rel={rel_slope:.1f}%)')}"),
 
         ("acc_hold_growing", 3,
          ts.acc_hold_growth_pct > config.ACC_HOLD_GROWTH_MIN,
