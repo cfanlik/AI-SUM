@@ -114,6 +114,7 @@ def main():
             "fresh_3d_count": getattr(r, "fresh_3d_count", 0),
             "fresh_4_7d_count": getattr(r, "fresh_4_7d_count", 0),
             "fresh_1_7d_hold_pct": getattr(r, "fresh_1_7d_hold_pct", 0.0),
+            "sybil_pattern":      getattr(r, "sybil_pattern", "REGULAR"),
         })
 
     # ── 矛盾检测 ──

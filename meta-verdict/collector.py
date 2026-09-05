@@ -573,7 +573,8 @@ def save_meta_result(conn: sqlite3.Connection, result: dict):
         ("fresh_2d_count", "INTEGER DEFAULT 0"),
         ("fresh_3d_count", "INTEGER DEFAULT 0"),
         ("fresh_4_7d_count", "INTEGER DEFAULT 0"),
-        ("fresh_1_7d_hold_pct", "REAL DEFAULT 0")
+        ("fresh_1_7d_hold_pct", "REAL DEFAULT 0"),
+        ("sybil_pattern", "TEXT DEFAULT 'REGULAR'")
     ]:
         try:
             conn.execute(f"ALTER TABLE meta_snapshots ADD COLUMN {col} {typedef}")
@@ -615,6 +616,7 @@ def save_meta_result(conn: sqlite3.Connection, result: dict):
         "fresh_3d_count": 0,
         "fresh_4_7d_count": 0,
         "fresh_1_7d_hold_pct": 0.0,
+        "sybil_pattern": "REGULAR",
     }
     payload.update(result)
 
@@ -623,12 +625,12 @@ def save_meta_result(conn: sqlite3.Connection, result: dict):
         (scan_time, chain, token_address, token_symbol, meta_score, meta_score_smooth, meta_verdict,
          engine_hits, master_signal, opus_verdict, unified_signal, whale_level, cb_verdict, stage,
          confidence_tier, resilience_index, resilience_norm,
-         master_score, opus_score, unified_score, whale_score, cb_score, hop2_score, dump_penalty, dump_reasons, price_now_ret, hold_delta_72h_pct, fresh_wallet_score, fresh_1_7d_count, fresh_1d_count, fresh_2d_count, fresh_3d_count, fresh_4_7d_count, fresh_1_7d_hold_pct)
+         master_score, opus_score, unified_score, whale_score, cb_score, hop2_score, dump_penalty, dump_reasons, price_now_ret, hold_delta_72h_pct, fresh_wallet_score, fresh_1_7d_count, fresh_1d_count, fresh_2d_count, fresh_3d_count, fresh_4_7d_count, fresh_1_7d_hold_pct, sybil_pattern)
         VALUES (:scan_time, :chain, :token_address, :token_symbol, :meta_score, :meta_score_smooth, :meta_verdict,
                 :engine_hits, :master_signal, :opus_verdict, :unified_signal, :whale_level,
                 :cb_verdict, :stage,
                 :confidence_tier, :resilience_index, :resilience_norm,
-                :master_score, :opus_score, :unified_score, :whale_score, :cb_score, :hop2_score, :dump_penalty, :dump_reasons, :price_now_ret, :hold_delta_72h_pct, :fresh_wallet_score, :fresh_1_7d_count, :fresh_1d_count, :fresh_2d_count, :fresh_3d_count, :fresh_4_7d_count, :fresh_1_7d_hold_pct)
+                :master_score, :opus_score, :unified_score, :whale_score, :cb_score, :hop2_score, :dump_penalty, :dump_reasons, :price_now_ret, :hold_delta_72h_pct, :fresh_wallet_score, :fresh_1_7d_count, :fresh_1d_count, :fresh_2d_count, :fresh_3d_count, :fresh_4_7d_count, :fresh_1_7d_hold_pct, :sybil_pattern)
     """, payload)
     _sync_token_lifecycle_atomic(conn, payload)
     conn.commit()
