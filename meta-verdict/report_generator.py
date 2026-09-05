@@ -373,7 +373,8 @@ def generate_report(
 
     # ── 第六屏：新激活地址与突击建仓小号集群雷达 ──
     fresh_pool = []
-    for r in all_ranked:
+    pool_source = all_arbitrated if all_arbitrated else all_ranked
+    for r in pool_source:
         if getattr(r, "fresh_wallet_score", 0.0) > 0 or (getattr(r, "fresh_1_7d_count", 0) >= 3 and getattr(r, "fresh_1_7d_hold_pct", 0.0) >= 5.0):
             fresh_pool.append(r)
     fresh_pool.sort(key=lambda x: (x.fresh_wallet_score, x.fresh_1_7d_hold_pct, x.fresh_1_7d_count), reverse=True)
