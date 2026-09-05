@@ -71,6 +71,7 @@ class MetaResult:
 
     # ── 新增: 新激活地址与突击建仓集群指标 ──
     fresh_wallet_score: float = 0.0
+    sybil_pattern:      str   = "REGULAR"   # DUAL_RESONANCE / FRESH_SYBIL / HOP2_PENETRATION / REGULAR
     fresh_1_7d_count:   int = 0
     fresh_1d_count:     int = 0
     fresh_2d_count:     int = 0
@@ -243,6 +244,21 @@ def arbitrate(token: TokenEngineData, hop2_pct: float = 0.0, conn: sqlite3.Conne
             res.fresh_wallet_score = 0.50
     else:
         res.fresh_wallet_score = 0.00
+
+    # 1.7 筹码三态形态分类器 (Dual-Resonance vs Fresh-Sybil vs Hop2-Penetration)
+    has_hop2 = (res.hop2_score > 0 or hop2_pct > 0.05)
+    has_fresh = (res.fresh_1_7d_count >= 3 and res.fresh_1_7d_hold_pct >= 5.0) or (res.fresh_wallet_score > 0)
+    
+    if has_hop2 and has_fresh:
+        res.sybil_pattern = "DUAL_RESONANCE"
+        # 双共振形态：资金穿透链路与新号建仓产生协同共振，赋予拓扑协同增益 +0.5分 (封顶 2.0)
+        res.fresh_wallet_score = round(min(2.0, res.fresh_wallet_score + 0.50), 2)
+    elif has_fresh:
+        res.sybil_pattern = "FRESH_SYBIL"
+    elif has_hop2:
+        res.sybil_pattern = "HOP2_PENETRATION"
+    else:
+        res.sybil_pattern = "REGULAR"
 
     # 2. 汇总总分
     raw_total = res.master_score + res.opus_score + res.unified_score + res.whale_score + res.cb_score + res.hop2_score + res.fresh_wallet_score
