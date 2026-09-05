@@ -107,6 +107,13 @@ def main():
             "whale_score":    r.whale_score,
             "cb_score":       r.cb_score,
             "hop2_score":     r.hop2_score,
+            "fresh_wallet_score": getattr(r, "fresh_wallet_score", 0.0),
+            "fresh_1_7d_count": getattr(r, "fresh_1_7d_count", 0),
+            "fresh_1d_count": getattr(r, "fresh_1d_count", 0),
+            "fresh_2d_count": getattr(r, "fresh_2d_count", 0),
+            "fresh_3d_count": getattr(r, "fresh_3d_count", 0),
+            "fresh_4_7d_count": getattr(r, "fresh_4_7d_count", 0),
+            "fresh_1_7d_hold_pct": getattr(r, "fresh_1_7d_hold_pct", 0.0),
         })
 
     # ── 矛盾检测 ──

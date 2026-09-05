@@ -232,6 +232,8 @@ def generate_report(
         "| **CEX占比 (Δ)** | 交易所地址持仓占比及其相较于初始快照的增量 | `Δ > +20%` 表明链上筹码正快速向中心化交易所归集 |",
         "| **波动度 (σ)** | 连续 5 轮仲裁得分的标准差 (StdDev) | `σ < 0.3` 为极度稳健吸筹；`σ > 2.0` 为多空剧烈拉锯博弈 |",
         "| **拟合增量 (Δ)** | 连续 5 轮快照首尾仲裁得分净变化值 (Score_curr - Score_init) | `Δ > +2.0` 加速爆发；`Δ < -2.0` 动能断崖跳水 |",
+        "| **7天内新激活小号 (Fresh)** | BubbleMap Top 300 中首次活跃距快照 <= 7 天的地址数量与持仓占比 | 门禁 `N >= 5` 且 `Hold >= 10%` 触发突击建仓调节加分 |",
+        "| **小号集群调节分 (Score)** | 依据 7 天内新激活小号控盘度赋予的独立正向激励调节分 | 最高 `+1.50` 分，直观反映庄家小号隐秘建仓烈度 |",
         "",
         "### 2. 置信梯队与风控分类标准",
         "| 决策梯队 / 分类 | 触发门槛与判定规则 | 推荐应对处置策略 |",
@@ -367,6 +369,60 @@ def generate_report(
             tok_str = format_token_cell(r.token_symbol, r.chain)
             md_lines.append(
                 f"| **{cat}** | {tok_str} | **{r.meta_score:.2f}** | {traj_str} | {ret_str} | {hold_str} | {penalty_str} | {reasons} | {strategy} |"
+            )
+
+    # ── 第六屏：新激活地址与突击建仓小号集群雷达 ──
+    fresh_pool = []
+    for r in all_ranked:
+        if getattr(r, "fresh_wallet_score", 0.0) > 0 or (getattr(r, "fresh_1_7d_count", 0) >= 3 and getattr(r, "fresh_1_7d_hold_pct", 0.0) >= 5.0):
+            fresh_pool.append(r)
+    fresh_pool.sort(key=lambda x: (x.fresh_wallet_score, x.fresh_1_7d_hold_pct, x.fresh_1_7d_count), reverse=True)
+
+    if fresh_pool:
+        md_lines.extend([
+            "",
+            "---",
+            "",
+            "## 🌱 第六屏：新激活地址与突击建仓小号集群雷达 (Fresh Wallets & Sybil Cluster Radar)",
+            "",
+            "> **雷达总则**: 穿透 BubbleMap Top 300 持币地址首次链上活跃时间（`first_activity_date`），精准捕捉操盘主力利用批创新号、多地址突击归集筹码的隐秘老鼠仓与操盘小号集群（三元门禁：7天内新号 >= 5 且持仓占比 >= 10%）。",
+            "",
+            "| 操盘定性 | 代币 | 仲裁分 (调节分) | 7天内小号数 (持仓占比) | 1天突击号 | 2天次新号 | 3天蓄势号 | 4-7天前置号 | 行为特征与操盘意图 | 推荐应对策略 |",
+            "| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :--- | :--- |",
+        ])
+
+        for r in fresh_pool[:30]:
+            cnt_7d = getattr(r, "fresh_1_7d_count", 0)
+            pct_7d = getattr(r, "fresh_1_7d_hold_pct", 0.0)
+            cnt_1d = getattr(r, "fresh_1d_count", 0)
+            cnt_2d = getattr(r, "fresh_2d_count", 0)
+            cnt_3d = getattr(r, "fresh_3d_count", 0)
+            cnt_4_7d = getattr(r, "fresh_4_7d_count", 0)
+            fw_score = getattr(r, "fresh_wallet_score", 0.0)
+
+            score_str = f"**{r.meta_score:.2f}** (+{fw_score:.2f})" if fw_score > 0 else f"**{r.meta_score:.2f}**"
+            wallets_str = f"**{cnt_7d} 个** ({pct_7d:.1f}%)"
+
+            if pct_7d >= 30.0 and cnt_7d >= 10:
+                cat = "🚨 重度小号集群控盘"
+                behavior = f"7天内批创 {cnt_7d} 个新地址突击建仓，持仓高达 {pct_7d:.1f}%，控盘极其集中"
+                strategy = "警惕强庄对倒拉砸 / 紧密跟踪拓扑归集"
+            elif cnt_1d >= 5 or (cnt_1d >= 3 and pct_7d >= 15.0):
+                cat = "⚡ 24h突击建仓集群"
+                behavior = f"24小时内突击涌入 {cnt_1d} 个新号集中拿筹，短线异动极其猛烈"
+                strategy = "短线异动拉升前兆 / 重点关注起步突破"
+            elif fw_score >= 0.5:
+                cat = "🌱 持续蓄水老鼠仓群"
+                behavior = f"7天内多梯队激活新号隐蔽吸筹，累计控盘 {pct_7d:.1f}%"
+                strategy = "主力低位暗中蓄势 / 顺势轻仓跟踪"
+            else:
+                cat = "👀 轻度新号异动"
+                behavior = f"发现 {cnt_7d} 个近期新地址拿筹，持仓占比 {pct_7d:.1f}%"
+                strategy = "维持常规观察 / 关注后续是否有集群扩量"
+
+            tok_str = format_token_cell(r.token_symbol, r.chain)
+            md_lines.append(
+                f"| **{cat}** | {tok_str} | {score_str} | {wallets_str} | {cnt_1d} | {cnt_2d} | {cnt_3d} | {cnt_4_7d} | {behavior} | {strategy} |"
             )
 
     md_lines.extend([

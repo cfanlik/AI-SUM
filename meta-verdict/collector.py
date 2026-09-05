@@ -67,6 +67,14 @@ class TokenEngineData:
     cb_windfall_pct: float = 0.0
     cb_signals:      str   = ""
 
+    # ── 新增: 新激活地址分箱与集中度 ──
+    fresh_1_7d_count:   int = 0
+    fresh_1d_count:     int = 0
+    fresh_2d_count:     int = 0
+    fresh_3d_count:     int = 0
+    fresh_4_7d_count:   int = 0
+    fresh_1_7d_hold_pct:float = 0.0
+
     # ── 新增: P2 出货风控与偏离度透传 ──
     hold_delta_72h_pct: float | None = None    # 72h 固定吸筹队列持仓变化率 (%)
     acc_count_latest:   int = 0                 # 最新快照吸筹地址数 (防误杀门禁)
@@ -279,6 +287,45 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
                 t.vl_ratio = row_market["vl_ratio"] or 0.0
                 t.market_cap_usd = row_market["market_cap_usd"] or 0.0
                 t.fdv_usd = row_market["fdv_usd"] or 0.0
+
+            # 新增: 1-7天新激活地址时态统计
+            try:
+                row_fresh = conn.execute("""
+                    SELECT 
+                        COUNT(CASE WHEN first_activity_date IS NOT NULL AND first_activity_date != '' 
+                                        AND (julianday(snapshot_time) - julianday(first_activity_date)) >= 0 
+                                        AND (julianday(snapshot_time) - julianday(first_activity_date)) <= 7 THEN 1 END) AS fresh_1_7d_count,
+                        COUNT(CASE WHEN first_activity_date IS NOT NULL AND first_activity_date != '' 
+                                        AND (julianday(snapshot_time) - julianday(first_activity_date)) >= 0 
+                                        AND (julianday(snapshot_time) - julianday(first_activity_date)) <= 1 THEN 1 END) AS fresh_1d_count,
+                        COUNT(CASE WHEN first_activity_date IS NOT NULL AND first_activity_date != '' 
+                                        AND (julianday(snapshot_time) - julianday(first_activity_date)) > 1 
+                                        AND (julianday(snapshot_time) - julianday(first_activity_date)) <= 2 THEN 1 END) AS fresh_2d_count,
+                        COUNT(CASE WHEN first_activity_date IS NOT NULL AND first_activity_date != '' 
+                                        AND (julianday(snapshot_time) - julianday(first_activity_date)) > 2 
+                                        AND (julianday(snapshot_time) - julianday(first_activity_date)) <= 3 THEN 1 END) AS fresh_3d_count,
+                        COUNT(CASE WHEN first_activity_date IS NOT NULL AND first_activity_date != '' 
+                                        AND (julianday(snapshot_time) - julianday(first_activity_date)) > 3 
+                                        AND (julianday(snapshot_time) - julianday(first_activity_date)) <= 7 THEN 1 END) AS fresh_4_7d_count,
+                        COALESCE(SUM(CASE WHEN first_activity_date IS NOT NULL AND first_activity_date != '' 
+                                              AND (julianday(snapshot_time) - julianday(first_activity_date)) >= 0 
+                                              AND (julianday(snapshot_time) - julianday(first_activity_date)) <= 7 
+                                         THEN hold_percentage ELSE 0 END), 0.0) AS fresh_1_7d_hold_pct
+                    FROM src.bubblemap_holders
+                    WHERE chain = ? AND token_address = ?
+                      AND snapshot_time = (
+                          SELECT MAX(snapshot_time) FROM src.bubblemap_holders WHERE chain = ? AND token_address = ?
+                      )
+                """, (t.chain, t.token_address, t.chain, t.token_address)).fetchone()
+                if row_fresh:
+                    t.fresh_1_7d_count = row_fresh["fresh_1_7d_count"] or 0
+                    t.fresh_1d_count = row_fresh["fresh_1d_count"] or 0
+                    t.fresh_2d_count = row_fresh["fresh_2d_count"] or 0
+                    t.fresh_3d_count = row_fresh["fresh_3d_count"] or 0
+                    t.fresh_4_7d_count = row_fresh["fresh_4_7d_count"] or 0
+                    t.fresh_1_7d_hold_pct = round(float(row_fresh["fresh_1_7d_hold_pct"] or 0.0), 2)
+            except Exception as _efresh:
+                logger.debug("%s 新激活地址分析跳过: %s", t.token_symbol, _efresh)
 
             # 72h 同源固定队列吸筹持仓衰减率与最新吸筹数计算 (同源口径，与抽屉 100% 对齐，零动态拼接)
             try:
@@ -519,7 +566,14 @@ def save_meta_result(conn: sqlite3.Connection, result: dict):
         ("dump_penalty", "REAL DEFAULT 0"),
         ("dump_reasons", "TEXT DEFAULT ''"),
         ("price_now_ret", "REAL DEFAULT NULL"),
-        ("hold_delta_72h_pct", "REAL DEFAULT NULL")
+        ("hold_delta_72h_pct", "REAL DEFAULT NULL"),
+        ("fresh_wallet_score", "REAL DEFAULT 0"),
+        ("fresh_1_7d_count", "INTEGER DEFAULT 0"),
+        ("fresh_1d_count", "INTEGER DEFAULT 0"),
+        ("fresh_2d_count", "INTEGER DEFAULT 0"),
+        ("fresh_3d_count", "INTEGER DEFAULT 0"),
+        ("fresh_4_7d_count", "INTEGER DEFAULT 0"),
+        ("fresh_1_7d_hold_pct", "REAL DEFAULT 0")
     ]:
         try:
             conn.execute(f"ALTER TABLE meta_snapshots ADD COLUMN {col} {typedef}")
@@ -554,6 +608,13 @@ def save_meta_result(conn: sqlite3.Connection, result: dict):
         "dump_reasons": "",
         "price_now_ret": None,
         "hold_delta_72h_pct": None,
+        "fresh_wallet_score": 0.0,
+        "fresh_1_7d_count": 0,
+        "fresh_1d_count": 0,
+        "fresh_2d_count": 0,
+        "fresh_3d_count": 0,
+        "fresh_4_7d_count": 0,
+        "fresh_1_7d_hold_pct": 0.0,
     }
     payload.update(result)
 
@@ -562,12 +623,12 @@ def save_meta_result(conn: sqlite3.Connection, result: dict):
         (scan_time, chain, token_address, token_symbol, meta_score, meta_score_smooth, meta_verdict,
          engine_hits, master_signal, opus_verdict, unified_signal, whale_level, cb_verdict, stage,
          confidence_tier, resilience_index, resilience_norm,
-         master_score, opus_score, unified_score, whale_score, cb_score, hop2_score, dump_penalty, dump_reasons, price_now_ret, hold_delta_72h_pct)
+         master_score, opus_score, unified_score, whale_score, cb_score, hop2_score, dump_penalty, dump_reasons, price_now_ret, hold_delta_72h_pct, fresh_wallet_score, fresh_1_7d_count, fresh_1d_count, fresh_2d_count, fresh_3d_count, fresh_4_7d_count, fresh_1_7d_hold_pct)
         VALUES (:scan_time, :chain, :token_address, :token_symbol, :meta_score, :meta_score_smooth, :meta_verdict,
                 :engine_hits, :master_signal, :opus_verdict, :unified_signal, :whale_level,
                 :cb_verdict, :stage,
                 :confidence_tier, :resilience_index, :resilience_norm,
-                :master_score, :opus_score, :unified_score, :whale_score, :cb_score, :hop2_score, :dump_penalty, :dump_reasons, :price_now_ret, :hold_delta_72h_pct)
+                :master_score, :opus_score, :unified_score, :whale_score, :cb_score, :hop2_score, :dump_penalty, :dump_reasons, :price_now_ret, :hold_delta_72h_pct, :fresh_wallet_score, :fresh_1_7d_count, :fresh_1d_count, :fresh_2d_count, :fresh_3d_count, :fresh_4_7d_count, :fresh_1_7d_hold_pct)
     """, payload)
     _sync_token_lifecycle_atomic(conn, payload)
     conn.commit()

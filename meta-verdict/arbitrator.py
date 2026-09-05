@@ -69,6 +69,15 @@ class MetaResult:
     resilience_index: float = 0.0       # 历史抗跌韧性原始分
     resilience_norm: float = 0.5        # Sigmoid [0, 1] 稳健平滑分
 
+    # ── 新增: 新激活地址与突击建仓集群指标 ──
+    fresh_wallet_score: float = 0.0
+    fresh_1_7d_count:   int = 0
+    fresh_1d_count:     int = 0
+    fresh_2d_count:     int = 0
+    fresh_3d_count:     int = 0
+    fresh_4_7d_count:   int = 0
+    fresh_1_7d_hold_pct:float = 0.0
+
     # ── 新增: P2 出货风控结果透传 ──
     dump_penalty:       float = 0.0             # 累计出货风控扣分
     dump_reasons:       str   = ""              # 出货与风控原因摘要
@@ -216,8 +225,27 @@ def arbitrate(token: TokenEngineData, hop2_pct: float = 0.0, conn: sqlite3.Conne
     else:
         res.hop2_score = 0.00
 
+    # 透传新激活地址分箱指标
+    res.fresh_1_7d_count = getattr(t, "fresh_1_7d_count", 0)
+    res.fresh_1d_count = getattr(t, "fresh_1d_count", 0)
+    res.fresh_2d_count = getattr(t, "fresh_2d_count", 0)
+    res.fresh_3d_count = getattr(t, "fresh_3d_count", 0)
+    res.fresh_4_7d_count = getattr(t, "fresh_4_7d_count", 0)
+    res.fresh_1_7d_hold_pct = getattr(t, "fresh_1_7d_hold_pct", 0.0)
+
+    # 1.6 新激活地址突击建仓调节分 (满分 1.50，三元门禁：7天内新号 >= 5 且持仓占比 >= 10%)
+    if res.fresh_1_7d_count >= 5 and res.fresh_1_7d_hold_pct >= 10.0:
+        if res.fresh_1_7d_hold_pct >= 30.0 and res.fresh_1_7d_count >= 10:
+            res.fresh_wallet_score = 1.50
+        elif res.fresh_1_7d_hold_pct >= 20.0 and res.fresh_1_7d_count >= 5:
+            res.fresh_wallet_score = 1.00
+        else:
+            res.fresh_wallet_score = 0.50
+    else:
+        res.fresh_wallet_score = 0.00
+
     # 2. 汇总总分
-    raw_total = res.master_score + res.opus_score + res.unified_score + res.whale_score + res.cb_score + res.hop2_score
+    raw_total = res.master_score + res.opus_score + res.unified_score + res.whale_score + res.cb_score + res.hop2_score + res.fresh_wallet_score
     res.meta_score = round(raw_total, 2)
     res.engine_hits = sum(1 for s in [res.master_score, res.opus_score, res.unified_score, res.whale_score, res.cb_score] if s > 0)
 
