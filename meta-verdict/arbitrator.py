@@ -234,7 +234,7 @@ def arbitrate(token: TokenEngineData, hop2_pct: float = 0.0, conn: sqlite3.Conne
     res.fresh_4_7d_count = getattr(t, "fresh_4_7d_count", 0)
     res.fresh_1_7d_hold_pct = getattr(t, "fresh_1_7d_hold_pct", 0.0)
 
-    # 1.6 新激活地址突击建仓调节分 (满分 1.50，三元门禁：7天内新号 >= 5 且持仓占比 >= 10%)
+    # 1.6 新激活地址突击建仓调节分 (双通道门禁：通道A高控盘老鼠仓[>=5号且>=10%]；通道B多号微量突击集群[>=10号且>=2%])
     if res.fresh_1_7d_count >= 5 and res.fresh_1_7d_hold_pct >= 10.0:
         if res.fresh_1_7d_hold_pct >= 30.0 and res.fresh_1_7d_count >= 10:
             res.fresh_wallet_score = 1.50
@@ -242,12 +242,14 @@ def arbitrate(token: TokenEngineData, hop2_pct: float = 0.0, conn: sqlite3.Conne
             res.fresh_wallet_score = 1.00
         else:
             res.fresh_wallet_score = 0.50
+    elif res.fresh_1_7d_count >= 10 and res.fresh_1_7d_hold_pct >= 2.0:
+        res.fresh_wallet_score = 0.50
     else:
         res.fresh_wallet_score = 0.00
 
     # 1.7 筹码三态形态分类器 (Dual-Resonance vs Fresh-Sybil vs Hop2-Penetration)
     has_hop2 = (res.hop2_score > 0 or hop2_pct > 0.05)
-    has_fresh = (res.fresh_1_7d_count >= 3 and res.fresh_1_7d_hold_pct >= 5.0) or (res.fresh_wallet_score > 0)
+    has_fresh = (res.fresh_wallet_score > 0) or (res.fresh_1_7d_count >= 3 and res.fresh_1_7d_hold_pct >= 5.0) or (res.fresh_1_7d_count >= 10 and res.fresh_1_7d_hold_pct >= 2.0)
     
     if has_hop2 and has_fresh:
         res.sybil_pattern = "DUAL_RESONANCE"
