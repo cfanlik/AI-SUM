@@ -376,7 +376,7 @@ def generate_report(
     fresh_pool = []
     pool_source = all_arbitrated if all_arbitrated else all_ranked
     for r in pool_source:
-        if getattr(r, "fresh_wallet_score", 0.0) > 0 or (getattr(r, "fresh_1_7d_count", 0) >= 3 and getattr(r, "fresh_1_7d_hold_pct", 0.0) >= 5.0):
+        if getattr(r, "fresh_wallet_score", 0.0) > 0 or (getattr(r, "fresh_1_7d_count", 0) >= 3 and getattr(r, "fresh_1_7d_hold_pct", 0.0) >= 5.0) or (getattr(r, "fresh_1_7d_count", 0) >= 10 and getattr(r, "fresh_1_7d_hold_pct", 0.0) >= 2.0):
             fresh_pool.append(r)
     fresh_pool.sort(key=lambda x: (x.fresh_wallet_score, x.fresh_1_7d_hold_pct, x.fresh_1_7d_count), reverse=True)
 
@@ -387,7 +387,7 @@ def generate_report(
             "",
             "## 🌱 第六屏：新激活地址与突击建仓小号集群雷达 (Fresh Wallets & Sybil Cluster Radar)",
             "",
-            "> **雷达总则**: 穿透 BubbleMap Top 300 持币地址首次链上活跃时间（`first_activity_date`），精准捕捉操盘主力利用批创新号、多地址突击归集筹码的隐秘老鼠仓与操盘小号集群（三元门禁：7天内新号 >= 5 且持仓占比 >= 10%）。",
+            "> **雷达总则**: 穿透 BubbleMap Top 300 持币地址首次链上活跃时间（`first_activity_date`），精准捕捉操盘主力利用批创新号、多地址突击归集筹码的隐秘老鼠仓与操盘小号集群（双通道门禁：高控盘老鼠仓 [7天内新号 >= 5 且持仓占比 >= 10%]，或 多号微量协同建仓 [7天内新号 >= 10 且持仓占比 >= 2%]）。",
             "",
             "| 操盘定性 | 代币 | 仲裁分 (调节分) | 7天内小号数 (持仓占比) | 1天突击号 | 2天次新号 | 3天蓄势号 | 4-7天前置号 | 行为特征与操盘意图 | 推荐应对策略 |",
             "| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :--- | :--- |",
@@ -418,6 +418,10 @@ def generate_report(
                 cat = "⚡ 24h突击建仓集群"
                 behavior = f"24小时内突击涌入 {cnt_1d} 个新号集中拿筹，短线异动极其猛烈"
                 strategy = "短线异动拉升前兆 / 重点关注起步突破"
+            elif cnt_7d >= 10 and pct_7d >= 2.0:
+                cat = "🐜 多地址微量协同集群"
+                behavior = f"7天内激活 {cnt_7d} 个新地址分散低位突击建仓，持仓占比 {pct_7d:.1f}%，具备多账户协同特征"
+                strategy = "多账户隐蔽建仓 / 持续跟踪筹码是否向单一实体归集"
             elif fw_score >= 0.5:
                 cat = "🌱 持续蓄水老鼠仓群"
                 behavior = f"7天内多梯队激活新号隐蔽吸筹，累计控盘 {pct_7d:.1f}%"
