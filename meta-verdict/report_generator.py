@@ -62,6 +62,7 @@ def generate_report(
     health: list[dict] = None,
     conflicts: list = None,
     all_arbitrated: list[MetaResult] = None,
+    screen7_data: list[dict] = None,
 ) -> str:
     """终端 + MD 双输出 (四屏标准决策驾驶舱)"""
 
@@ -435,6 +436,101 @@ def generate_report(
             md_lines.append(
                 f"| **{cat}** | {tok_str} | {score_str} | {wallets_str} | {cnt_1d} | {cnt_2d} | {cnt_3d} | {cnt_4_7d} | {behavior} | {strategy} |"
             )
+
+    # ── 第七屏：Hop-2 大额资金穿透与长期仓位接力雷达 ──
+    if screen7_data:
+        def _fmt_usd(val: float) -> str:
+            if not val or val <= 0:
+                return "—"
+            if val >= 1_000_000:
+                return f"${val/1_000_000:.2f}M"
+            if val >= 1_000:
+                return f"${val/1_000:.1f}K"
+            return f"${val:.2f}"
+
+        ho_cnt = sum(1 for item in screen7_data if item.get("handover"))
+        print(f"\n🌊 第七屏: Hop-2 大额资金穿透与长期仓位接力雷达 (总命中: {len(screen7_data)} | 长期平移接力: {ho_cnt})")
+        for item in screen7_data[:5]:
+            ho_mark = " [🔒平移接力]" if item.get("handover") else ""
+            w_cnt = len(item.get("whales", []))
+            pct_val = item.get("total_pct", 0.0)
+            u_str = _fmt_usd(item.get("total_usd", 0.0))
+            print(f"  🐋 {item['symbol']} ({item['chain']}): 穿透估值 {u_str} | {w_cnt} 户 ({pct_val:.2f}%){ho_mark}")
+
+        md_lines.extend([
+            "",
+            "---",
+            "",
+            "## 🌊 第七屏：Hop-2 大额资金穿透与长期仓位接力雷达 (Whale Hop-2 & Position Handover Radar > $10,000)",
+            "",
+            "> **雷达总则**: 本屏专门穿透 BubbleMap Top 300 持币大户的二跳资金路由（Hop-2），精准捕获隐蔽通过中间地址、子钱包或非直接 DEX 路径注资的**单户/累计真金 >= $10,000 USD** 的核心主力；同时自动比对 14d~60d 历史快照，挖掘并透视**等额仓位平移接力（Handover）与超长期静默锁仓（Dormancy）**标的。",
+            "",
+            "### 1. 🌊 资金穿透与长期接力核心标的榜 (Top Whale Penetration & Handover)",
+            "| 操盘分类 | 代币 | 链 | 现决策梯队 | 穿透真金总估值 (>$10K) | 巨鲸户数 (持仓占比) | 最大单户真金 | 长期平移接力沉淀 | 核心行为特征与策略建议 |",
+            "| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :--- |",
+        ])
+
+        for item in screen7_data[:30]:
+            sym = item.get("symbol", "")
+            chain = item.get("chain", "")
+            tier = item.get("confidence_tier", "L3-Watch")
+            tot_usd = item.get("total_usd", 0.0)
+            whales = item.get("whales", [])
+            w_cnt = len(whales)
+            w_pct = item.get("total_pct", 0.0)
+            max_u = item.get("max_usd", 0.0)
+            ho = item.get("handover")
+
+            if ho and tot_usd >= 10000.0:
+                cat = "🐋 长期穿透锁仓巨鲸"
+                ho_str = f"**{ho['span_days']}天** (`{ho['origin_address'][:6]}...`→`{ho['target_address'][:6]}...`)"
+                feat = f"二跳穿透真金 {_fmt_usd(tot_usd)} 且在 {ho['span_days']} 天前完成等额仓位平移，死锁未动"
+                strat = "超长期底仓沉淀 / 现货分批布局中长线"
+            elif ho:
+                cat = "🔒 长期等额换仓接力"
+                ho_str = f"**{ho['span_days']}天** (`{ho['origin_address'][:6]}...`→`{ho['target_address'][:6]}...`)"
+                feat = f"历史持仓 {ho['transferred_amount']:,.0f} 枚全额平移，静默锁仓 {ho['span_days']} 天"
+                strat = "机构换仓防排查 / 观察启动信号"
+            elif tot_usd >= 100000.0:
+                cat = "⚡ 超大额资金穿透 (>$100K)"
+                ho_str = "—"
+                feat = f"二跳穿透真金高达 {_fmt_usd(tot_usd)}，{w_cnt} 户死锁控盘 {w_pct:.2f}%"
+                strat = "重金真金沉淀 / 顺势轻仓跟随"
+            else:
+                cat = "🌊 大额真金穿透 (>$10K)"
+                ho_str = "—"
+                feat = f"二跳穿透真金 {_fmt_usd(tot_usd)}，{w_cnt} 户控盘 {w_pct:.2f}%"
+                strat = "资金穿透实锤 / 关注突破买点"
+
+            tot_usd_str = f"**{_fmt_usd(tot_usd)}**"
+            whales_str = f"{w_cnt} 户 ({w_pct:.2f}%)" if w_cnt > 0 else "—"
+            max_u_str = _fmt_usd(max_u)
+            tok_str = format_token_cell(sym, chain)
+
+            md_lines.append(
+                f"| **{cat}** | {tok_str} | {chain} | `{tier}` | {tot_usd_str} | {whales_str} | {max_u_str} | {ho_str} | {feat} | {strat} |"
+            )
+
+        md_lines.extend([
+            "",
+            "### 2. 🔍 穿透大户与换仓地址白盒透视 (Address-Level Whitebox Ledger)",
+            "| 代币 | 角色类型 | 物理钱包地址 | 持仓占比% | 实盘真金估值 | 二跳DEX% | GMGN买次 | 历史换仓来源 | 锁仓天数 |",
+            "| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :---: |",
+        ])
+
+        for item in screen7_data[:20]:
+            sym = item.get("symbol", "")
+            ho = item.get("handover")
+            for w in item.get("whales", [])[:2]:
+                w_addr = w.get("address", "")
+                addr_fmt = f"`{w_addr[:8]}...{w_addr[-6:]}`" if len(w_addr) >= 14 else f"`{w_addr}`"
+                gmgn_str = f"{w.get('gmgn_buy_cnt', 0)}次" if w.get('gmgn_buy_cnt') else "—"
+                is_ho_target = (ho and ho['target_address'].lower() == w_addr.lower())
+                ho_orig = f"`{ho['origin_address'][:6]}...{ho['origin_address'][-4:]}`" if is_ho_target else "—"
+                ho_days = f"{ho['span_days']}天" if is_ho_target else "—"
+                md_lines.append(
+                    f"| **{sym}** | 穿透大户 | {addr_fmt} | {w.get('hold_pct', 0.0):.2f}% | **${w.get('effective_usd', 0.0):,.2f}** | {w.get('hop2_ratio', 0.0)*100:.0f}% | {gmgn_str} | {ho_orig} | {ho_days} |"
+                )
 
     md_lines.extend([
         "",

@@ -132,8 +132,52 @@ def main():
     # 更新生命周期表 (完美追踪完全体状态)
     _update_lifecycle(conn, all_arbitrated, scan_time)
 
-    # 生成报告（含趋势+健康+矛盾）
-    generate_report(acc_list, dist_list, len(all_data), scan_time, trend, health, conflicts, all_arbitrated=all_arbitrated)
+    # ── 第七屏：Hop-2 大额资金穿透与长期仓位接力扫描 ──
+    screen7_data = []
+    try:
+        from hop2_whale_scanner import scan_hop2_whales
+        from position_handover import scan_position_handovers
+        import sqlite3
+        src_conn = sqlite3.connect(config.SRC_DB_PATH)
+        tokens_for_s7 = [
+            {"chain": d.chain, "token_address": d.token_address.lower(), "token_symbol": d.token_symbol}
+            for d in all_data
+        ]
+        hop2_whales_map = scan_hop2_whales(src_conn, tokens_for_s7, min_usd=10000.0)
+        handover_map = scan_position_handovers(src_conn, tokens_for_s7, min_days=14, min_usd=10000.0)
+        src_conn.close()
+
+        tier_map = {d.token_address.lower(): getattr(d, "confidence_tier", "L3-Watch") for d in all_arbitrated}
+        score_map = {d.token_address.lower(): d.meta_score for d in all_arbitrated}
+
+        all_keys = set(hop2_whales_map.keys()) | set(handover_map.keys())
+        for k in all_keys:
+            hw = hop2_whales_map.get(k)
+            ho = handover_map.get(k)
+            chain = hw["chain"] if hw else ho["chain"]
+            addr = hw["token_address"] if hw else ho["token_address"]
+            sym = hw["token_symbol"] if hw else ho["token_symbol"]
+
+            screen7_data.append({
+                "symbol": sym,
+                "chain": chain,
+                "token_address": addr,
+                "meta_score": score_map.get(addr.lower(), 0.0),
+                "confidence_tier": tier_map.get(addr.lower(), "L3-Watch"),
+                "whales": hw["whales"] if hw else [],
+                "total_usd": hw["total_usd"] if hw else 0.0,
+                "total_pct": hw["total_pct"] if hw else 0.0,
+                "max_usd": hw["max_usd"] if hw else 0.0,
+                "handover": ho["handover"] if ho else None,
+            })
+
+        screen7_data.sort(key=lambda x: (1 if x["handover"] else 0, x["total_usd"]), reverse=True)
+        logger.info(f"第七屏数据构建完成: {len(screen7_data)} 个标的命中")
+    except Exception as e:
+        logger.error(f"第七屏扫描失败: {e}", exc_info=True)
+
+    # 生成报告（含趋势+健康+矛盾+第七屏）
+    generate_report(acc_list, dist_list, len(all_data), scan_time, trend, health, conflicts, all_arbitrated=all_arbitrated, screen7_data=screen7_data)
 
     # ── 拉升前兆扫描 ──
     try:
