@@ -76,6 +76,21 @@ def main():
     # 一次性完全体仲裁（出厂即获得 hop2 加分与最终裁决判定）
     all_arbitrated = [arbitrate(d, hop2_pct=hop2_map.get(d.token_address.lower(), 0.0), conn=conn, scan_time=scan_time) for d in all_data]
 
+    # ── 引入真实市场价格前向拟合与过热预警校准器 (plan.md 演进) ──
+    import price_fit_radar
+    token_data_map = {d.token_address.lower(): d for d in all_data}
+    for r in all_arbitrated:
+        t_data = token_data_map.get(r.token_address.lower())
+        calib = price_fit_radar.calculate_fit_calibration(r, t_data, conn=conn)
+        r.fit_score_delta = calib.fit_delta
+        r.calibrated_score = calib.calibrated_score
+        r.lifecycle_status = calib.lifecycle_status
+        r.fit_action_guide = calib.action_guide
+        r._calib_result = calib
+
+    # 构建第八屏雷达数据集
+    screen8_data = price_fit_radar.build_screen8_radar_data(all_arbitrated, conn=conn)
+
     # 重新分流生成最终排行列表
     acc_list = sorted([r for r in all_arbitrated if r.meta_verdict == "ACC"], key=lambda r: r.meta_score, reverse=True)
     dist_list = sorted([r for r in all_arbitrated if r.meta_verdict == "DIST"], key=lambda r: r.meta_score)
@@ -115,6 +130,10 @@ def main():
             "fresh_4_7d_count": getattr(r, "fresh_4_7d_count", 0),
             "fresh_1_7d_hold_pct": getattr(r, "fresh_1_7d_hold_pct", 0.0),
             "sybil_pattern":      getattr(r, "sybil_pattern", "REGULAR"),
+            "fit_score_delta":    getattr(r, "fit_score_delta", 0.0),
+            "calibrated_score":   getattr(r, "calibrated_score", 0.0),
+            "lifecycle_status":   getattr(r, "lifecycle_status", "NORMAL"),
+            "fit_action_guide":   getattr(r, "fit_action_guide", ""),
         })
 
     # ── 矛盾检测 ──
@@ -176,8 +195,8 @@ def main():
     except Exception as e:
         logger.error(f"第七屏扫描失败: {e}", exc_info=True)
 
-    # 生成报告（含趋势+健康+矛盾+第七屏）
-    generate_report(acc_list, dist_list, len(all_data), scan_time, trend, health, conflicts, all_arbitrated=all_arbitrated, screen7_data=screen7_data)
+    # 生成报告（含趋势+健康+矛盾+第七屏+第八屏）
+    generate_report(acc_list, dist_list, len(all_data), scan_time, trend, health, conflicts, all_arbitrated=all_arbitrated, screen7_data=screen7_data, screen8_data=screen8_data)
 
     # ── 拉升前兆扫描 ──
     try:
