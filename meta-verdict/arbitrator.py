@@ -79,6 +79,12 @@ class MetaResult:
     fresh_4_7d_count:   int = 0
     fresh_1_7d_hold_pct:float = 0.0
 
+    # ── 新增: 真实市场价格前向拟合与过热预警指标 (plan.md 演进) ──
+    fit_score_delta:   float = 0.0             # 市场前向拟合校准增量
+    calibrated_score:  float = 0.0             # 最终校准得分 (meta_score + fit_delta)
+    lifecycle_status:  str   = "NORMAL"        # ACCELERATING / STEADY / OVERHEATING / HIGH_DIVERGENCE
+    fit_action_guide:  str   = ""              # 操作指引
+
     # ── 新增: P2 出货风控结果透传 ──
     dump_penalty:       float = 0.0             # 累计出货风控扣分
     dump_reasons:       str   = ""              # 出货与风控原因摘要
@@ -138,6 +144,10 @@ def determine_confidence_tier(token: TokenEngineData, score: float, hits: int, c
 
     # ── L1 顶级共振标的判定 (得分 >= 7.0 且多引擎共振) ──
     if score >= 7.0:
+        # 真实前向行情风控门禁: 极度分歧或过热追顶绝对禁止进入 L1-Alpha (防高位追顶回撤)
+        if getattr(token, "series_std", 0) >= 1.8 or getattr(token, "lifecycle_status", "") == "OVERHEATING":
+            return "L2-Bet"
+
         # 轧空分流器 (Squeeze Diverter)
         if token.vl_ratio > 10.0 or token.cex_delta_pct > 20.0:
             return "L1-Squeeze"

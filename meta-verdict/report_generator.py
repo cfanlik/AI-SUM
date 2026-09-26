@@ -63,6 +63,7 @@ def generate_report(
     conflicts: list = None,
     all_arbitrated: list[MetaResult] = None,
     screen7_data: list[dict] = None,
+    screen8_data: list[dict] = None,
 ) -> str:
     """终端 + MD 双输出 (四屏标准决策驾驶舱)"""
 
@@ -531,6 +532,34 @@ def generate_report(
                 md_lines.append(
                     f"| **{sym}** | 穿透大户 | {addr_fmt} | {w.get('hold_pct', 0.0):.2f}% | **${w.get('effective_usd', 0.0):,.2f}** | {w.get('hop2_ratio', 0.0)*100:.0f}% | {gmgn_str} | {ho_orig} | {ho_days} |"
                 )
+
+    # ── 第八屏: 真实市场价格前向拟合与过热-衰减预警雷达 (Forward Price-Fit & Overheating Radar) ──
+    if screen8_data:
+        md_lines.extend([
+            "",
+            "---",
+            "",
+            "## 🎯 第八屏：真实市场价格前向拟合与过热-衰减预警雷达 (Forward Price-Fit & Overheating Radar)",
+            "> 基于 VPS 生产行情高频时序与真实前向收益实证（N=20387）校准：强化连续吸筹正向动能，施加极高分过热滞涨衰减与引擎分歧对冲。",
+            "",
+            "| 梯队 | 代币 | 基础仲裁分 | 拟合校准分 (Δ) | 连续吸筹 (consec) | 7d留存锁仓 | 引擎分歧 (σ) | 生命周期状态 | 操作指引 |",
+            "| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :--- |",
+        ])
+        for d in screen8_data:
+            tok_cell = format_token_cell(d.get("token_symbol", ""), d.get("chain", ""))
+            delta_val = d.get("fit_delta", 0.0)
+            delta_str = f"+{delta_val:.2f}" if delta_val >= 0 else f"{delta_val:.2f}"
+            calib_str = f"**{d.get('calibrated_score', 0.0):.2f}** ({delta_str})"
+            status_badge = d.get("lifecycle_status", "NORMAL")
+            if status_badge == "OVERHEATING":
+                status_badge = "🔴 **过热预警**"
+            elif status_badge == "ACCELERATING":
+                status_badge = "🟢 **加速蓄力**"
+            elif status_badge == "HIGH_DIVERGENCE":
+                status_badge = "⚠️ **高分歧**"
+            md_lines.append(
+                f"| `{d.get('confidence_tier', 'L3-Watch')}` | {tok_cell} | {d.get('meta_score', 0.0):.2f} | {calib_str} | {d.get('consec_acc', 0)} 轮 | {d.get('retention_7d', 0.0):.1f}% | {d.get('score_sigma', 0.0):.2f} | {status_badge} | {d.get('action_guide', '')} |"
+            )
 
     md_lines.extend([
         "",
