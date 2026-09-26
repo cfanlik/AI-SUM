@@ -52,6 +52,36 @@ def format_token_cell(symbol: str, chain: str) -> str:
         return f"**{sym} [{ch.upper()}]**"
     return f"**{sym}**"
 
+def _render_screen8_table(items: list[dict]) -> list[str]:
+    lines = [
+        "| 梯队 | 代币 | 基础仲裁分 | 拟合校准分 (Δ) | 连续吸筹 (consec) | 7d留存锁仓 | 引擎分歧 (σ) | 生命周期状态 | 操作指引 |",
+        "| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :--- |",
+    ]
+    if not items:
+        lines.append("| — | *暂无入选标的* | — | — | — | — | — | — | — |")
+        return lines
+
+    for d in items:
+        tok_cell = format_token_cell(d.get("token_symbol", ""), d.get("chain", ""))
+        delta_val = d.get("fit_delta", 0.0)
+        delta_str = f"+{delta_val:.2f}" if delta_val >= 0 else f"{delta_val:.2f}"
+        calib_str = f"**{d.get('calibrated_score', 0.0):.2f}** ({delta_str})"
+        status_badge = d.get("lifecycle_status", "NORMAL")
+        if status_badge == "OVERHEATING":
+            status_badge = "🔴 **过热预警**"
+        elif status_badge == "ACCELERATING":
+            status_badge = "🟢 **加速蓄力**"
+        elif status_badge == "HIGH_DIVERGENCE":
+            status_badge = "⚠️ **高分歧**"
+        elif status_badge == "DENIED":
+            status_badge = "🚫 **一票否决**"
+        elif status_badge == "DIST_WARN":
+            status_badge = "⚠️ **出货阻断**"
+        lines.append(
+            f"| `{d.get('confidence_tier', 'L3-Watch')}` | {tok_cell} | {d.get('meta_score', 0.0):.2f} | {calib_str} | {d.get('consec_acc', 0)} 轮 | {d.get('retention_7d', 0.0):.1f}% | {d.get('score_sigma', 0.0):.2f} | {status_badge} | {d.get('action_guide', '')} |"
+        )
+    return lines
+
 
 def generate_report(
     acc_list: list[MetaResult],
@@ -63,7 +93,7 @@ def generate_report(
     conflicts: list = None,
     all_arbitrated: list[MetaResult] = None,
     screen7_data: list[dict] = None,
-    screen8_data: list[dict] = None,
+    screen8_data: list[dict] | dict = None,
 ) -> str:
     """终端 + MD 双输出 (四屏标准决策驾驶舱)"""
 
@@ -540,26 +570,21 @@ def generate_report(
             "---",
             "",
             "## 🎯 第八屏：真实市场价格前向拟合与过热-衰减预警雷达 (Forward Price-Fit & Overheating Radar)",
-            "> 基于 VPS 生产行情高频时序与真实前向收益实证（N=20387）校准：强化连续吸筹正向动能，施加极高分过热滞涨衰减与引擎分歧对冲。",
-            "",
-            "| 梯队 | 代币 | 基础仲裁分 | 拟合校准分 (Δ) | 连续吸筹 (consec) | 7d留存锁仓 | 引擎分歧 (σ) | 生命周期状态 | 操作指引 |",
-            "| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :--- |",
+            "> 基于 VPS 生产行情高频时序与真实前向收益实证（N=20387）校准：强化连续吸筹正向动能，施加极高分过热滞涨衰减与引擎分歧对冲。四大核心矩阵精炼聚焦（Top 5），全景降噪。",
         ])
-        for d in screen8_data:
-            tok_cell = format_token_cell(d.get("token_symbol", ""), d.get("chain", ""))
-            delta_val = d.get("fit_delta", 0.0)
-            delta_str = f"+{delta_val:.2f}" if delta_val >= 0 else f"{delta_val:.2f}"
-            calib_str = f"**{d.get('calibrated_score', 0.0):.2f}** ({delta_str})"
-            status_badge = d.get("lifecycle_status", "NORMAL")
-            if status_badge == "OVERHEATING":
-                status_badge = "🔴 **过热预警**"
-            elif status_badge == "ACCELERATING":
-                status_badge = "🟢 **加速蓄力**"
-            elif status_badge == "HIGH_DIVERGENCE":
-                status_badge = "⚠️ **高分歧**"
-            md_lines.append(
-                f"| `{d.get('confidence_tier', 'L3-Watch')}` | {tok_cell} | {d.get('meta_score', 0.0):.2f} | {calib_str} | {d.get('consec_acc', 0)} 轮 | {d.get('retention_7d', 0.0):.1f}% | {d.get('score_sigma', 0.0):.2f} | {status_badge} | {d.get('action_guide', '')} |"
-            )
+        if isinstance(screen8_data, dict):
+            sections = [
+                ("### 1. 🚀 L1 顶级共振与真金冲刺池 (Top 5)", screen8_data.get("l1_top", [])),
+                ("### 2. 💎 L2 潜力蓄力池 (Top 5)", screen8_data.get("l2_top", [])),
+                ("### 3. ⚠️ 极高分过热滞涨与风险预警池 (Risk Alert Top 5)", screen8_data.get("alert_top", [])),
+                ("### 4. 🌱 L3 观察池连续吸筹黑马 (Top 5)", screen8_data.get("l3_top", [])),
+            ]
+            for title, items in sections:
+                md_lines.extend(["", title, ""])
+                md_lines.extend(_render_screen8_table(items))
+        elif isinstance(screen8_data, list):
+            md_lines.extend([""])
+            md_lines.extend(_render_screen8_table(screen8_data))
 
     md_lines.extend([
         "",

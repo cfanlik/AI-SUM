@@ -76,20 +76,7 @@ def main():
     # 一次性完全体仲裁（出厂即获得 hop2 加分与最终裁决判定）
     all_arbitrated = [arbitrate(d, hop2_pct=hop2_map.get(d.token_address.lower(), 0.0), conn=conn, scan_time=scan_time) for d in all_data]
 
-    # ── 引入真实市场价格前向拟合与过热预警校准器 (plan.md 演进) ──
-    import price_fit_radar
-    token_data_map = {d.token_address.lower(): d for d in all_data}
-    for r in all_arbitrated:
-        t_data = token_data_map.get(r.token_address.lower())
-        calib = price_fit_radar.calculate_fit_calibration(r, t_data, conn=conn)
-        r.fit_score_delta = calib.fit_delta
-        r.calibrated_score = calib.calibrated_score
-        r.lifecycle_status = calib.lifecycle_status
-        r.fit_action_guide = calib.action_guide
-        r._calib_result = calib
-
-    # 构建第八屏雷达数据集
-    screen8_data = price_fit_radar.build_screen8_radar_data(all_arbitrated, conn=conn)
+    screen8_data = {}
 
     # 重新分流生成最终排行列表
     acc_list = sorted([r for r in all_arbitrated if r.meta_verdict == "ACC"], key=lambda r: r.meta_score, reverse=True)
@@ -141,7 +128,7 @@ def main():
     conflicts = detect_conflicts(all_arbitrated, all_data)
 
     # ── 趋势分析（对比上一轮，基于完全体数据）──
-    trend = analyze_trend(conn, all_results, scan_time)
+    trend = analyze_trend(conn, all_arbitrated, scan_time)
     if trend.has_prev:
         logger.info(f"趋势对比: vs {trend.prev_scan_time} | "
                      f"新进{len(trend.newcomers)} 退出{len(trend.exits)} "
@@ -150,6 +137,38 @@ def main():
 
     # 更新生命周期表 (完美追踪完全体状态)
     _update_lifecycle(conn, all_arbitrated, scan_time)
+
+    # ── 第八屏：真实市场价格前向拟合与过热-衰减预警雷达 (时序标准差就绪后执行) ──
+    try:
+        import price_fit_radar
+        token_data_map = {d.token_address.lower(): d for d in all_data}
+        for r in all_arbitrated:
+            t_data = token_data_map.get(r.token_address.lower())
+            calib = price_fit_radar.calculate_fit_calibration(r, t_data, conn=conn)
+            r.fit_score_delta = calib.fit_delta
+            r.calibrated_score = calib.calibrated_score
+            r.lifecycle_status = calib.lifecycle_status
+            r.fit_action_guide = calib.action_guide
+            r._calib_result = calib
+
+        # 原子写穿回补 meta_snapshots 中的校准字段
+        conn.executemany("""
+            UPDATE meta_snapshots 
+            SET fit_score_delta = ?, calibrated_score = ?, lifecycle_status = ?, fit_action_guide = ?
+            WHERE scan_time = ? AND chain = ? AND lower(token_address) = lower(?)
+        """, [
+            (getattr(r, "fit_score_delta", 0.0), getattr(r, "calibrated_score", 0.0),
+             getattr(r, "lifecycle_status", "NORMAL"), getattr(r, "fit_action_guide", ""),
+             scan_time, r.chain, r.token_address)
+            for r in all_arbitrated
+        ])
+        conn.commit()
+
+        # 构建第八屏四大精炼矩阵数据集
+        screen8_data = price_fit_radar.build_screen8_radar_data(all_arbitrated, conn=conn)
+        logger.info(f"第八屏雷达数据构建完成: L1={len(screen8_data.get('l1_top', []))}, L2={len(screen8_data.get('l2_top', []))}, Alert={len(screen8_data.get('alert_top', []))}, L3={len(screen8_data.get('l3_top', []))}")
+    except Exception as e:
+        logger.error(f"第八屏构建失败: {e}", exc_info=True)
 
     # ── 第七屏：Hop-2 大额资金穿透与长期仓位接力扫描 ──
     screen7_data = []
