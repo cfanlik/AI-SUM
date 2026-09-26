@@ -79,6 +79,7 @@ class TokenEngineData:
     hold_delta_72h_pct: float | None = None    # 72h 固定吸筹队列持仓变化率 (%)
     acc_count_latest:   int = 0                 # 最新快照吸筹地址数 (防误杀门禁)
     price_now_ret:      float | None = None     # 信号首发至今价格收益率 (%)
+    retention_7d:       float = 0.0             # 7d 锁仓留存率 (%)
 
 
 def get_connection() -> sqlite3.Connection:
@@ -453,12 +454,15 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
         try:
             for k, t in tokens.items():
                 row_th = conn.execute("""
-                    SELECT price_now_ret FROM token_history
+                    SELECT price_now_ret, retention_7d FROM token_history
                     WHERE lower(token_address) = lower(?)
                     ORDER BY computed_date DESC LIMIT 1
                 """, (t.token_address,)).fetchone()
-                if row_th and row_th["price_now_ret"] is not None:
-                    t.price_now_ret = round(float(row_th["price_now_ret"]), 2)
+                if row_th:
+                    if row_th["price_now_ret"] is not None:
+                        t.price_now_ret = round(float(row_th["price_now_ret"]), 2)
+                    if row_th["retention_7d"] is not None:
+                        t.retention_7d = round(float(row_th["retention_7d"]), 2)
         except Exception as _eth:
             logger.debug("token_history 收益补全异常: %s", _eth)
     except Exception as _e:
