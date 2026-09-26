@@ -77,6 +77,8 @@ def _render_screen8_table(items: list[dict]) -> list[str]:
             status_badge = "🚫 **一票否决**"
         elif status_badge == "DIST_WARN":
             status_badge = "⚠️ **出货阻断**"
+        elif status_badge == "CHURN_ALERT":
+            status_badge = "⚠️ **筹码松动**"
         lines.append(
             f"| `{d.get('confidence_tier', 'L3-Watch')}` | {tok_cell} | {d.get('meta_score', 0.0):.2f} | {calib_str} | {d.get('consec_acc', 0)} 轮 | {d.get('retention_7d', 0.0):.1f}% | {d.get('score_sigma', 0.0):.2f} | {status_badge} | {d.get('action_guide', '')} |"
         )
