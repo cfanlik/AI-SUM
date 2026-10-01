@@ -19,7 +19,8 @@ def audit_and_bind_identity(sum_db: str, select_db: str) -> list[dict]:
     q.row_factory = sqlite3.Row
 
     # 1. 提取 A 原始事件
-    TARGET = {'ACC_ACCELERATING', 'CONTROLLED'}
+    # 兼容 PR #214 后的统一 ACCUMULATING 阶段以及历史 ACC_ACCELERATING / CONTROLLED
+    TARGET = {'ACCUMULATING', 'ACC_ACCELERATING', 'CONTROLLED'}
     meta = s.execute(
         'SELECT scan_time, chain, token_address, token_symbol, stage, engine_hits '
         'FROM meta_snapshots '

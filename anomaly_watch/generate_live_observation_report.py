@@ -247,6 +247,16 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
         print(f"读取门禁清单异常，默认拦截: {e}")
         evaluation_reason = "INSUFFICIENT_TRAINING_SAMPLE"
 
+    if git_commit == "UNKNOWN":
+        try:
+            import subprocess
+            git_commit = subprocess.check_output(
+                ["git", "-C", ROOT_DIR, "rev-parse", "--short", "HEAD"],
+                text=True
+            ).strip()
+        except Exception:
+            pass
+
     sum_db = os.getenv("SUM_DB", "/opt/AI-SUM/select-sum.db")
     events_rows = []
 
