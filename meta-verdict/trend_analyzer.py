@@ -85,9 +85,9 @@ def compute_token_series(conn: sqlite3.Connection, chain: str, token_address: st
     elif metric.score_delta_5 < -1.0:
         metric.trend_category = "动能衰减"
     else:
-        metric.trend_category = "温和演进"
+        metric.trend_category = "温和演进" if current_score >= 3.0 else "低位震荡"
 
-    # V/L 换手疲劳度检测及增量自洽定性 (彻底消除负分还判定为稳步递增的Bug)
+    # V/L 换手疲劳度检测及增量自洽定性 (彻底消除负分或低分还判定为稳步递增的Bug)
     delta = metric.score_delta_5
     if current_vl > 10.0:
         metric.vl_fatigue = True
@@ -101,7 +101,10 @@ def compute_token_series(conn: sqlite3.Connection, chain: str, token_address: st
     elif delta >= 2.0:
         metric.summary_thesis = f"得分加速上攻爆发(Δ{delta:+.1f})"
     elif delta > 0.5:
-        metric.summary_thesis = f"得分轨迹稳步攀升(Δ{delta:+.1f})"
+        if current_score >= 3.0:
+            metric.summary_thesis = f"得分轨迹稳步攀升(Δ{delta:+.1f})"
+        else:
+            metric.summary_thesis = f"低位微幅震荡(Δ{delta:+.1f}，未脱离弱势区间)"
     else:
         metric.summary_thesis = f"多空窄幅拉锯震荡(Δ{delta:+.1f})"
 

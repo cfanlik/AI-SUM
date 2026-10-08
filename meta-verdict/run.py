@@ -121,6 +121,10 @@ def main():
             "calibrated_score":   getattr(r, "calibrated_score", 0.0),
             "lifecycle_status":   getattr(r, "lifecycle_status", "NORMAL"),
             "fit_action_guide":   getattr(r, "fit_action_guide", ""),
+            "dump_penalty":       getattr(r, "dump_penalty", 0.0),
+            "dump_reasons":       getattr(r, "dump_reasons", ""),
+            "price_now_ret":      getattr(r, "price_now_ret", None),
+            "hold_delta_72h_pct": getattr(r, "hold_delta_72h_pct", None),
         })
 
     # ── 矛盾检测 ──
@@ -151,14 +155,15 @@ def main():
             r.fit_action_guide = calib.action_guide
             r._calib_result = calib
 
-        # 原子写穿回补 meta_snapshots 中的校准字段
+        # 原子写穿回补 meta_snapshots 中的校准字段与价格偏离度
         conn.executemany("""
             UPDATE meta_snapshots 
-            SET fit_score_delta = ?, calibrated_score = ?, lifecycle_status = ?, fit_action_guide = ?
+            SET fit_score_delta = ?, calibrated_score = ?, lifecycle_status = ?, fit_action_guide = ?, price_now_ret = ?
             WHERE scan_time = ? AND chain = ? AND lower(token_address) = lower(?)
         """, [
             (getattr(r, "fit_score_delta", 0.0), getattr(r, "calibrated_score", 0.0),
              getattr(r, "lifecycle_status", "NORMAL"), getattr(r, "fit_action_guide", ""),
+             getattr(r, "price_now_ret", None),
              scan_time, r.chain, r.token_address)
             for r in all_arbitrated
         ])

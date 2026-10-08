@@ -74,6 +74,38 @@ def calculate_fit_calibration(res, token_data, conn: sqlite3.Connection = None) 
     status = "NORMAL"
     guide = "中性观察"
 
+    # ── 门禁 0.5 [ALGO-01 前置熔断]: 二级市场价格破位一票否决硬门禁 ──
+    price_ret = getattr(res, "price_now_ret", None)
+    if price_ret is None and token_data:
+        price_ret = getattr(token_data, "price_now_ret", None)
+    if price_ret is None and conn:
+        try:
+            row_p = conn.execute(
+                "SELECT price_now_ret FROM token_history WHERE lower(token_address) = lower(?) ORDER BY computed_date DESC LIMIT 1",
+                (res.token_address,)
+            ).fetchone()
+            if row_p and row_p[0] is not None:
+                price_ret = round(float(row_p[0]), 2)
+        except Exception:
+            pass
+
+    if price_ret is not None and price_ret <= -15.0:
+        # 价格下行破位 >= 15%，绝对阻断 ACCELERATING 状态，剥夺吸筹动能并扣分惩罚
+        delta = -1.20
+        status = "DECAY_BREAKDOWN"
+        guide = f"价格下行破位({price_ret:.1f}%)，动能衰竭严禁盲目抄底"
+        final_score = round(max(0.0, res.meta_score + delta), 2)
+        return FitCalibrationResult(
+            token_address=res.token_address,
+            calibrated_score=final_score,
+            fit_delta=round(delta, 2),
+            consec_acc=consec,
+            score_sigma=sigma,
+            retention_7d=retention,
+            lifecycle_status=status,
+            action_guide=guide
+        )
+
     # 1. 动静互补与连续吸筹模型 (结合 retention_7d 存量与 consec 动能)
     if consec >= 7:
         if retention >= 70.0:
@@ -90,9 +122,10 @@ def calculate_fit_calibration(res, token_data, conn: sqlite3.Connection = None) 
             status = "CHURN_ALERT"
             guide = f"大户留存骤降({retention:.1f}%)，筹码严重流失"
         else:
-            delta += 0.80
-            status = "ACCELERATING"
-            guide = "核心强动能，持续蓄力"
+            # 修复漏洞：历史留存数据缺失/为0时，严禁盲目判定加速蓄力，回退 NORMAL
+            delta += 0.00
+            status = "NORMAL"
+            guide = "历史留存数据缺失，维持中性观察"
     elif consec >= 3:
         if retention >= 70.0:
             delta += 0.70  # 0.40 (动能) + 0.30 (锁仓安全垫)
@@ -107,9 +140,10 @@ def calculate_fit_calibration(res, token_data, conn: sqlite3.Connection = None) 
             status = "NORMAL"
             guide = "动能初现但留存偏低，观察沉淀"
         else:
-            delta += 0.40
-            status = "ACCELERATING"
-            guide = "多轮持续吸筹，动能健康"
+            # 修复漏洞：历史留存数据缺失/为0时，回退 NORMAL
+            delta += 0.00
+            status = "NORMAL"
+            guide = "历史留存数据缺失，维持中性观察"
     else:
         if retention >= 70.0:
             delta += 0.30
@@ -186,7 +220,7 @@ def build_screen8_radar_data(all_arbitrated: list, conn: sqlite3.Connection = No
         d for d in valid_items 
         if d["confidence_tier"] in ("L1-Alpha", "L1-Squeeze", "L1-Special") 
         and d["meta_score"] >= 7.0
-        and d["lifecycle_status"] not in ("OVERHEATING", "HIGH_DIVERGENCE", "DIST_WARN", "CHURN_ALERT")
+        and d["lifecycle_status"] not in ("OVERHEATING", "HIGH_DIVERGENCE", "DIST_WARN", "CHURN_ALERT", "DECAY_BREAKDOWN")
     ]
     l1_candidates.sort(key=lambda x: x["calibrated_score"], reverse=True)
     l1_top = l1_candidates[:5]
@@ -195,7 +229,7 @@ def build_screen8_radar_data(all_arbitrated: list, conn: sqlite3.Connection = No
     l2_candidates = [
         d for d in valid_items 
         if d["confidence_tier"] in ("L2-Bet", "L2-Speculative") 
-        and d["lifecycle_status"] not in ("OVERHEATING", "HIGH_DIVERGENCE", "DIST_WARN", "CHURN_ALERT")
+        and d["lifecycle_status"] not in ("OVERHEATING", "HIGH_DIVERGENCE", "DIST_WARN", "CHURN_ALERT", "DECAY_BREAKDOWN")
     ]
     l2_candidates.sort(key=lambda x: x["calibrated_score"], reverse=True)
     l2_top = l2_candidates[:5]
@@ -204,10 +238,10 @@ def build_screen8_radar_data(all_arbitrated: list, conn: sqlite3.Connection = No
     # 包含 OVERHEATING / HIGH_DIVERGENCE / DIST_WARN / CHURN_ALERT 或 score_sigma >= 1.6
     alert_candidates = [
         d for d in items 
-        if d["lifecycle_status"] in ("OVERHEATING", "HIGH_DIVERGENCE", "DIST_WARN", "CHURN_ALERT")
+        if d["lifecycle_status"] in ("OVERHEATING", "HIGH_DIVERGENCE", "DIST_WARN", "CHURN_ALERT", "DECAY_BREAKDOWN")
         or d["score_sigma"] >= 1.6
     ]
-    severity_map = {"DIST_WARN": 4, "CHURN_ALERT": 3, "OVERHEATING": 2, "HIGH_DIVERGENCE": 1}
+    severity_map = {"DECAY_BREAKDOWN": 5, "DIST_WARN": 4, "CHURN_ALERT": 3, "OVERHEATING": 2, "HIGH_DIVERGENCE": 1}
     alert_candidates.sort(
         key=lambda x: (severity_map.get(x["lifecycle_status"], 0), x["score_sigma"]),
         reverse=True
@@ -220,7 +254,7 @@ def build_screen8_radar_data(all_arbitrated: list, conn: sqlite3.Connection = No
         d for d in valid_items 
         if d["confidence_tier"] == "L3-Watch" 
         and d["consec_acc"] >= 7
-        and d["lifecycle_status"] not in ("DIST_WARN", "CHURN_ALERT")
+        and d["lifecycle_status"] not in ("DIST_WARN", "CHURN_ALERT", "DECAY_BREAKDOWN")
     ]
     l3_candidates.sort(key=lambda x: (x["consec_acc"], x["calibrated_score"]), reverse=True)
     l3_top = l3_candidates[:5]
