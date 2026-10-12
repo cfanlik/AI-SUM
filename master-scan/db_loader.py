@@ -28,7 +28,8 @@ def get_connection() -> sqlite3.Connection:
     通过 PRAGMA query_only=ON 确保对原始数据库只读访问，不产生任何写操作。
     调用方负责 conn.close()。
     """
-    conn = sqlite3.connect(config.SUM_DB_PATH)
+    conn = sqlite3.connect(config.SUM_DB_PATH, timeout=60.0)
+    conn.execute('PRAGMA busy_timeout = 60000;')
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     # ATTACH 原始库（注意 sqlite3 的 PRAGMA query_only=ON 会作用于整个主连接导致建表报错，故移除）

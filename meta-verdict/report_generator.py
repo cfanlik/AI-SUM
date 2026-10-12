@@ -604,6 +604,52 @@ def generate_report(
             md_lines.extend([""])
             md_lines.extend(_render_screen8_table(screen8_data))
 
+    # ── 第九屏: 全网 CEX 资金流时序加速度与筹码背离雷达 (CEX Flow Delta & Microstructure Radar) ──
+    try:
+        from cex_divergence_analyzer import analyze_cex_flow_divergence
+        div_res = analyze_cex_flow_divergence(all_arbitrated)
+        top_alerts = div_res.get("top_alerts", [])
+        micro_matrix = div_res.get("micro_matrix", [])
+        stats = div_res.get("stats", {})
+        
+        if top_alerts or micro_matrix:
+            md_lines.extend([
+                "",
+                "---",
+                "",
+                "## 🌊 第九屏：全网 CEX 资金流时序加速度与筹码背离雷达 (CEX Flow Delta & Microstructure Radar)",
+                f"> **数据源**: 官方 ChainAlert JSON-RPC 3日时序全量拟合 ({stats.get('prev_batch', '')} → {stats.get('latest_batch', '')}) | **覆盖率**: AI-SUM 标的 {stats.get('aisum_covered', 0)} 个 ({stats.get('coverage_pct', 0.0):.1f}%)",
+                "> **量化维度**: `流向加速度 (Δflow)` · `微观均额 (Ticket Size)` · `3d一致性 (Consistency)` · `DEX-CEX 时空背离`",
+                "",
+                "### 🚦 看板 A：CEX 资金流阶跃异动与多空背离 Top 15 (加速度 Δ ≥ 20%+)",
+                "",
+                "| 代币 | 24h 净流量 | 环比变化量 (Δ USD) | 变化幅度 (Δ%) | 交易笔数 (Tx) | 单笔均额 | 3d 一致性 | 微观群体形态 | 异动定性与风控预警 |",
+                "| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |",
+            ])
+            for r in top_alerts:
+                sym_str = format_token_cell(r["token"], "ALL")
+                net_str = f"${r['net_latest']:+,.0f}"
+                delta_str = f"${r['flow_delta']:+,.0f}"
+                pct_str = f"**{r['flow_delta_pct']:+.1f}%**"
+                tx_str = f"{r['tx_latest']} ({r['tx_delta_pct']:+.1f}%)"
+                ticket_str = f"${r['ticket_latest']:,.0f}"
+                cons_str = f"{r['consistency_pct']:.0f}% 提现"
+                crowd = r["crowd_type"]
+                warn = r["warning_msg"]
+                md_lines.append(f"| {sym_str} | {net_str} | {delta_str} | {pct_str} | {tx_str} | {ticket_str} | {cons_str} | {crowd} | {warn} |")
+
+            md_lines.extend([
+                "",
+                "### 👥 看板 B：筹码微观结构与散户/巨鲸背离矩阵 (Microstructure Matrix)",
+                "",
+                "| 行为分类 | 代表标的 | 交易笔数 | 单笔均额 | 物理行为图景 | 推荐应对策略 |",
+                "| :--- | :--- | :---: | :---: | :--- | :--- |",
+            ])
+            for m in micro_matrix:
+                md_lines.append(f"| **{m['category']}** | {m['tokens']} | {m['tx_range']} | **{m['ticket_range']}** | {m['desc']} | {m['strategy']} |")
+    except Exception as e:
+        logger.error(f"第九屏构建失败: {e}", exc_info=True)
+
     md_lines.extend([
         "",
         "---",
