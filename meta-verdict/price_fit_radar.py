@@ -70,6 +70,42 @@ def calculate_fit_calibration(res, token_data, conn: sqlite3.Connection = None) 
             action_guide="风控拦截 / 严禁介入"
         )
 
+    # 门禁 0.1: CEX 资金流拟合与仲裁前置核心状态继承
+    curr_status = getattr(res, "lifecycle_status", "")
+    if curr_status == "ULTRA_ACC":
+        return FitCalibrationResult(
+            token_address=res.token_address,
+            calibrated_score=round(res.meta_score + 1.10, 2),
+            fit_delta=1.10,
+            consec_acc=consec,
+            score_sigma=sigma,
+            retention_7d=retention,
+            lifecycle_status="ULTRA_ACC",
+            action_guide="顶级真金共振，现货分批建仓 / 中长线持有"
+        )
+    elif curr_status == "OVERHEATING":
+        return FitCalibrationResult(
+            token_address=res.token_address,
+            calibrated_score=round(max(0.0, res.meta_score - 0.50), 2),
+            fit_delta=-0.50,
+            consec_acc=consec,
+            score_sigma=sigma,
+            retention_7d=retention,
+            lifecycle_status="OVERHEATING",
+            action_guide="现货高位止盈 / 规避追高"
+        )
+    elif curr_status == "DECAY_BREAKDOWN":
+        return FitCalibrationResult(
+            token_address=res.token_address,
+            calibrated_score=round(max(0.0, res.meta_score - 1.20), 2),
+            fit_delta=-1.20,
+            consec_acc=consec,
+            score_sigma=sigma,
+            retention_7d=retention,
+            lifecycle_status="DECAY_BREAKDOWN",
+            action_guide="一票否决阻断 / 严禁抄底"
+        )
+
     delta = 0.0
     status = "NORMAL"
     guide = "中性观察"

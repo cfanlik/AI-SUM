@@ -71,3 +71,7 @@ HOP2_ACC_BONUS = {
     "medium": 0.8,   # hop2_acc_pct >= 15%
     "low":    0.0,   # hop2_acc_pct < 15%
 }
+
+# ── CEX 资金流拟合与 Watchdog 熔断 (SSOT 规范) ──
+CEX_FLOW_ENABLED   = True
+CEX_FLOW_MAX_HOURS = 24.0

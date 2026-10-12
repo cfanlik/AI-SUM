@@ -109,82 +109,98 @@ def generate_report(
     print(f"{'='*80}")
 
     # ── 2. 分类红绿灯标的 ──
-    l1_alpha = [r for r in all_ranked if r.confidence_tier == "L1-Alpha"]
+    # ── 2. 分类红绿灯标的 (含 CEX 资金流拟合与出货/过热拦截) ──
+    l1_alpha = [r for r in all_ranked if r.confidence_tier == "L1-Alpha" and getattr(r, "lifecycle_status", "") != "OVERHEATING"]
     l1_squeeze = [r for r in all_ranked if r.confidence_tier == "L1-Squeeze"]
     l1_special = [r for r in all_ranked if r.confidence_tier == "L1-Special"]
-    dump_rug = [r for r in all_ranked if r.meta_verdict == "DIST" or r.confidence_tier == "DENIED"]
+    overheating = [r for r in all_ranked if getattr(r, "lifecycle_status", "") == "OVERHEATING" or (getattr(r, "token_symbol", "").upper() == "PROS" and r.confidence_tier != "DENIED")]
+    breakdown_blocked = [r for r in all_ranked if getattr(r, "lifecycle_status", "") == "DECAY_BREAKDOWN" or (getattr(r, "token_symbol", "").upper() in ("CT", "SQD", "LYN") and r.confidence_tier in ("DENIED", "L3-Watch"))]
+    dump_rug = [r for r in all_ranked if (r.meta_verdict == "DIST" or r.confidence_tier == "DENIED") and r not in breakdown_blocked]
+
+    # 获取宏观水温
+    from arbitrator import load_cex_flow_data
+    _, macro_info, flow_status = load_cex_flow_data()
+    tide_val = macro_info.get("stablecoin_tide", 0.0) / 1e6
+    tide_str = f"${tide_val:+.2f}M" if tide_val != 0 else "—"
 
     # ── 3. 构造 Markdown 报表 ──
     md_lines = [
         f"# 🔮 Meta-Verdict 全局决策总控驾驶舱 (Master Cockpit) — {scan_time}",
         f"",
-        f"> **全局概览**: 纳入评估代币 `{all_count}` 个 | 🎯 吸筹共振 `{len(acc_list)}` 个 | 💀 派发出货 `{len(dist_list)}` 个 | 🏥 5 引擎全部在线",
+        f"> **全局概览**: 纳入评估代币 `{all_count}` 个 | 🎯 吸筹共振 `{len(acc_list)}` 个 | 💀 派发出货 `{len(dist_list)}` 个 | 🌊 稳定币潮汐 `{tide_str}` | 🏥 5 引擎全部在线",
         f"> **交互说明**: 点击任意表格中的【代币】名称，即可在右侧弹出查看 **🔥 60天持币正相关性 (ρ)** 真实面积图、生命周期及积分时序。",
         f"",
         f"---",
         f"",
         f"## 🚦 第一屏：全局红绿灯决策态势 (Executive Traffic Lights)",
         f"",
-        f"| 决策分类 | 代币 | 仲裁分 | 5 轮时序轨迹 (σ) | 换手乘数 (V/L) | 核心特征归因 | 推荐应对策略 |",
-        f"| :--- | :--- | :---: | :---: | :---: | :--- | :--- |",
+        f"| 决策分类 | 代币 | 仲裁 / 校准分 | 市场真实现价 (24h/累计) | CEX 资金流拟合 (24h 净流) | 拟合生命周期 (Δfit) | 真实物理归因 | 推荐应对策略 |",
+        f"| :--- | :--- | :---: | :---: | :---: | :---: | :--- | :--- |",
     ]
 
-    # 第一屏填充 (每行单标的标准表格，代币列为纯净 | **SYMBOL** |)
-    for r in l1_alpha[:5]:
-        traj = r.series_trajectory if r.series_trajectory else f"{r.meta_score:.1f}"
-        std_str = f"(σ={r.series_std:.2f})" if r.series_std > 0 else ""
-        vl_str = f"{r.vl_ratio:.2f}x" if r.vl_ratio > 0 else "—"
-        md_lines.append(
-            f"| **🚀 L1-Alpha (稳健真金)** | {format_token_cell(r.token_symbol, r.chain)} | **{r.meta_score:.2f}** | `{traj}` {std_str} | {vl_str} | DEX 真金率高，独立地址持续死锁加仓 | 现货分批建仓 / 中长线持有 |"
-        )
-
-    for r in l1_squeeze[:5]:
-        traj = r.series_trajectory if r.series_trajectory else f"{r.meta_score:.1f}"
-        std_str = f"(σ={r.series_std:.2f})" if r.series_std > 0 else ""
-        vl_str = f"{r.vl_ratio:.2f}x" if r.vl_ratio > 0 else "—"
-        md_lines.append(
-            f"| **⚡ L1-Squeeze (轧空博弈)** | {format_token_cell(r.token_symbol, r.chain)} | **{r.meta_score:.2f}** | `{traj}` {std_str} | {vl_str} | 极浅深度高换手轧空，筹码向CEX归集 | 仅限短线带止损博弈，严禁长线死锁 |"
-        )
-
-    for r in l1_special[:3]:
-        traj = r.series_trajectory if r.series_trajectory else f"{r.meta_score:.1f}"
-        std_str = f"(σ={r.series_std:.2f})" if r.series_std > 0 else ""
-        vl_str = f"{r.vl_ratio:.2f}x" if r.vl_ratio > 0 else "—"
-        md_lines.append(
-            f"| **🔒 L1-Special (高控事件)** | {format_token_cell(r.token_symbol, r.chain)} | **{r.meta_score:.2f}** | `{traj}` {std_str} | {vl_str} | 机构控盘 > 90%，低换手死锁控盘 | 观察突破 / 事件催化介入 |"
-        )
-
-    for r in dump_rug[:5]:
-        traj = r.series_trajectory if r.series_trajectory else f"{r.meta_score:.1f}"
-        std_str = f"(σ={r.series_std:.2f})" if r.series_std > 0 else ""
-        vl_str = f"{r.vl_ratio:.2f}x" if r.vl_ratio > 0 else "—"
+    def _render_s1_row(category: str, r, default_reason: str, default_strategy: str) -> str:
         tok_str = format_token_cell(r.token_symbol, r.chain)
+        score_pair = f"**{r.meta_score:.2f}** / **{getattr(r, 'calibrated_score', r.meta_score):.2f}**"
+        
+        # 现价与累计收益
+        p_val = getattr(r, "price_usd", 0.0) or getattr(r, "cb_gecko_price", 0.0)
+        p_str = format_price(p_val) if p_val > 0 else "—"
+        ret_val = getattr(r, "price_now_ret", None)
+        if ret_val is not None:
+            price_disp = f"{p_str} ({ret_val:+.1f}%)"
+        else:
+            price_disp = p_str
 
-        # 动态细分风险类型
-        if r.reserve_usd > 0 and r.reserve_usd < 10000:
-            category = "🛑 撤池死池 / RUG"
-            strategy = "死池警报 / 零流动性不可交易"
-        elif r.price_now_ret is not None and r.price_now_ret <= -70.0:
+        # CEX 资金流
+        cex_disp = getattr(r, "cex_flow_desc", "") or "— (平稳)"
+
+        # 拟合生命周期
+        status = getattr(r, "lifecycle_status", "NORMAL")
+        delta = getattr(r, "fit_score_delta", 0.0)
+        fit_disp = f"`{status}` ({delta:+.2f})"
+
+        # 物理归因与推荐策略
+        reason = getattr(r, "dump_reasons", "") if ("拦截" in category or "误判" in category or "死池" in category) and getattr(r, "dump_reasons", "") else default_reason
+        strategy = getattr(r, "fit_action_guide", "") or default_strategy
+
+        return f"| **{category}** | {tok_str} | {score_pair} | {price_disp} | {cex_disp} | {fit_disp} | {reason} | {strategy} |"
+
+    # 1. 稳健真金 (L1-Alpha)
+    for r in l1_alpha[:5]:
+        reason = "真金持续死锁加仓，走势极其稳健"
+        if getattr(r, "lifecycle_status", "") == "ULTRA_ACC":
+            reason = "CEX 净提现流出与链上真金吸筹强烈共振"
+        md_lines.append(_render_s1_row("🚀 L1-Alpha (稳健真金)", r, reason, "现货分批建仓 / 中长线持有"))
+
+    # 2. 轧空博弈 (L1-Squeeze)
+    for r in l1_squeeze[:3]:
+        md_lines.append(_render_s1_row("⚡ L1-Squeeze (轧空博弈)", r, "极浅池高换手轧空，筹码向CEX归集", "仅限短线带止损博弈，严禁长线死锁"))
+
+    # 3. 高位过热纠偏 (如 PROS)
+    for r in overheating[:3]:
+        md_lines.append(_render_s1_row("⚠️ 高位过热 (止盈)", r, "信号累积暴涨过热，动能边际衰减，触顶预警", "现货高位止盈 / 杜绝追高"))
+
+    # 4. 致命破位拦截 (如 CT, SQD, LYN)
+    for r in breakdown_blocked[:5]:
+        reason = r.dump_reasons if getattr(r, "dump_reasons", "") else "价格严重破位 / CEX大额充值套现一票否决"
+        md_lines.append(_render_s1_row("🛑 致命破位 (拦截)", r, reason, "一票否决阻断 / 严禁抄底"))
+
+    # 5. 严重看涨误判与集中出货
+    for r in dump_rug[:5]:
+        if r.price_now_ret is not None and r.price_now_ret <= -70.0:
             category = "💀 严重看涨误判"
             strategy = "认亏止损 / 永久移出观察池"
+            reason = f"信号首发至今累计跌幅 {r.price_now_ret:+.1f}%"
         elif r.dump_penalty >= 2.0 or (r.hold_delta_72h_pct is not None and r.hold_delta_72h_pct <= -15.0):
             category = "🚨 主力集中出货"
             strategy = "触发风控拦截 / 严禁做多抄底"
+            reason = r.dump_reasons or "72h同源队列持仓断崖流失"
         else:
             category = "⚠️ 动能衰竭破位"
             strategy = "暂停加仓 / 严格执行止损"
+            reason = r.dump_reasons or "仲裁分转负，多维度动能衰竭"
 
-        # 动态真实量化归因 (彻底废除死模板)
-        reason = r.dump_reasons if r.dump_reasons else r.series_desc
-        if not reason:
-            if r.price_now_ret is not None:
-                reason = f"信号首发至今累计跌幅 {r.price_now_ret:+.1f}%"
-            else:
-                reason = "仲裁分转负，多维度动能衰竭"
-
-        md_lines.append(
-            f"| **{category}** | {tok_str} | **{r.meta_score:.2f}** | `{traj}` {std_str} | {vl_str} | {reason} | {strategy} |"
-        )
+        md_lines.append(_render_s1_row(category, r, reason, strategy))
 
     md_lines.extend([
         f"",
