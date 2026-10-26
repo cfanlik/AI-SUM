@@ -629,12 +629,21 @@ def generate_report(
         micro_matrix = div_res.get("micro_matrix", [])
         stats = div_res.get("stats", {})
         
-        if top_alerts or micro_matrix:
+        if stats.get("status") == "SOURCE_STALE":
             md_lines.extend([
                 "",
                 "---",
                 "",
                 "## 🌊 第九屏：全网 CEX 资金流时序加速度与筹码背离雷达 (CEX Flow Delta & Microstructure Radar)",
+                f"> ⚠️ **数据源时效熔断**: CEX 资金流快照已过期 ({stats.get('latest_batch', '')}，距今 {stats.get('stale_hours', 0)}h > 24h)，已安全阻断陈旧差分数据透传。待新批次入库后自动恢复。",
+                ""
+            ])
+        elif top_alerts or micro_matrix:
+            md_lines.extend([
+                "",
+                "---",
+                "",
+                "## 🌊 第九屏：全网 CEX 资金流时序加速度与筹码背离雷达 (CEX Flow Delta & Microstructure Radar)", 
                 f"> **数据源**: 官方 ChainAlert JSON-RPC 3日时序全量拟合 ({stats.get('prev_batch', '')} → {stats.get('latest_batch', '')}) | **覆盖率**: AI-SUM 标的 {stats.get('aisum_covered', 0)} 个 ({stats.get('coverage_pct', 0.0):.1f}%)",
                 "> **量化维度**: `流向加速度 (Δflow)` · `微观均额 (Ticket Size)` · `3d一致性 (Consistency)` · `DEX-CEX 时空背离`",
                 "",

@@ -518,11 +518,11 @@ def arbitrate(token: TokenEngineData, hop2_pct: float = 0.0, conn: sqlite3.Conne
         res.stage = "WATCHLIST" if res.engine_hits >= 1 else "NEUTRAL"
 
     # 4. 拟合生命周期状态判定与纠偏
-    # 顶级真金判定: KITE, UAI, SOON 等持续净流出共振
+    # 顶级真金判定: KITE, UAI, SOON 或 CEX 资金流净流出共振
     if res.meta_score >= 7.0 and (res.cex_flow_status in ("OUTFLOW_ACC", "NEUTRAL") or sym in ("KITE", "UAI", "SOON")):
         if not is_breakdown and (t.price_now_ret is None or t.price_now_ret > -15.0):
             res.lifecycle_status = "ULTRA_ACC"
-            res.fit_action_guide = "现货分批建仓 / 中长线持有"
+            res.fit_action_guide = "现货分批建仓 / 中长线持有" 
 
     # 高位过热纠偏: PROS 等累计暴涨但动能衰竭
     if (t.price_now_ret is not None and t.price_now_ret >= 40.0 and sym == "PROS") or        (res.meta_score >= 8.0 and t.price_now_ret is not None and t.price_now_ret >= 50.0 and getattr(t, "series_std", 0) >= 1.2):

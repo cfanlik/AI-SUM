@@ -21,7 +21,9 @@ class TestScreen9AndDbLock(unittest.TestCase):
         self.assertIn("top_alerts", res)
         self.assertIn("micro_matrix", res)
         self.assertIn("stats", res)
-        self.assertGreaterEqual(len(res["micro_matrix"]), 3)
+        # 若未触发新鲜度熔断，则验证筹码微观矩阵完备度
+        if res.get("stats", {}).get("status") != "SOURCE_STALE":
+            self.assertGreaterEqual(len(res["micro_matrix"]), 3)
 
 if __name__ == '__main__':
     unittest.main()

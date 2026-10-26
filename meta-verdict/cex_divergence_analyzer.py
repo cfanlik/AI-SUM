@@ -7,6 +7,7 @@
 4. DEX-CEX 跨域时空多空背离指数 (Divergence Index)
 """
 from __future__ import annotations
+from datetime import datetime
 import os
 import sqlite3
 import logging
@@ -37,6 +38,36 @@ def analyze_cex_flow_divergence(all_arbitrated: Optional[List[Any]] = None) -> D
 
         latest_batch = batches[0]
         prev_batch = batches[1]
+
+        # ── 新鲜度门禁 (Watchdog Gate): 超过 24h 视为数据源停滞，阻断陈旧时序差分 ──
+        batch_dt = None
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S"):
+            try:
+                batch_dt = datetime.strptime(latest_batch.split(".")[0].replace("Z", ""), fmt)
+                break
+            except Exception:
+                continue
+
+        now = datetime.now()
+        max_hours = 24.0
+        if batch_dt and (now - batch_dt).total_seconds() / 3600.0 > max_hours:
+            diff_h = (now - batch_dt).total_seconds() / 3600.0
+            logger.warning(
+                "第九屏检测到 CEX 快照已过期 (批次: %s, 距今 %.1fh > %.1fh)，触发静默熔断阻断幽灵输出",
+                latest_batch, diff_h, max_hours
+            )
+            return {
+                "top_alerts": [],
+                "micro_matrix": [],
+                "stats": {
+                    "total_tokens": 0,
+                    "coverage_pct": 0.0,
+                    "status": "SOURCE_STALE",
+                    "latest_batch": latest_batch,
+                    "stale_hours": round(diff_h, 1),
+                    "message": f"数据源过期熔断 (快照: {latest_batch}, 距今 {diff_h:.1f}h)"
+                }
+            }
 
         # 读取最新批次的全部代币
         latest_rows = conn.execute("""
