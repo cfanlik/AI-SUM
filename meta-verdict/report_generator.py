@@ -5,6 +5,7 @@ meta-verdict 报告生成器 (Master Cockpit 决策总控驾驶舱终极标准�
 """
 from __future__ import annotations
 import os
+import sys
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -689,6 +690,9 @@ def generate_report(
 
     # --- 第十屏：BSC Alpha 庄家低杠杆建仓与独立行情过滤雷达 ---
     try:
+        _ai_sum_root = str(Path(__file__).resolve().parent.parent)
+        if _ai_sum_root not in sys.path:
+            sys.path.insert(0, _ai_sum_root)
         from alpha_oi_scan.alpha_filter import run_alpha_scan
         alpha_res = run_alpha_scan()
         if alpha_res:

@@ -1,10 +1,13 @@
+import os
 import sys
 import unittest
 import sqlite3
 from dataclasses import dataclass
 
-sys.path.insert(0, '/opt/AI-SUM')
-sys.path.insert(0, '/opt/AI-SUM/meta-verdict')
+from pathlib import Path
+_repo_dir = str(Path(__file__).resolve().parent.parent)
+sys.path.insert(0, _repo_dir)
+sys.path.insert(0, os.path.join(_repo_dir, 'meta-verdict'))
 
 import price_fit_radar as pfr
 import arbitrator as arb
