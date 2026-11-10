@@ -167,7 +167,21 @@ def run_alpha_scan(conn: sqlite3.Connection = None, oi_threshold: float = 0.25) 
     
     futures_rows = conn.execute(ft_query).fetchall()
 
-    # 2. 读取 Gecko 市值与链上 Top20 持仓
+    # 2. 预加载 alpha_tokens_daily 映射，杜绝循环内重复探测表与全表检索
+    has_alpha = bool(conn.execute("SELECT name FROM src_db.sqlite_master WHERE type='table' AND name='alpha_tokens_daily'").fetchone())
+    alpha_map = {}
+    if has_alpha:
+        try:
+            for ar in conn.execute("SELECT token_symbol, contract_address, chain FROM src_db.alpha_tokens_daily").fetchall():
+                if ar[0]:
+                    alpha_map[ar[0].upper()] = {
+                        "chain": ar[2] or "BSC",
+                        "address": ar[1] or ""
+                    }
+        except Exception as e:
+            logger.warning(f"加载 alpha_tokens_daily 异常: {e}")
+
+    # 3. 循环评估与精准剪枝 (带索引自愈与耗时压降)
     results = []
     inserted = []
 
@@ -180,46 +194,52 @@ def run_alpha_scan(conn: sqlite3.Connection = None, oi_threshold: float = 0.25) 
         price = float(r["mark_price"] or 0.0)
         pri_ex = r["primary_exchange"] or "BINANCE"
 
-        # 查市值
-        gk = conn.execute("""
-            SELECT COALESCE(NULLIF(market_cap_usd, 0), fdv_usd, 0), price_usd
-            FROM src_db.gecko_market_data
-            WHERE token_address = ?
-            ORDER BY scan_time DESC LIMIT 1
-        """, (addr,)).fetchone()
-        mcap = float(gk[0]) if gk else 0.0
+        alpha_info = alpha_map.get(sym)
+        chain = alpha_info["chain"] if alpha_info else ("BSC" if addr.startswith("0x") else "UNKNOWN")
+        if not addr and alpha_info and alpha_info["address"]:
+            addr = alpha_info["address"]
 
-        # 如果市值依然是 0，通过 token_names 或估算兜底
-        if mcap <= 0:
-            tn = conn.execute("SELECT market_cap_usd FROM src_db.token_names WHERE LOWER(token_address)=?", (addr.lower(),)).fetchone()
-            if tn and tn[0] and float(tn[0]) > 0:
-                mcap = float(tn[0])
+        mcap = 0.0
+        top20_ratio = 0.0
+        gain_90d = 1.0
 
-        # 查 Top 20 链上控盘度
-        top20_row = conn.execute("""
-            SELECT SUM(hold_percentage)
-            FROM src_db.bubblemap_holders
-            WHERE token_address = ? AND rank <= 20
-        """, (addr,)).fetchone()
-        top20_ratio = (float(top20_row[0]) / 100.0) if (top20_row and top20_row[0]) else 0.0
+        # 仅对具有有效链上合约地址的标的查询 Gecko 市值与链上 Top20 控盘
+        if addr.startswith("0x"):
+            gk = conn.execute("""
+                SELECT COALESCE(NULLIF(market_cap_usd, 0), fdv_usd, 0), price_usd
+                FROM src_db.gecko_market_data
+                WHERE token_address = ?
+                ORDER BY scan_time DESC LIMIT 1
+            """, (addr,)).fetchone()
+            if gk and gk[0]:
+                mcap = float(gk[0])
+            elif mcap <= 0:
+                tn = conn.execute("SELECT market_cap_usd FROM src_db.token_names WHERE LOWER(token_address)=?", (addr.lower(),)).fetchone()
+                if tn and tn[0] and float(tn[0]) > 0:
+                    mcap = float(tn[0])
 
-        # 查 90 天涨幅 (若无 90 天则以 60 天最低价作为基准)
-        low_row = conn.execute("""
-            SELECT MIN(mark_price)
-            FROM src_db.futures_snapshots
-            WHERE symbol = ? AND mark_price > 0
-        """, (sym,)).fetchone()
-        low_price = float(low_row[0]) if (low_row and low_row[0]) else price
-        gain_90d = round(price / low_price, 2) if low_price > 0 else 1.0
+            # 查 Top 20 链上控盘度：强制走 (chain, token_address, snapshot_time) 组合索引，杜绝无快照聚合与跨链漏查
+            if chain.upper() in ("BSC", "56") or "BSC" in chain.upper():
+                top20_row = conn.execute("""
+                    SELECT SUM(hold_percentage)
+                    FROM src_db.bubblemap_holders
+                    WHERE chain = 'bsc' AND token_address = ? AND rank <= 20
+                    AND snapshot_time = (
+                        SELECT MAX(snapshot_time) FROM src_db.bubblemap_holders WHERE chain = 'bsc' AND token_address = ?
+                    )
+                """, (addr, addr)).fetchone()
+                if top20_row and top20_row[0]:
+                    top20_ratio = float(top20_row[0]) / 100.0
 
-        # 判断是否在 alpha_tokens_daily 或 BSC 代币
-        alpha_row = conn.execute("""
-            SELECT chain FROM src_db.alpha_tokens_daily
-            WHERE token_symbol = ? OR LOWER(contract_address) = ?
-            ORDER BY id DESC LIMIT 1
-        """, (sym, addr.lower())).fetchone() if conn.execute("SELECT name FROM src_db.sqlite_master WHERE type='table' AND name='alpha_tokens_daily'").fetchone() else None
-
-        chain = alpha_row[0] if alpha_row else ("BSC" if addr.startswith("0x") else "UNKNOWN")
+        # 查 90 天最低价 (针对持仓 >= 1M 或关注标的)
+        if oi_usd >= 1000000 and price > 0:
+            low_row = conn.execute("""
+                SELECT MIN(mark_price)
+                FROM src_db.futures_snapshots
+                WHERE symbol = ? AND mark_price > 0
+            """, (sym,)).fetchone()
+            low_price = float(low_row[0]) if (low_row and low_row[0]) else price
+            gain_90d = round(price / low_price, 2) if low_price > 0 else 1.0
 
         token_meta = {
             "symbol": sym,

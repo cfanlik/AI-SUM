@@ -15,7 +15,13 @@ import argparse
 from datetime import datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+# 确保 meta-verdict 目录及 AI-SUM 项目根目录均加入 sys.path
+_current_dir = Path(__file__).resolve().parent
+_root_dir = _current_dir.parent
+if str(_current_dir) not in sys.path:
+    sys.path.insert(0, str(_current_dir))
+if str(_root_dir) not in sys.path:
+    sys.path.insert(0, str(_root_dir))
 
 import config
 from collector import get_connection, ensure_tables, collect_all_tokens, save_meta_result, ensure_hop2_tracking_table, collect_hop2_tracking
