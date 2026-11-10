@@ -376,6 +376,16 @@ def generate_report(
     if dump_pool:
         md_lines.extend([
             "",
+            "### 6. BSC Alpha 合约持仓独立行情与杠杆风控参数字典",
+            "| 字段 / 参数 | 物理定义与算法规则 | 阈值标准与决策含义 |",
+            "| :--- | :--- | :--- |",
+            "| **合约杠杆率 (OI/Mcap)** | 全网中心化交易所未平仓合约总价值与代币真实流通市值的比值 | `<= 25% (±10%)` 为低杠杆潜伏建仓期；`> 35%~70%` 为拉升逼空期；`> 70%~100%` 为超杠杆踩踏高危期 |",
+            "| **持仓增速 (24H ΔOI)** | 过去 24 小时全网 CEX 合约未平仓价值的百分比增幅 | `< 20%` 为平稳暗中吸筹；`> 30%` 为加速拉升或散户跟单过热 |",
+            "| **链上 Top20 控盘度** | BSC 链上前 20 大非交易所持币地址合计占流通总量的比例 | `>= 90% (±5%)` 具备绝对庄控定价权，可脱离大盘走出独立走势 |",
+            "| **90天涨幅倍数** | 当前价格相较于过去 90 天最低价的比值 (Price / Low_90d) | `< 5.0x` (或 < 10.0x) 排除已暴涨数倍的终局出货盘 |",
+            "| **决策分类: L1-Alpha-OI** | 满足全部 6 大建仓门槛（低杠杆 + 平稳吸筹 + 极高控盘 + 未暴涨） | 具备极高抗跌性与逆势爆发潜能，为现货埋伏首选 |",
+            "| **决策分类: L3-Crash-Risk** | OI/Mcap > 70% 或 24H 去杠杆 > 20% 且累计涨幅过大 | 极易发生连环爆仓崩塌，系统执行一票否决风控拦截 |",
+            "",
             "---",
             "",
             "## 🚨 第五屏：暴跌出货与严重看涨误判专项风控看板 (Crash & Heavy Distribution Radar)",
@@ -676,6 +686,40 @@ def generate_report(
     except Exception as e:
         logger.error(f"第九屏构建失败: {e}", exc_info=True)
 
+
+    # --- 第十屏：BSC Alpha 庄家低杠杆建仓与独立行情过滤雷达 ---
+    try:
+        from alpha_oi_scan.alpha_filter import run_alpha_scan
+        alpha_res = run_alpha_scan()
+        if alpha_res:
+            md_lines.extend([
+                "",
+                "---",
+                "",
+                "## 🔥 第十屏：BSC Alpha 庄家低杠杆建仓与独立行情过滤雷达 (Alpha BSC CEX-OI Setup Radar)",
+                "",
+                "> **核心逻辑**: 当大盘普跌或震荡时，满足 `OI / 流通市值 <= 25% (±10%)`、`24H OI 增幅 < 20%`、`链上 Top20 控盘 >= 90%` 且 `合约持仓 >= 5M` 的 BSC Alpha 标的展现出极高独立抗跌胜率与突击拉升潜能；反之，`OI / 流通市值 > 70%~100%` 属于超杠杆博弈危险区，极易发生多杀多连环爆仓踩踏。",
+                "",
+                "| 代币 (Ticker) | 决策阶段 (Stage) | 全网合约持仓 (CEX OI) | 交易所分布 (Top Ex) | 真实流通市值 (Mcap) | OI / Mcap (杠杆率) | 24H OI 增幅 (Δ) | 链上Top20控盘 | 90d涨幅倍数 | 独立行情定性与归因 | 推荐应对策略 |",
+                "| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- | :--- |",
+            ])
+            stage_order = {"🚀 L1-Alpha-OI": 1, "👀 L2-潜力蓄势": 2, "⚡ L2-Squeeze": 3, "🛑 L3-Crash-Risk": 4, "─ L4-观察/未达标": 5}
+            sorted_alpha = sorted(alpha_res, key=lambda x: (stage_order.get(x["stage"], 99), -x["total_oi_usd"]))
+            for item in sorted_alpha[:15]:
+                sym_str = f"**{item['symbol']}**"
+                stage_str = f"**{item['stage']}**"
+                oi_str = f"${item['total_oi_usd']/1e6:.1f}M"
+                ex_str = item.get("primary_exchange", "BINANCE")
+                mcap_str = f"${item['market_cap_usd']/1e6:.1f}M" if item["market_cap_usd"] > 0 else "—"
+                ratio_str = f"**{item['oi_mcap_ratio']*100:.1f}%**" if item["oi_mcap_ratio"] < 99 else "超标"
+                chg_str = f"{item['oi_change_24h']*100:+.1f}%"
+                top20_str = f"{item['top20_ratio']*100:.1f}%" if item['top20_ratio'] > 0 else "—"
+                gain_str = f"{item['gain_90d_ratio']:.1f}x"
+                verdict_str = item["verdict"]
+                strat_str = item["strategy"]
+                md_lines.append(f"| {sym_str} | {stage_str} | {oi_str} | {ex_str} | {mcap_str} | {ratio_str} | {chg_str} | {top20_str} | {gain_str} | {verdict_str} | {strat_str} |")
+    except Exception as e:
+        logger.error(f"第十屏构建失败: {e}", exc_info=True)
     md_lines.extend([
         "",
         "---",
