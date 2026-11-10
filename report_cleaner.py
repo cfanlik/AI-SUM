@@ -19,6 +19,7 @@ RULES = [
     ("unified",    "unified_*.md",   5),   # 压缩至 5 份
     ("whale",      "whale_*.md",     5),   # 压缩至 5 份
     ("meta",       "meta_*.md",      60),  # meta 驾驶舱 SSOT，保留 60 份支持回测
+    ("meta",       "alpha_oi_*.md",  30),  # Alpha OI 专报保留 30 份
     ("cost-basis", "cb_*.md",        5),   # 压缩至 5 份
     ("pump",       "pump_*.md",      5),   # 压缩至 5 份
     ("history",    "history_*.md",   5),   # 压缩至 5 份
@@ -71,7 +72,7 @@ def clean_legacy(dry_run=False, verbose=False):
                 continue
             if f.suffix == ".md" and not any(
                 f.name.startswith(p) for p in ["opus_", "whale_", "cb_", "meta_",
-                    "radar_", "unified_", "pump_", "history_", "tracking_", "week_", "month_"]
+                    "radar_", "unified_", "pump_", "history_", "tracking_", "week_", "month_", "alpha_oi_"]
             ):
                 if verbose or dry_run:
                     print(f"  {'[DRY] ' if dry_run else ''}删除非标准 {subdir}/{f.name}")
