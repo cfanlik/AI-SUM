@@ -102,8 +102,7 @@ def load_all_tokens(conn: sqlite3.Connection) -> list[dict]:
         bm_last_snapshot      AS latest_snapshot,
         datetime(bm_last_snapshot, '-30 days') AS earliest_snapshot
     FROM src_db.token_names
-    WHERE bm_last_snapshot >= datetime('now', '-7 days')
-      AND bm_snapshot_count >= :min_snap
+    WHERE bm_snapshot_count >= :min_snap
     ORDER BY chain, token_address
     """
     rows = conn.execute(sql, {

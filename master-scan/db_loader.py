@@ -101,8 +101,7 @@ def load_all_tokens(conn: sqlite3.Connection) -> list[dict]:
         bm_snapshot_count      AS snap_count,
         bm_last_snapshot       AS latest_snapshot
     FROM src_db.token_names
-    WHERE bm_last_snapshot >= datetime('now', '-7 days')
-      AND bm_snapshot_count >= 2
+    WHERE bm_snapshot_count >= 2
     ORDER BY chain, token_address
     """
     rows = conn.execute(sql).fetchall()
