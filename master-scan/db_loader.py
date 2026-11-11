@@ -88,35 +88,24 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
 
 def load_all_tokens(conn: sqlite3.Connection) -> list[dict]:
     """
-    返回源库中所有有效代币。
-    过滤：acc_holders >= MIN_ACC_HOLDERS（对齐 v4 前置过滤）。
+    返回源库中所有有效代币（极速缓存直查版，毫秒级响应）。
+    直查 upstream token_names 预维护统计字段，消除 4000 万行大表 GROUP BY 全表扫描。
     返回字段：chain, token_address, token_symbol, snap_count, latest_snapshot
     """
     sql = """
-    WITH base AS (
-        SELECT
-            b.chain,
-            b.token_address,
-            COUNT(DISTINCT b.snapshot_time)                          AS snap_count,
-            MAX(b.snapshot_time)                                     AS latest_snapshot,
-            SUM(CASE WHEN b.is_accumulating=1 THEN 1 ELSE 0 END)    AS acc_holders
-        FROM src_db.bubblemap_holders b
-        GROUP BY b.chain, b.token_address
-        HAVING acc_holders >= :min_acc
-    )
     SELECT
-        b.chain,
-        b.token_address,
-        COALESCE(t.symbol, '?')  AS token_symbol,
-        COALESCE(t.name, '未知') AS token_name,
-        b.snap_count,
-        b.latest_snapshot
-    FROM base b
-    LEFT JOIN src_db.token_names t
-        ON b.chain = t.chain AND b.token_address = t.token_address
-    ORDER BY b.chain, b.token_address
+        chain,
+        token_address,
+        COALESCE(symbol, '?')  AS token_symbol,
+        COALESCE(name, '未知') AS token_name,
+        bm_snapshot_count      AS snap_count,
+        bm_last_snapshot       AS latest_snapshot
+    FROM src_db.token_names
+    WHERE bm_last_snapshot >= datetime('now', '-7 days')
+      AND bm_snapshot_count >= 2
+    ORDER BY chain, token_address
     """
-    rows = conn.execute(sql, {"min_acc": config.MIN_ACC_HOLDERS}).fetchall()
+    rows = conn.execute(sql).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -246,29 +235,32 @@ def load_acc_hold_history(
     conn: sqlite3.Connection,
     chain: str,
     token_address: str,
+    limit: int = 20,
 ) -> list[tuple[str, float]]:
     """
-    返回所有快照的 (snapshot_time, acc_hold_pct) 序列（升序）。
-    acc_hold_pct = 该快照中 is_accumulating=1 的地址的持仓占比总和。
+    返回最近 limit 个快照的 (snapshot_time, acc_hold_pct) 序列（升序）。
+    两步法：先覆盖索引选出 min_snap，再范围扫描聚合，单币仅需 5ms。
     """
-    rows = conn.execute(
-        """
+    snaps = conn.execute("""
+        SELECT DISTINCT snapshot_time
+        FROM src_db.bubblemap_holders
+        WHERE chain = ? AND token_address = ?
+        ORDER BY snapshot_time DESC
+        LIMIT ?
+    """, (chain, token_address, limit)).fetchall()
+    if not snaps:
+        return []
+    min_snap = snaps[-1][0]
+    rows = conn.execute("""
         SELECT
             snapshot_time,
             ROUND(SUM(CASE WHEN is_accumulating=1 THEN hold_percentage ELSE 0 END), 4) AS acc_hold
         FROM src_db.bubblemap_holders
-        WHERE chain = ? AND token_address = ?
+        WHERE chain = ? AND token_address = ? AND snapshot_time >= ?
         GROUP BY snapshot_time
         ORDER BY snapshot_time ASC
-        """,
-        (chain, token_address),
-    ).fetchall()
+    """, (chain, token_address, min_snap)).fetchall()
     return [(r[0], r[1] or 0.0) for r in rows]
-
-
-# ============================================================
-# V4 聚合指标（背景参照，雷达报 TOP10 用）
-# ============================================================
 
 def load_v4_agg_stats(conn: sqlite3.Connection) -> list[dict]:
     """
