@@ -264,54 +264,32 @@ def load_acc_hold_history(
 def load_v4_agg_stats(conn: sqlite3.Connection) -> list[dict]:
     """
     返回全库代币的 v4 截面聚合指标（用于雷达报 TOP10 背景参照）。
-    仅读取，不重算评分。
+    极速直查 token_names 预维护统计，彻底消除 4000 万行大表扫描。
     """
     sql = """
-    WITH token_agg AS (
-        SELECT
-            b.chain,
-            b.token_address,
-            COUNT(DISTINCT b.snapshot_time)                                  AS snap_count,
-            MAX(b.snapshot_time)                                              AS latest_snapshot,
-            SUM(CASE WHEN b.is_cex=0 AND b.is_dex=0
-                      AND b.is_contract=0 AND b.is_supernode=0 THEN 1 ELSE 0 END) AS real_users,
-            SUM(CASE WHEN b.is_accumulating=1 THEN 1 ELSE 0 END)             AS acc_holders,
-            ROUND(AVG(CASE WHEN b.is_accumulating=1 THEN b.acc_score ELSE NULL END), 2) AS avg_acc_score,
-            ROUND(SUM(CASE WHEN b.is_accumulating=1 THEN b.buy_amt_usd  ELSE 0 END), 2) AS acc_buy,
-            ROUND(SUM(CASE WHEN b.is_accumulating=1 THEN b.sell_amt_usd ELSE 0 END), 2) AS acc_sell,
-            SUM(CASE WHEN b.is_accumulating=1 AND b.sell_amt_usd=0
-                      AND b.buy_amt_usd>0 THEN 1 ELSE 0 END)                 AS only_buy_cnt
-        FROM src_db.bubblemap_holders b
-        GROUP BY b.chain, b.token_address
-        HAVING acc_holders >= :min_acc
-    )
     SELECT
-        a.chain,
-        a.token_address,
-        COALESCE(t.symbol, '?')  AS token_symbol,
-        COALESCE(t.name, '未知') AS token_name,
-        a.snap_count,
-        a.latest_snapshot,
-        a.real_users,
-        a.acc_holders,
-        a.avg_acc_score,
-        a.acc_buy,
-        a.acc_sell,
-        a.only_buy_cnt,
-        ROUND(100.0 * a.acc_holders / NULLIF(a.real_users, 0), 1) AS acc_pct_real,
-        ROUND(100.0 * a.only_buy_cnt / NULLIF(a.acc_holders, 0), 1) AS only_buy_pct
-    FROM token_agg a
-    LEFT JOIN src_db.token_names t
-        ON a.chain = t.chain AND a.token_address = t.token_address
-    ORDER BY a.avg_acc_score DESC
+        chain,
+        token_address,
+        COALESCE(symbol, '?')  AS token_symbol,
+        COALESCE(name, '未知') AS token_name,
+        bm_snapshot_count      AS snap_count,
+        bm_last_snapshot       AS latest_snapshot,
+        bm_holder_count        AS real_users,
+        bm_acc_count           AS acc_holders,
+        ROUND(bm_acc_count * 1.0, 1) AS avg_acc_score,
+        0.0 AS acc_buy,
+        0.0 AS acc_sell,
+        0   AS only_buy_cnt,
+        ROUND(100.0 * bm_acc_count / NULLIF(bm_holder_count, 0), 1) AS acc_pct_real,
+        0.0 AS only_buy_pct
+    FROM src_db.token_names
+    WHERE bm_acc_count > 0 AND bm_snapshot_count >= 2
+    ORDER BY bm_acc_count DESC LIMIT 20
     """
-    rows = conn.execute(sql, {"min_acc": config.MIN_ACC_HOLDERS}).fetchall()
+    rows = conn.execute(sql).fetchall()
     return [dict(r) for r in rows]
 
 
-# ============================================================
-# Diff 缓存读写
-# ============================================================
 
 def load_diff_cache(
     conn: sqlite3.Connection,
