@@ -25,8 +25,8 @@ from report_generator import (
 
 
 def _analyze_token(conn, chain: str, addr: str, sym: str):
-    """单代币完整分析流程"""
-    snapshots = db_loader.load_snapshot_times(conn, addr)
+    """单代币完整分析流程（透传 chain 以完全命中 idx_bm_token 联合索引）"""
+    snapshots = db_loader.load_snapshot_times(conn, addr, chain=chain)
     if len(snapshots) < config.MIN_SNAPSHOTS:
         return None
 
@@ -34,8 +34,8 @@ def _analyze_token(conn, chain: str, addr: str, sym: str):
     last_snap = snapshots[-1]
 
     # 加载持仓数据
-    latest_holders = db_loader.load_top_holders(conn, addr, last_snap, 300)
-    first_holders = db_loader.load_top_holders(conn, addr, first_snap, 20)
+    latest_holders = db_loader.load_top_holders(conn, addr, last_snap, 300, chain=chain)
+    first_holders = db_loader.load_top_holders(conn, addr, first_snap, 20, chain=chain)
 
     if len(latest_holders) < 5:
         return None
@@ -44,13 +44,13 @@ def _analyze_token(conn, chain: str, addr: str, sym: str):
     cp = build_concentration(latest_holders)
 
     # 漂移检测
-    acc_stats = db_loader.load_acc_stats_series(conn, addr)
+    acc_stats = db_loader.load_acc_stats_series(conn, addr, chain=chain)
     dr = detect_drift(first_holders, latest_holders, acc_stats,
                       first_snap, last_snap, len(snapshots))
 
     # 评分 & Gecko
-    scores = db_loader.load_latest_scores(conn, addr)
-    gecko = db_loader.load_latest_gecko(conn, addr)
+    scores = db_loader.load_latest_scores(conn, addr, chain=chain)
+    gecko = db_loader.load_latest_gecko(conn, addr, chain=chain)
 
     # 裁决
     verdict = evaluate(chain, addr, sym, cp, dr, scores, gecko, latest_holders)

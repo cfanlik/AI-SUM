@@ -18,7 +18,7 @@ import argparse
 STEPS = [
     ("master-scan", ["python3", "master-scan/run.py"]),
     ("opus-scan", ["python3", "opus-scan/run.py", "--offline"]),
-    ("unified-scan", ["python3", "unified-scan/run.py"]),
+    ("unified-scan", ["python3", "unified-scan/run.py", "--offline"]),
     ("bigcoin", ["python3", "bigcoin/run.py"]),
     ("cost-basis-scan", ["python3", "cost-basis-scan/run.py"]),
     ("meta-verdict", ["python3", "meta-verdict/run.py"]),

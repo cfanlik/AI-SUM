@@ -91,30 +91,22 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
 # ════════════════════════════════════════════════════════════
 
 def load_all_tokens(conn: sqlite3.Connection) -> list[dict]:
-    """全部有效代币（≥MIN_SNAPSHOTS快照 + ≥MIN_ACC_HOLDERS吸筹地址）"""
+    """全部有效代币（直查 token_names，毫秒级响应）"""
     sql = """
-    WITH base AS (
-        SELECT chain, token_address,
-               COUNT(DISTINCT snapshot_time) AS snap_count,
-               MAX(snapshot_time) AS latest_snapshot,
-               MIN(snapshot_time) AS earliest_snapshot,
-               SUM(CASE WHEN is_accumulating=1 THEN 1 ELSE 0 END) AS acc_holders
-        FROM src_db.bubblemap_holders
-        GROUP BY chain, token_address
-        HAVING snap_count >= :min_snap AND acc_holders >= :min_acc
-    )
-    SELECT b.chain, b.token_address,
-           COALESCE(t.symbol, '?') AS token_symbol,
-           COALESCE(t.name, '?')   AS token_name,
-           b.snap_count, b.latest_snapshot, b.earliest_snapshot
-    FROM base b
-    LEFT JOIN src_db.token_names t
-        ON b.chain = t.chain AND b.token_address = t.token_address
-    ORDER BY b.chain, b.token_address
+    SELECT
+        chain,
+        token_address,
+        COALESCE(symbol, '?') AS token_symbol,
+        COALESCE(name, '?')   AS token_name,
+        bm_snapshot_count     AS snap_count,
+        bm_last_snapshot      AS latest_snapshot,
+        datetime(bm_last_snapshot, '-30 days') AS earliest_snapshot
+    FROM src_db.token_names
+    WHERE bm_snapshot_count >= :min_snap
+    ORDER BY chain, token_address
     """
     rows = conn.execute(sql, {
         "min_snap": config.MIN_SNAPSHOTS,
-        "min_acc": config.MIN_ACC_HOLDERS,
     }).fetchall()
     return [dict(r) for r in rows]
 
@@ -204,10 +196,20 @@ def load_roster_series(
 # ════════════════════════════════════════════════════════════
 
 def load_snapshot_stats_series(
-    conn: sqlite3.Connection, chain: str, addr: str
+    conn: sqlite3.Connection, chain: str, addr: str, limit: int = 20
 ) -> list[dict]:
-    rows = conn.execute(
-        """
+    """滑动窗口限制至最近 20 期快照聚合"""
+    snaps = conn.execute("""
+        SELECT DISTINCT snapshot_time
+        FROM src_db.bubblemap_holders
+        WHERE chain = ? AND token_address = ?
+        ORDER BY snapshot_time DESC
+        LIMIT ?
+    """, (chain, addr, limit)).fetchall()
+    if not snaps:
+        return []
+    min_snap = snaps[-1][0]
+    rows = conn.execute("""
         SELECT snapshot_time,
             COUNT(*) AS total,
             SUM(CASE WHEN is_accumulating=1 THEN 1 ELSE 0 END) AS acc_cnt,
@@ -218,18 +220,11 @@ def load_snapshot_stats_series(
                 AND is_cex=0 AND is_contract=0 AND is_supernode=0
                 THEN 1 ELSE 0 END) AS hidden_whale
         FROM src_db.bubblemap_holders
-        WHERE chain=? AND token_address=?
+        WHERE chain = ? AND token_address = ? AND snapshot_time >= ?
         GROUP BY snapshot_time
         ORDER BY snapshot_time ASC
-        """,
-        (chain, addr),
-    ).fetchall()
+    """, (chain, addr, min_snap)).fetchall()
     return [dict(r) for r in rows]
-
-
-# ════════════════════════════════════════════════════════════
-# Gecko 市场数据
-# ════════════════════════════════════════════════════════════
 
 def load_gecko_latest(
     conn: sqlite3.Connection, chain: str, addr: str

@@ -696,40 +696,81 @@ def collect_hop2_tracking(sum_conn: sqlite3.Connection, scan_time: str, tokens_t
     except Exception:
         pass
     
+    # 预加载所有跟踪代币的最新快照时间，消除循环内 90+ 次 MAX(snapshot_time) 嵌套大表子查询
+    latest_snaps = {}
+    try:
+        snap_rows = sum_conn.execute("""
+            SELECT chain, token_address, bm_last_snapshot
+            FROM src.token_names
+            WHERE bm_last_snapshot IS NOT NULL
+        """).fetchall()
+        for sr in snap_rows:
+            latest_snaps[(sr["chain"], sr["token_address"])] = sr["bm_last_snapshot"]
+    except Exception as e:
+        logger.warning(f"[HOP2] 预加载 token_names 快照时间失败: {e}")
+
     saved = 0
     for t in tokens:
         chain = t["chain"]
         addr = t["token_address"]
         sym = t["token_symbol"] or "?"
         
-        row = sum_conn.execute("""
-            SELECT
-                COUNT(*)                                                              AS total_holders,
-                COALESCE(SUM(is_accumulating), 0)                                     AS acc_count,
-                SUM(CASE WHEN dex_ratio_hop2 IS NOT NULL AND dex_ratio_hop2 >= 0.5
-                         THEN 1 ELSE 0 END)                                           AS hop2_high_count,
-                SUM(CASE WHEN is_accumulating = 1
-                         AND dex_ratio_hop2 IS NOT NULL AND dex_ratio_hop2 >= 0.5
-                         THEN 1 ELSE 0 END)                                           AS hop2_acc_count,
-                SUM(CASE WHEN entity_id IS NOT NULL AND entity_id != ''
-                         THEN 1 ELSE 0 END)                                           AS entity_count,
-                COUNT(DISTINCT CASE WHEN entity_id IS NOT NULL AND entity_id != ''
-                              THEN entity_id END)                                      AS unique_entities,
-                SUM(CASE WHEN gmgn_verified = 2 AND dex_ratio_hop2 >= 0.5
-                         THEN 1 ELSE 0 END)                                           AS tier_98_count,
-                SUM(CASE WHEN gmgn_verified = 1 AND dex_ratio_hop2 >= 0.5
-                         THEN 1 ELSE 0 END)                                           AS tier_90_count,
-                SUM(CASE WHEN gmgn_verified = 0 AND dex_ratio_hop2 >= 0.5
-                         THEN 1 ELSE 0 END)                                           AS tier_30_count,
-                SUM(CASE WHEN gmgn_verified IS NULL AND dex_ratio_hop2 >= 0.5
-                         THEN 1 ELSE 0 END)                                           AS tier_80_count,
-                AVG(CASE WHEN is_accumulating = 1 THEN dex_ratio_hop2 END)            AS hop2_avg
-            FROM src.bubblemap_holders
-            WHERE chain = ? AND token_address = ?
-              AND snapshot_time = (
-                  SELECT MAX(snapshot_time) FROM src.bubblemap_holders WHERE chain = ? AND token_address = ?
-              )
-        """, [chain, addr, chain, addr]).fetchone()
+        target_snap = latest_snaps.get((chain, addr))
+        if target_snap:
+            row = sum_conn.execute("""
+                SELECT
+                    COUNT(*)                                                              AS total_holders,
+                    COALESCE(SUM(is_accumulating), 0)                                     AS acc_count,
+                    SUM(CASE WHEN dex_ratio_hop2 IS NOT NULL AND dex_ratio_hop2 >= 0.5
+                             THEN 1 ELSE 0 END)                                           AS hop2_high_count,
+                    SUM(CASE WHEN is_accumulating = 1
+                             AND dex_ratio_hop2 IS NOT NULL AND dex_ratio_hop2 >= 0.5
+                             THEN 1 ELSE 0 END)                                           AS hop2_acc_count,
+                    SUM(CASE WHEN entity_id IS NOT NULL AND entity_id != ''
+                             THEN 1 ELSE 0 END)                                           AS entity_count,
+                    COUNT(DISTINCT CASE WHEN entity_id IS NOT NULL AND entity_id != ''
+                                  THEN entity_id END)                                      AS unique_entities,
+                    SUM(CASE WHEN gmgn_verified = 2 AND dex_ratio_hop2 >= 0.5
+                             THEN 1 ELSE 0 END)                                           AS tier_98_count,
+                    SUM(CASE WHEN gmgn_verified = 1 AND dex_ratio_hop2 >= 0.5
+                             THEN 1 ELSE 0 END)                                           AS tier_90_count,
+                    SUM(CASE WHEN gmgn_verified = 0 AND dex_ratio_hop2 >= 0.5
+                             THEN 1 ELSE 0 END)                                           AS tier_30_count,
+                    SUM(CASE WHEN gmgn_verified IS NULL AND dex_ratio_hop2 >= 0.5
+                             THEN 1 ELSE 0 END)                                           AS tier_80_count,
+                    AVG(CASE WHEN is_accumulating = 1 THEN dex_ratio_hop2 END)            AS hop2_avg
+                FROM src.bubblemap_holders
+                WHERE chain = ? AND token_address = ? AND snapshot_time = ?
+            """, [chain, addr, target_snap]).fetchone()
+        else:
+            row = sum_conn.execute("""
+                SELECT
+                    COUNT(*)                                                              AS total_holders,
+                    COALESCE(SUM(is_accumulating), 0)                                     AS acc_count,
+                    SUM(CASE WHEN dex_ratio_hop2 IS NOT NULL AND dex_ratio_hop2 >= 0.5
+                             THEN 1 ELSE 0 END)                                           AS hop2_high_count,
+                    SUM(CASE WHEN is_accumulating = 1
+                             AND dex_ratio_hop2 IS NOT NULL AND dex_ratio_hop2 >= 0.5
+                             THEN 1 ELSE 0 END)                                           AS hop2_acc_count,
+                    SUM(CASE WHEN entity_id IS NOT NULL AND entity_id != ''
+                             THEN 1 ELSE 0 END)                                           AS entity_count,
+                    COUNT(DISTINCT CASE WHEN entity_id IS NOT NULL AND entity_id != ''
+                                  THEN entity_id END)                                      AS unique_entities,
+                    SUM(CASE WHEN gmgn_verified = 2 AND dex_ratio_hop2 >= 0.5
+                             THEN 1 ELSE 0 END)                                           AS tier_98_count,
+                    SUM(CASE WHEN gmgn_verified = 1 AND dex_ratio_hop2 >= 0.5
+                             THEN 1 ELSE 0 END)                                           AS tier_90_count,
+                    SUM(CASE WHEN gmgn_verified = 0 AND dex_ratio_hop2 >= 0.5
+                             THEN 1 ELSE 0 END)                                           AS tier_30_count,
+                    SUM(CASE WHEN gmgn_verified IS NULL AND dex_ratio_hop2 >= 0.5
+                             THEN 1 ELSE 0 END)                                           AS tier_80_count,
+                    AVG(CASE WHEN is_accumulating = 1 THEN dex_ratio_hop2 END)            AS hop2_avg
+                FROM src.bubblemap_holders
+                WHERE chain = ? AND token_address = ?
+                  AND snapshot_time = (
+                      SELECT MAX(snapshot_time) FROM src.bubblemap_holders WHERE chain = ? AND token_address = ?
+                  )
+            """, [chain, addr, chain, addr]).fetchone()
         
         if not row or (row["total_holders"] or 0) == 0:
             continue
