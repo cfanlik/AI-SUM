@@ -11,14 +11,15 @@ v4 变更:
   - 在报告头部增设「🚨 撤池 Rugpull 风险高危雷达」，置顶警示 S5 (大撤池) 高危代币
   - 在报告中融合 24h/48h/72h 多尺度 LP 水位与添加占比 (Add%) 看板
 """
+import os
 import sqlite3
 import statistics
 from datetime import datetime, timedelta
 from pathlib import Path
 
-SRC_DB = "/opt/select-coin/data/select.db"
-SUM_DB = "/opt/AI-SUM/select-sum.db"
-REPORT_DIR = "/opt/AI-SUM/report/pump"
+SRC_DB = os.environ.get("SRC_DB_PATH", "/opt/select-coin/data/select.db")
+SUM_DB = os.environ.get("SUM_DB_PATH", "/opt/AI-SUM/select-sum.db")
+REPORT_DIR = os.environ.get("PUMP_REPORT_DIR", "/opt/AI-SUM/report/pump")
 
 
 def connect(path, readonly=False):
@@ -295,27 +296,9 @@ def calc_pump_readiness(src, sumdb, token_address, token_symbol, scan_time):
             if control_level in ("A", "B"):
                 d3_score = 15
 
-    # 爆破计算
+    # GMGN 已于 Phase 0-A 彻底清理并删除空表 gmgn_holders，underwater_ratio 置默认值
     underwater_ratio = 0.0
-    latest_gmgn = src.execute("""
-        SELECT MAX(snapshot_time) FROM gmgn_holders WHERE token_address = ? AND snapshot_time <= ?
-    """, [token_address, scan_time]).fetchone()[0]
-    
-    if latest_gmgn:
-        gmgn_totals = src.execute("""
-            SELECT 
-                COUNT(*) as total_holders,
-                SUM(CASE WHEN unrealized_pnl < 0 THEN 1 ELSE 0 END) as loss_holders
-            FROM gmgn_holders
-            WHERE token_address = ? AND snapshot_time = ? AND hold_amount > 0
-        """, [token_address, latest_gmgn]).fetchone()
-        
-        if gmgn_totals and gmgn_totals["total_holders"] > 0:
-            underwater_ratio = (gmgn_totals["loss_holders"] or 0) / gmgn_totals["total_holders"]
-
     stealth_pump = False
-    if control_level in ("A", "B") and underwater_ratio > 0.90:
-        stealth_pump = True
 
     # D4 & D5: Meta与留存
     latest_meta = sumdb.execute("""

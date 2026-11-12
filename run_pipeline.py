@@ -20,7 +20,7 @@ STEPS = [
     ("opus-scan", ["python3", "opus-scan/run.py", "--offline"]),
     ("unified-scan", ["python3", "unified-scan/run.py", "--offline"]),
     ("bigcoin", ["python3", "bigcoin/run.py"]),
-    ("cost-basis-scan", ["python3", "cost-basis-scan/run.py"]),
+    # Phase 0-A/C2 下线: 原依赖已删除的 GMGN gmgn_avg_price 均价数据
     ("meta-verdict", ["python3", "meta-verdict/run.py"]),
     ("history-report", ["python3", "meta-verdict/history_report.py"]),
     ("materialize-surge", ["python3", "meta-verdict/materialize_surge.py"]),

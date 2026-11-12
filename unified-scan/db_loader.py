@@ -140,7 +140,7 @@ def load_snapshot_holders(
                buy_amt_usd, sell_amt_usd, buy_cnt, sell_cnt,
                net_inflow, acc_score, is_accumulating,
                is_cex, is_dex, is_contract, is_supernode,
-               dex_ratio, dex_ratio_hop2, gmgn_verified, entity_id,
+               dex_ratio, dex_ratio_hop2, entity_id,
                COALESCE(recent_48h_in, 0) AS recent_48h_in,
                COALESCE(recent_48h_out, 0) AS recent_48h_out,
                COALESCE(surge_ratio, 0) AS surge_ratio
@@ -175,7 +175,7 @@ def load_roster_series(
         SELECT snapshot_time, wallet_address, hold_percentage,
                acc_score, buy_amt_usd, sell_amt_usd, buy_cnt, sell_cnt,
                is_accumulating, is_cex, is_dex, is_contract, is_supernode,
-               dex_ratio, dex_ratio_hop2, gmgn_verified, entity_id
+               dex_ratio, dex_ratio_hop2, entity_id
         FROM src_db.bubblemap_holders
         WHERE chain=? AND token_address=?
           AND snapshot_time IN ({placeholders})

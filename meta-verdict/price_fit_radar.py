@@ -38,7 +38,7 @@ def calculate_fit_calibration(res, token_data, conn: sqlite3.Connection = None) 
     tier = getattr(res, "confidence_tier", "")
     verdict = getattr(res, "meta_verdict", "")
     cb_verdict = getattr(res, "cb_verdict", "")
-    consec = getattr(token_data, "acc_count_latest", getattr(res, "consec_acc", 0)) if token_data else getattr(res, "consec_acc", 0)
+    consec = int(getattr(res, "consec_acc", 0) or 0)
     sigma = getattr(res, "series_std", 0.0) or 0.0
 
     # 优先从 token_data 读取 retention_7d，兜底直查 token_history
@@ -57,11 +57,50 @@ def calculate_fit_calibration(res, token_data, conn: sqlite3.Connection = None) 
             pass
     retention = retention or 0.0
 
-    # 门禁 0: 终审一票否决权高于历史吸筹动能 (严禁给负分/否决标的打加速蓄力)
-    if tier == "DENIED" or verdict == "DIST" or res.meta_score <= -2.0:
+    # 读取最新市场收益率 (供 Gate 0.5 破位硬门禁前置判断)
+    price_ret = getattr(res, "price_now_ret", None)
+    if price_ret is None and token_data:
+        price_ret = getattr(token_data, "price_now_ret", None)
+    if price_ret is None and conn:
+        try:
+            row_p = conn.execute(
+                "SELECT price_now_ret FROM token_history WHERE lower(token_address) = lower(?) ORDER BY computed_date DESC LIMIT 1",
+                (res.token_address,)
+            ).fetchone()
+            if row_p and row_p[0] is not None:
+                price_ret = round(float(row_p[0]), 2)
+        except Exception:
+            pass
+
+    # ── 门禁 0.5 [ALGO-01 前置熔断]: 二级市场价格破位 <= -15% 一票否决硬门禁 ──
+    # 同步覆写 meta_verdict / confidence_tier / stage，彻底杜绝同批 L1/L2 与 DECAY_BREAKDOWN 精神分裂
+    if price_ret is not None and price_ret <= -15.0:
+        delta = -1.20
+        status = "DECAY_BREAKDOWN"
+        guide = f"价格下行破位({price_ret:.1f}%)，一票否决严禁介入"
+        res.meta_verdict = "DIST"
+        res.stage = "DISTRIBUTING"
+        res.confidence_tier = "DENIED"
+        res.lifecycle_status = status
+        final_score = round(max(0.0, res.meta_score + delta), 2)
         return FitCalibrationResult(
             token_address=res.token_address,
-            calibrated_score=res.meta_score,
+            calibrated_score=final_score,
+            fit_delta=round(delta, 2),
+            consec_acc=consec,
+            score_sigma=sigma,
+            retention_7d=retention,
+            lifecycle_status=status,
+            action_guide=guide
+        )
+
+    # 门禁 0: 终审一票否决权高于历史吸筹动能 (非负截断)
+    if tier == "DENIED" or verdict == "DIST" or res.meta_score <= -2.0:
+        if tier != "DENIED" and (verdict == "DIST" or res.meta_score <= -2.0):
+            res.confidence_tier = "DENIED"
+        return FitCalibrationResult(
+            token_address=res.token_address,
+            calibrated_score=round(max(0.0, res.meta_score), 2),
             fit_delta=0.0,
             consec_acc=consec,
             score_sigma=sigma,
@@ -75,7 +114,7 @@ def calculate_fit_calibration(res, token_data, conn: sqlite3.Connection = None) 
     if curr_status == "ULTRA_ACC":
         return FitCalibrationResult(
             token_address=res.token_address,
-            calibrated_score=round(res.meta_score + 1.10, 2),
+            calibrated_score=round(max(0.0, res.meta_score + 1.10), 2),
             fit_delta=1.10,
             consec_acc=consec,
             score_sigma=sigma,
@@ -109,38 +148,6 @@ def calculate_fit_calibration(res, token_data, conn: sqlite3.Connection = None) 
     delta = 0.0
     status = "NORMAL"
     guide = "中性观察"
-
-    # ── 门禁 0.5 [ALGO-01 前置熔断]: 二级市场价格破位一票否决硬门禁 ──
-    price_ret = getattr(res, "price_now_ret", None)
-    if price_ret is None and token_data:
-        price_ret = getattr(token_data, "price_now_ret", None)
-    if price_ret is None and conn:
-        try:
-            row_p = conn.execute(
-                "SELECT price_now_ret FROM token_history WHERE lower(token_address) = lower(?) ORDER BY computed_date DESC LIMIT 1",
-                (res.token_address,)
-            ).fetchone()
-            if row_p and row_p[0] is not None:
-                price_ret = round(float(row_p[0]), 2)
-        except Exception:
-            pass
-
-    if price_ret is not None and price_ret <= -15.0:
-        # 价格下行破位 >= 15%，绝对阻断 ACCELERATING 状态，剥夺吸筹动能并扣分惩罚
-        delta = -1.20
-        status = "DECAY_BREAKDOWN"
-        guide = f"价格下行破位({price_ret:.1f}%)，动能衰竭严禁盲目抄底"
-        final_score = round(max(0.0, res.meta_score + delta), 2)
-        return FitCalibrationResult(
-            token_address=res.token_address,
-            calibrated_score=final_score,
-            fit_delta=round(delta, 2),
-            consec_acc=consec,
-            score_sigma=sigma,
-            retention_7d=retention,
-            lifecycle_status=status,
-            action_guide=guide
-        )
 
     # 1. 动静互补与连续吸筹模型 (结合 retention_7d 存量与 consec 动能)
     if consec >= 7:
@@ -204,7 +211,7 @@ def calculate_fit_calibration(res, token_data, conn: sqlite3.Connection = None) 
         status = "OVERHEATING"
         guide = "高位动能衰竭，触发过热追高预警"
 
-    final_score = round(res.meta_score + delta, 2)
+    final_score = round(max(0.0, res.meta_score + delta), 2)
     return FitCalibrationResult(
         token_address=res.token_address,
         calibrated_score=final_score,

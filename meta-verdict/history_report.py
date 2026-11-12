@@ -6,6 +6,7 @@ AI-SUM 长期分析报告 V3.0
 只读 select.db，可写 select-sum.db
 输出: /opt/AI-SUM/report/history/history_MMDD_HHMM.md (每6小时1份)
 """
+import os
 import sqlite3
 import statistics
 from datetime import datetime, timedelta
@@ -13,9 +14,9 @@ from pathlib import Path
 from collections import defaultdict
 import math
 
-SRC_DB = "/opt/select-coin/data/select.db"
-SUM_DB = "/opt/AI-SUM/select-sum.db"
-REPORT_DIR = "/opt/AI-SUM/report/history"
+SRC_DB = os.environ.get("SRC_DB_PATH", "/opt/select-coin/data/select.db")
+SUM_DB = os.environ.get("SUM_DB_PATH", "/opt/AI-SUM/select-sum.db")
+REPORT_DIR = os.environ.get("HISTORY_REPORT_DIR", "/opt/AI-SUM/report/history")
 
 
 def format_price(val) -> str:
@@ -1126,7 +1127,7 @@ def save_token_history(sumdb, bt_data, mig_data, ts_data, liq_data=None, dt_map=
     gecko_fallback_map = {}
     try:
         import sqlite3
-        conn_sel = sqlite3.connect("file:/opt/select-coin/data/select.db?mode=ro", uri=True, timeout=10)
+        conn_sel = sqlite3.connect(f"file:{SRC_DB}?mode=ro", uri=True, timeout=10)
         conn_sel.row_factory = sqlite3.Row
         g_rows = conn_sel.execute("SELECT LOWER(token_address) as addr, reserve_usd, volume_24h FROM gecko_market_data WHERE scan_time >= datetime('now', '-3 days') ORDER BY scan_time DESC").fetchall()
         for g in g_rows:
@@ -1599,13 +1600,10 @@ def hop2_analysis(src, sumdb):
                          THEN 1 ELSE 0 END)                                           AS entity_cnt,
                 COUNT(DISTINCT CASE WHEN entity_id IS NOT NULL AND entity_id != ''
                               THEN entity_id END)                                      AS uniq_ent,
-                SUM(CASE WHEN gmgn_verified = 2 AND dex_ratio_hop2 >= 0.5
-                         THEN 1 ELSE 0 END)                                           AS t98,
-                SUM(CASE WHEN gmgn_verified = 1 AND dex_ratio_hop2 >= 0.5
-                         THEN 1 ELSE 0 END)                                           AS t90,
-                SUM(CASE WHEN gmgn_verified = 0 AND dex_ratio_hop2 >= 0.5
-                         THEN 1 ELSE 0 END)                                           AS t30,
-                SUM(CASE WHEN gmgn_verified IS NULL AND dex_ratio_hop2 >= 0.5
+                0                                                                     AS t98,
+                0                                                                     AS t90,
+                0                                                                     AS t30,
+                SUM(CASE WHEN dex_ratio_hop2 IS NOT NULL AND dex_ratio_hop2 >= 0.5
                          THEN 1 ELSE 0 END)                                           AS t80,
                 AVG(CASE WHEN is_accumulating = 1 THEN dex_ratio_hop2 END)            AS hop2_avg
             FROM bubblemap_holders
@@ -1724,12 +1722,9 @@ def hop2_analysis(src, sumdb):
     md += f"| 7d 均收益 | {_avg(high_grp, 'ret_7d')} | {_avg(low_grp, 'ret_7d')} |\n"
     md += f"| 14d 均收益 | {_avg(high_grp, 'ret_14d')} | {_avg(low_grp, 'ret_14d')} |\n\n"
 
-    md += "### 置信度分档分布\n\n"
+    md += "### Hop-2 置信度分布 (Pure BubbleMap)\n\n"
     md += "| 档位 | 数量 | 占比 |\n|------|------|------|\n"
-    md += f"| 98分(GMGN双确认) | {sum_t98} | {sum_t98/tier_total:.0%} |\n"
-    md += f"| 90分(GMGN单确认) | {sum_t90} | {sum_t90/tier_total:.0%} |\n"
-    md += f"| 80分(未验证)     | {sum_t80} | {sum_t80/tier_total:.0%} |\n"
-    md += f"| 30分(GMGN否决)   | {sum_t30} | {sum_t30/tier_total:.0%} |\n\n"
+    md += f"| Hop-2 二跳穿透 (≥50%) | {sum_t80} | {sum_t80/tier_total:.0%} |\n\n"
 
     # Top 10 hop2 代币
     top10 = sorted(stats, key=lambda s: s["hop2_pct"], reverse=True)[:10]
@@ -2113,8 +2108,9 @@ def futures_analysis(src, sumdb):
 
 
 
-def l3_gate_status(out_db_path="/opt/AI-SUM/data/signal-validation.db") -> str:
-    import os
+def l3_gate_status(out_db_path=None) -> str:
+    if not out_db_path:
+        out_db_path = os.environ.get("VAL_DB_PATH", "/opt/AI-SUM/data/signal-validation.db")
     import sqlite3
     if not os.path.exists(out_db_path):
         return "## 🛡️ 模块 0: Launch Path 验证系统\n\n> ⚠ 独立验证数据库 `signal-validation.db` 尚未生成，准入状态: **NOT_EVALUATED -> DENIED**\n"

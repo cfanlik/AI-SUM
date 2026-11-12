@@ -114,8 +114,8 @@ def generate_report(
     l1_alpha = [r for r in all_ranked if r.confidence_tier == "L1-Alpha" and getattr(r, "lifecycle_status", "") != "OVERHEATING"]
     l1_squeeze = [r for r in all_ranked if r.confidence_tier == "L1-Squeeze"]
     l1_special = [r for r in all_ranked if r.confidence_tier == "L1-Special"]
-    overheating = [r for r in all_ranked if getattr(r, "lifecycle_status", "") == "OVERHEATING" or (getattr(r, "token_symbol", "").upper() == "PROS" and r.confidence_tier != "DENIED")]
-    breakdown_blocked = [r for r in all_ranked if getattr(r, "lifecycle_status", "") == "DECAY_BREAKDOWN" or (getattr(r, "token_symbol", "").upper() in ("CT", "SQD", "LYN") and r.confidence_tier in ("DENIED", "L3-Watch"))]
+    overheating = [r for r in all_ranked if getattr(r, "lifecycle_status", "") == "OVERHEATING"]
+    breakdown_blocked = [r for r in all_ranked if getattr(r, "lifecycle_status", "") == "DECAY_BREAKDOWN"]
     dump_rug = [r for r in all_ranked if (r.meta_verdict == "DIST" or r.confidence_tier == "DENIED") and r not in breakdown_blocked]
 
     # 获取宏观水温
@@ -591,8 +591,8 @@ def generate_report(
         md_lines.extend([
             "",
             "### 2. 🔍 穿透大户与换仓地址白盒透视 (Address-Level Whitebox Ledger)",
-            "| 代币 | 角色类型 | 物理钱包地址 | 持仓占比% | 实盘真金估值 | 二跳DEX% | GMGN买次 | 历史换仓来源 | 锁仓天数 |",
-            "| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- | :---: |",
+            "| 代币 | 角色类型 | 物理钱包地址 | 持仓占比% | 实盘真金估值 | 二跳DEX% | 历史换仓来源 | 锁仓天数 |",
+            "| :--- | :--- | :--- | :---: | :---: | :---: | :--- | :---: |",
         ])
 
         for item in screen7_data[:20]:
@@ -601,12 +601,11 @@ def generate_report(
             for w in item.get("whales", [])[:2]:
                 w_addr = w.get("address", "")
                 addr_fmt = f"`{w_addr[:8]}...{w_addr[-6:]}`" if len(w_addr) >= 14 else f"`{w_addr}`"
-                gmgn_str = f"{w.get('gmgn_buy_cnt', 0)}次" if w.get('gmgn_buy_cnt') else "—"
                 is_ho_target = (ho and ho['target_address'].lower() == w_addr.lower())
                 ho_orig = f"`{ho['origin_address'][:6]}...{ho['origin_address'][-4:]}`" if is_ho_target else "—"
                 ho_days = f"{ho['span_days']}天" if is_ho_target else "—"
                 md_lines.append(
-                    f"| **{sym}** | 穿透大户 | {addr_fmt} | {w.get('hold_pct', 0.0):.2f}% | **${w.get('effective_usd', 0.0):,.2f}** | {w.get('hop2_ratio', 0.0)*100:.0f}% | {gmgn_str} | {ho_orig} | {ho_days} |"
+                    f"| **{sym}** | 穿透大户 | {addr_fmt} | {w.get('hold_pct', 0.0):.2f}% | **${w.get('effective_usd', 0.0):,.2f}** | {w.get('hop2_ratio', 0.0)*100:.0f}% | {ho_orig} | {ho_days} |"
                 )
 
     # ── 第八屏: 真实市场价格前向拟合与过热-衰减预警雷达 (Forward Price-Fit & Overheating Radar) ──
@@ -730,7 +729,6 @@ def generate_report(
         "",
         "## 🔗 底层专业子引擎钻取索引 (Drilldown Links)",
         "- 🚀 [拉升前兆与流动性共振报告 (Pump Radar)](../pump/latest_pump_report.md)",
-        "- 💰 [持仓成本与 VWAP 偏离深度报告 (Cost Basis)](../cost-basis/latest_cb_report.md)",
         "- 📊 [长期画像与多周期回测报告 (History Backtest)](../history/latest_history_report.md)",
         "- ⚡ [实盘突发异动与穿透观察专报 (Anomaly Watch)](../anomaly/latest_实时信号验证报告_实盘观察.md)",
         "",
@@ -739,7 +737,8 @@ def generate_report(
     report_content = "\n".join(md_lines)
 
     # 写入文件
-    out_dir = Path("/opt/AI-SUM/report/meta")
+    import config as _cfg
+    out_dir = Path(_cfg.REPORT_DIR)
     out_dir.mkdir(parents=True, exist_ok=True)
     
     ts_clean = scan_time.replace(":", "").replace("-", "").replace(" ", "_")

@@ -74,7 +74,7 @@ def scan_hop2_whales(
         try:
             h_rows = cursor.execute("""
                 SELECT rank, wallet_address, hold_amount, hold_percentage, buy_amt_usd,
-                       dex_ratio, dex_ratio_hop2, gmgn_verified, gmgn_buy_cnt, gmgn_buy_cost_usd,
+                       dex_ratio, dex_ratio_hop2,
                        acc_score, is_accumulating
                 FROM bubblemap_holders
                 WHERE chain = ? AND token_address = ? AND snapshot_time = ?
@@ -92,13 +92,12 @@ def scan_hop2_whales(
         max_u = 0.0
 
         for hr in h_rows:
-            r_rank, r_addr, r_amt, r_pct, r_buy_usd, r_dex, r_hop2, r_gmgn, r_buy_cnt, r_gmgn_cost, r_score, r_acc = hr
+            r_rank, r_addr, r_amt, r_pct, r_buy_usd, r_dex, r_hop2, r_score, r_acc = hr
             
-            # 白盒物理核算：GMGN买入实付美元成本 vs 当前持仓市值
-            cost_usd = float(r_gmgn_cost or 0.0)
+            # 单一物理估值核算：当前持仓市值 (hold_amount * price_usd)
             hold_amt = float(r_amt or 0.0)
             val_usd = hold_amt * price_usd if price_usd > 0 else 0.0
-            eff_usd = max(cost_usd, val_usd)
+            eff_usd = val_usd
 
             if eff_usd >= min_usd:
                 whales.append({
@@ -106,13 +105,11 @@ def scan_hop2_whales(
                     "address": r_addr,
                     "hold_amount": hold_amt,
                     "hold_pct": float(r_pct or 0.0),
-                    "cost_usd": cost_usd,
+                    "cost_usd": 0.0,
                     "val_usd": val_usd,
                     "effective_usd": eff_usd,
                     "hop2_ratio": float(r_hop2 or 0.0),
                     "dex_ratio": float(r_dex or 0.0),
-                    "gmgn_verified": r_gmgn,
-                    "gmgn_buy_cnt": r_buy_cnt or 0,
                     "is_accumulating": bool(r_acc)
                 })
                 tot_usd += eff_usd

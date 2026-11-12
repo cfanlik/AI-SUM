@@ -73,8 +73,8 @@ def compute_token_series(conn: sqlite3.Connection, chain: str, token_address: st
         metric.score_std = 0.0
         metric.score_delta_5 = 0.0
 
-    # 时序特征定性
-    if metric.score_std < 0.3:
+    # 时序特征定性 (严格守卫: 必须处于有效多头区间 >= 3.0 才允许判定极度稳健，防零分/负分幻觉)
+    if metric.score_std < 0.3 and current_score >= 3.0:
         metric.trend_category = "极度稳健"
     elif metric.score_delta_5 <= -2.5:
         metric.trend_category = "断崖跳水"
