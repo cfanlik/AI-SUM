@@ -80,6 +80,9 @@ class TokenEngineData:
     acc_count_latest:   int = 0                 # 最新快照吸筹地址数 (防误杀门禁)
     price_now_ret:      float | None = None     # 信号首发至今价格收益率 (%)
     retention_7d:       float = 0.0             # 7d 锁仓留存率 (%)
+    resilience_index:   float | None = None     # 来自 token_history 的历史抗跌韧性原始分
+    series_std:         float = 0.0             # 前置 5 轮标准差 (供 arbitrate 判定)
+    hist_scores:        list = field(default_factory=list)  # 最近历史轮次得分
 
 
 def get_connection() -> sqlite3.Connection:
@@ -248,9 +251,12 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
         FROM cost_basis_snapshots c
         INNER JOIN (
             SELECT chain, token_address, MAX(scan_time) AS latest
-            FROM cost_basis_snapshots GROUP BY chain, token_address
+            FROM cost_basis_snapshots
+            WHERE scan_time >= datetime('now', '-48 hours')
+            GROUP BY chain, token_address
         ) m ON c.chain=m.chain AND c.token_address=m.token_address AND c.scan_time=m.latest
         WHERE c.verdict != 'NEUTRAL'
+          AND c.scan_time >= datetime('now', '-48 hours')
     """).fetchall()
     for r in rows:
         k = key(r["chain"], r["token_address"])
@@ -454,7 +460,7 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
         try:
             for k, t in tokens.items():
                 row_th = conn.execute("""
-                    SELECT price_now_ret, retention_7d FROM token_history
+                    SELECT price_now_ret, retention_7d, resilience_index FROM token_history
                     WHERE lower(token_address) = lower(?)
                     ORDER BY computed_date DESC LIMIT 1
                 """, (t.token_address,)).fetchone()
@@ -463,6 +469,8 @@ def collect_all_tokens(conn: sqlite3.Connection) -> list[TokenEngineData]:
                         t.price_now_ret = round(float(row_th["price_now_ret"]), 2)
                     if row_th["retention_7d"] is not None:
                         t.retention_7d = round(float(row_th["retention_7d"]), 2)
+                    if "resilience_index" in row_th.keys() and row_th["resilience_index"] is not None:
+                        t.resilience_index = round(float(row_th["resilience_index"]), 2)
         except Exception as _eth:
             logger.debug("token_history 收益补全异常: %s", _eth)
     except Exception as _e:
@@ -730,13 +738,10 @@ def collect_hop2_tracking(sum_conn: sqlite3.Connection, scan_time: str, tokens_t
                              THEN 1 ELSE 0 END)                                           AS entity_count,
                     COUNT(DISTINCT CASE WHEN entity_id IS NOT NULL AND entity_id != ''
                                   THEN entity_id END)                                      AS unique_entities,
-                    SUM(CASE WHEN gmgn_verified = 2 AND dex_ratio_hop2 >= 0.5
-                             THEN 1 ELSE 0 END)                                           AS tier_98_count,
-                    SUM(CASE WHEN gmgn_verified = 1 AND dex_ratio_hop2 >= 0.5
-                             THEN 1 ELSE 0 END)                                           AS tier_90_count,
-                    SUM(CASE WHEN gmgn_verified = 0 AND dex_ratio_hop2 >= 0.5
-                             THEN 1 ELSE 0 END)                                           AS tier_30_count,
-                    SUM(CASE WHEN gmgn_verified IS NULL AND dex_ratio_hop2 >= 0.5
+                    0                                                                     AS tier_98_count,
+                    0                                                                     AS tier_90_count,
+                    0                                                                     AS tier_30_count,
+                    SUM(CASE WHEN dex_ratio_hop2 IS NOT NULL AND dex_ratio_hop2 >= 0.5
                              THEN 1 ELSE 0 END)                                           AS tier_80_count,
                     AVG(CASE WHEN is_accumulating = 1 THEN dex_ratio_hop2 END)            AS hop2_avg
                 FROM src.bubblemap_holders
@@ -756,13 +761,10 @@ def collect_hop2_tracking(sum_conn: sqlite3.Connection, scan_time: str, tokens_t
                              THEN 1 ELSE 0 END)                                           AS entity_count,
                     COUNT(DISTINCT CASE WHEN entity_id IS NOT NULL AND entity_id != ''
                                   THEN entity_id END)                                      AS unique_entities,
-                    SUM(CASE WHEN gmgn_verified = 2 AND dex_ratio_hop2 >= 0.5
-                             THEN 1 ELSE 0 END)                                           AS tier_98_count,
-                    SUM(CASE WHEN gmgn_verified = 1 AND dex_ratio_hop2 >= 0.5
-                             THEN 1 ELSE 0 END)                                           AS tier_90_count,
-                    SUM(CASE WHEN gmgn_verified = 0 AND dex_ratio_hop2 >= 0.5
-                             THEN 1 ELSE 0 END)                                           AS tier_30_count,
-                    SUM(CASE WHEN gmgn_verified IS NULL AND dex_ratio_hop2 >= 0.5
+                    0                                                                     AS tier_98_count,
+                    0                                                                     AS tier_90_count,
+                    0                                                                     AS tier_30_count,
+                    SUM(CASE WHEN dex_ratio_hop2 IS NOT NULL AND dex_ratio_hop2 >= 0.5
                              THEN 1 ELSE 0 END)                                           AS tier_80_count,
                     AVG(CASE WHEN is_accumulating = 1 THEN dex_ratio_hop2 END)            AS hop2_avg
                 FROM src.bubblemap_holders

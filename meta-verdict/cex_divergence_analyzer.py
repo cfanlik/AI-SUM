@@ -15,10 +15,11 @@ from typing import Dict, List, Any, Optional
 
 logger = logging.getLogger("meta-verdict")
 
-SRC_DB_PATH = "/opt/select-coin/data/select.db"
+SRC_DB_PATH = os.environ.get("SRC_DB_PATH", "/opt/select-coin/data/select.db")
 
 def get_cex_flow_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(SRC_DB_PATH, timeout=60.0)
+    db_path = os.environ.get("SRC_DB_PATH", SRC_DB_PATH)
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=60.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout = 60000;")
     return conn

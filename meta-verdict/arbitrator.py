@@ -105,6 +105,7 @@ class MetaResult:
     price_now_ret:      float | None = None     # 信号首发至今收益率
     hold_delta_72h_pct: float | None = None     # 72h 持仓变动
     acc_count_latest:   int = 0                 # 最新吸筹地址数量
+    consec_acc:         int = 0                 # 真实连续 ACC 轮次
 
 
 # ── 全局 CEX 资金流缓存与 Watchdog 熔断机制 ──
@@ -267,20 +268,20 @@ def determine_confidence_tier(token: TokenEngineData, score: float, hits: int, c
     if token.cb_windfall_pct > 80.0 and token.cex_delta_pct > 30.0:
         return "DENIED"
 
-    # 门禁 3: 致命破位与 CEX 充值抛售一票否决 (CT, SQD, LYN 等核心拦截标的)
-    if (price_ret is not None and price_ret <= -18.0) or sym in ("CT", "SQD", "LYN"):
-        if sym in ("CT", "SQD", "LYN") or cex_flow_status == "INFLOW_DUMP" or token.vl_ratio > 12.0:
+    # 门禁 3: 致命破位与 CEX 充值抛售/极高换手一票否决（纯客观市场因子，无硬编码黑名单）
+    if price_ret is not None and price_ret <= -18.0:
+        if cex_flow_status == "INFLOW_DUMP" or token.vl_ratio > 12.0 or price_ret <= -50.0:
             return "DENIED"
 
     # ── L1 顶级共振标的判定 (得分 >= 7.0 且多引擎共振) ──
     if score >= 7.0:
-        # 门禁: 极度分歧或高位过热追顶绝对禁止进入 L1-Alpha (纠偏 PROS 高位止盈，防顶部追高)
-        if getattr(token, "series_std", 0) >= 1.8 or lifecycle_status == "OVERHEATING" or            (price_ret is not None and price_ret >= 40.0 and sym == "PROS"):
+        # 门禁: 极度分歧或高位过热追顶禁止进入 L1-Alpha
+        if getattr(token, "series_std", 0) >= 1.8 or lifecycle_status == "OVERHEATING":
             return "L2-Bet"
 
-        # 轧空分流器 (Squeeze Diverter): CT 等存在大额充值或破位风险者严禁进入 L1-Squeeze
+        # 轧空分流器 (Squeeze Diverter)
         if token.vl_ratio > 10.0 or token.cex_delta_pct > 20.0:
-            if lifecycle_status == "DECAY_BREAKDOWN" or cex_flow_status == "INFLOW_DUMP" or sym in ("CT", "SQD", "LYN"):
+            if lifecycle_status == "DECAY_BREAKDOWN" or cex_flow_status == "INFLOW_DUMP":
                 return "DENIED"
             return "L1-Squeeze"
         
@@ -481,14 +482,14 @@ def arbitrate(token: TokenEngineData, hop2_pct: float = 0.0, conn: sqlite3.Conne
         if bdc >= 0.35 and t.hold_delta_72h_pct is not None and t.hold_delta_72h_pct >= 0:
             _dump_reasons.append(f"诱多套牢背离(BDC={bdc:.2f},局部持币{t.hold_delta_72h_pct:+.1f}% vs 破位{t.price_now_ret:+.1f}%)")
 
-    # ── 维度 E: CEX 暴增充值与破位一票否决拦截 (拦截 CT/SQD/LYN 等破位出货) ──
+    # ── 维度 E: CEX 暴增充值与严重破位一票否决拦截（纯客观数据判别，无代币黑名单）──
     is_breakdown = False
-    if (t.price_now_ret is not None and t.price_now_ret <= -18.0) or sym in ("CT", "SQD", "LYN"):
-        if sym in ("CT", "SQD", "LYN") or res.cex_flow_status == "INFLOW_DUMP" or t.vl_ratio > 12.0:
+    if t.price_now_ret is not None and t.price_now_ret <= -18.0:
+        if res.cex_flow_status == "INFLOW_DUMP" or t.vl_ratio > 12.0 or t.price_now_ret <= -50.0:
             is_breakdown = True
             _dump_penalty += 2.50
-            ret_disp = f"{t.price_now_ret:+.1f}%" if t.price_now_ret is not None else "暴跌"
-            _dump_reasons.append(f"CEX暴增充值一票否决/致命破位({ret_disp})")
+            ret_disp = f"{t.price_now_ret:+.1f}%"
+            _dump_reasons.append(f"CEX充值抛压或致命破位({ret_disp})")
 
     if _dump_penalty > 0:
         res.meta_score = round(res.meta_score - _dump_penalty, 2)
@@ -517,22 +518,52 @@ def arbitrate(token: TokenEngineData, hop2_pct: float = 0.0, conn: sqlite3.Conne
         res.meta_verdict = "NEUTRAL"
         res.stage = "WATCHLIST" if res.engine_hits >= 1 else "NEUTRAL"
 
-    # 4. 拟合生命周期状态判定与纠偏
-    # 顶级真金判定: KITE, UAI, SOON 或 CEX 资金流净流出共振
-    if res.meta_score >= 7.0 and (res.cex_flow_status in ("OUTFLOW_ACC", "NEUTRAL") or sym in ("KITE", "UAI", "SOON")):
+    # 4. 拟合生命周期状态判定与纠偏（纯特征驱动，彻底移除代币白/黑名单特权）
+    if res.meta_score >= 7.0 and res.cex_flow_status in ("OUTFLOW_ACC", "NEUTRAL"):
         if not is_breakdown and (t.price_now_ret is None or t.price_now_ret > -15.0):
             res.lifecycle_status = "ULTRA_ACC"
-            res.fit_action_guide = "现货分批建仓 / 中长线持有" 
+            res.fit_action_guide = "现货分批建仓 / 中长线持有"
 
-    # 高位过热纠偏: PROS 等累计暴涨但动能衰竭
-    if (t.price_now_ret is not None and t.price_now_ret >= 40.0 and sym == "PROS") or        (res.meta_score >= 8.0 and t.price_now_ret is not None and t.price_now_ret >= 50.0 and getattr(t, "series_std", 0) >= 1.2):
+    # 高位过热纠偏: 累计暴涨且得分分歧加剧
+    if res.meta_score >= 8.0 and t.price_now_ret is not None and t.price_now_ret >= 50.0 and getattr(t, "series_std", 0) >= 1.2:
         res.lifecycle_status = "OVERHEATING"
         res.fit_action_guide = "现货高位止盈 / 规避追高"
 
-    # 5. 置信度梯队评定
-    consec = get_prev_consec_acc(conn, t.chain, t.token_address)
+    # 4.5 真实计算 meta_score_smooth 与 resilience_index / resilience_norm
+    hist_scores = list(getattr(t, "hist_scores", []) or [])
+    if not hist_scores and conn is not None:
+        try:
+            q_rows = conn.execute(
+                """SELECT meta_score FROM meta_snapshots
+                   WHERE chain = ? AND lower(token_address) = lower(?) AND scan_time < ?
+                   ORDER BY scan_time DESC LIMIT 4""",
+                (t.chain, t.token_address, scan_time or "9999-12-31")
+            ).fetchall()
+            hist_scores = [float(r[0]) for r in q_rows[::-1] if r[0] is not None]
+        except Exception:
+            hist_scores = []
+    seq = hist_scores[-4:] + [res.meta_score]
+    weights = list(range(1, len(seq) + 1))
+    res.meta_score_smooth = round(sum(w * v for w, v in zip(weights, seq)) / sum(weights), 2)
+
+    raw_resilience = getattr(t, "resilience_index", None)
+    if raw_resilience is None:
+        if t.price_now_ret is not None and t.retention_7d > 0:
+            raw_resilience = t.price_now_ret / max(1.0 - t.retention_7d / 100.0, 0.01)
+        elif t.price_now_ret is not None:
+            raw_resilience = t.price_now_ret
+        else:
+            raw_resilience = res.meta_score * 10.0
+    res.resilience_index = round(float(raw_resilience), 2)
+    norm_val = calculate_resilience_norm(res.resilience_index / 100.0)
+    res.resilience_norm = norm_val if norm_val is not None else 0.5
+
+    # 5. 置信度梯队评定与真实连续吸筹轮次透传
+    prev_consec = get_prev_consec_acc(conn, t.chain, t.token_address)
+    res.consec_acc = prev_consec + 1 if res.meta_verdict == "ACC" else 0
+    res.series_std = float(getattr(t, "series_std", 0.0) or 0.0)
     res.confidence_tier = determine_confidence_tier(
-        t, res.meta_score, res.engine_hits, consec,
+        t, res.meta_score, res.engine_hits, res.consec_acc,
         lifecycle_status=res.lifecycle_status,
         cex_flow_status=res.cex_flow_status,
         price_ret=t.price_now_ret

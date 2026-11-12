@@ -96,7 +96,7 @@ def scan_position_handovers(
         # 3. 查最新快照中的持仓大户 (命中 idx_bm_snap_chain_token 复合索引)
         try:
             late_holders = cursor.execute("""
-                SELECT wallet_address, hold_amount, hold_percentage, gmgn_buy_cost_usd
+                SELECT wallet_address, hold_amount, hold_percentage
                 FROM bubblemap_holders
                 WHERE snapshot_time = ? AND chain = ? AND token_address = ?
                   AND is_cex = 0 AND is_contract = 0 AND hold_percentage >= 1.0
@@ -126,7 +126,7 @@ def scan_position_handovers(
         for h_snap, span_days in sorted(valid_hist_snaps, key=lambda x: x[1], reverse=True):
             try:
                 hist_holders = cursor.execute("""
-                    SELECT wallet_address, hold_amount, hold_percentage, gmgn_buy_cost_usd
+                    SELECT wallet_address, hold_amount, hold_percentage
                     FROM bubblemap_holders
                     WHERE snapshot_time = ? AND chain = ? AND token_address = ?
                       AND is_cex = 0 AND is_contract = 0 AND hold_percentage >= 1.0
@@ -135,9 +135,9 @@ def scan_position_handovers(
                 hist_holders = []
 
             for eh in hist_holders:
-                e_addr, e_amt, e_pct, e_cost = eh
+                e_addr, e_amt, e_pct = eh
                 e_amt = float(e_amt or 0.0)
-                eff_usd = max(float(e_cost or 0.0), e_amt * price_usd)
+                eff_usd = e_amt * price_usd
 
                 if eff_usd < min_usd:
                     continue

@@ -223,10 +223,7 @@ def compute_snapshot_diff(
             continue
         dr = h.get('dex_ratio') or 0.0
         dr2 = h.get('dex_ratio_hop2') or 0.0
-        gv = h.get('gmgn_verified') or 0
         best = max(dr, dr2)
-        if gv >= 1:
-            best = max(best, 1.0)  # gmgn 验证视为满分
         entity_dex_max[eid] = max(entity_dex_max.get(eid, 0.0), best)
 
     # Step 2: 对吸筹地址判定 DEX 验证
@@ -236,9 +233,8 @@ def compute_snapshot_diff(
             continue
         dr = h.get('dex_ratio') or 0.0
         dr2 = h.get('dex_ratio_hop2') or 0.0
-        gv = h.get('gmgn_verified') or 0
         # 直接判定
-        if dr >= 0.5 or dr2 >= 0.5 or gv >= 1:
+        if dr >= 0.5 or dr2 >= 0.5:
             dex_verified_count += 1
             continue
         # entity 聚簇穿透：组内有通过的则共享

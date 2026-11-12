@@ -8,10 +8,10 @@ from collections import defaultdict
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import market_context
 
-SRC_DB = "/opt/select-coin/data/select.db"
-SUM_DB = "/opt/AI-SUM/select-sum.db"
-WEEKLY_DIR = "/opt/AI-SUM/report/weekly"
-MONTHLY_DIR = "/opt/AI-SUM/report/monthly"
+SRC_DB = os.environ.get("SRC_DB_PATH", "/opt/select-coin/data/select.db")
+SUM_DB = os.environ.get("SUM_DB_PATH", "/opt/AI-SUM/select-sum.db")
+WEEKLY_DIR = os.environ.get("WEEKLY_REPORT_DIR", "/opt/AI-SUM/report/weekly")
+MONTHLY_DIR = os.environ.get("MONTHLY_REPORT_DIR", "/opt/AI-SUM/report/monthly")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("weekly_report")
 

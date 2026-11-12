@@ -7,6 +7,9 @@ from __future__ import annotations
 import os
 _env_path = "/opt/AI-SUM/.env"
 def _read_env(key, default=""):
+    env_val = os.environ.get(key)
+    if env_val:
+        return env_val.strip()
     try:
         for line in open(_env_path):
             if line.startswith(f"{key}="):
@@ -17,7 +20,7 @@ def _read_env(key, default=""):
 
 SUM_DB_PATH = _read_env("SUM_DB_PATH", "/opt/AI-SUM/select-sum.db")
 SRC_DB_PATH = _read_env("SRC_DB_PATH", "/opt/select-coin/data/select.db")
-REPORT_DIR  = "/opt/AI-SUM/report/meta"
+REPORT_DIR  = _read_env("META_REPORT_DIR", "/opt/AI-SUM/report/meta")
 
 # ── 积分权重 ──
 MASTER_DIAMOND = 4

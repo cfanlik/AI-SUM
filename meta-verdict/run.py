@@ -79,17 +79,66 @@ def main():
     except Exception as _e:
         logger.error(f"加载 hop2 映射失败: {_e}")
 
-    # 一次性完全体仲裁（出厂即获得 hop2 加分与最终裁决判定）
+    # ── Step 1 (C3 原子管道): 预读最近 5 轮历史得分算前置 series_std，供 arbitrate 判断过热与波动 ──
+    try:
+        import numpy as _np
+        hist_rows = conn.execute(
+            """SELECT chain, lower(token_address) AS addr, meta_score, scan_time
+               FROM meta_snapshots
+               WHERE scan_time < ?
+               ORDER BY scan_time DESC LIMIT 2000""",
+            (scan_time,)
+        ).fetchall()
+        hist_map = {}
+        for hr in hist_rows:
+            k = (hr["chain"], hr["addr"])
+            lst = hist_map.setdefault(k, [])
+            if len(lst) < 5 and hr["meta_score"] is not None:
+                lst.append(float(hr["meta_score"]))
+        for d in all_data:
+            seq = list(reversed(hist_map.get((d.chain, d.token_address.lower()), [])))
+            d.hist_scores = seq
+            d.series_std = round(float(_np.std(seq)), 2) if len(seq) >= 2 else 0.0
+    except Exception as _he:
+        logger.warning(f"预读历史时序 std 失败(回退0.0): {_he}")
+
+    # ── Step 2: 全量仲裁（出厂即获 hop2、smooth、resilience 与 consec_acc）──
     all_arbitrated = [arbitrate(d, hop2_pct=hop2_map.get(d.token_address.lower(), 0.0), conn=conn, scan_time=scan_time) for d in all_data]
 
-    screen8_data = {}
+    # ── Step 3: 内存态趋势分析 + 第八屏真实价格校准（含 Gate 0.5 -15% 一票否决同步覆写）──
+    trend = analyze_trend(conn, all_arbitrated, scan_time)
+    if trend.has_prev:
+        logger.info(f"趋势对比: vs {trend.prev_scan_time} | "
+                     f"新进{len(trend.newcomers)} 退出{len(trend.exits)} "
+                     f"↑{trend.score_up} ↓{trend.score_down} →{trend.stable} "
+                     f"跃变{len(trend.jumps)}")
 
-    # 重新分流生成最终排行列表
+    screen8_data = {}
+    try:
+        import price_fit_radar
+        token_data_map = {d.token_address.lower(): d for d in all_data}
+        for r in all_arbitrated:
+            t_data = token_data_map.get(r.token_address.lower())
+            # 内存态终审分歧校验：若计入当轮后 series_std >= 1.8，禁止留居 L1-Alpha/Squeeze
+            if getattr(r, "series_std", 0.0) >= 1.8 and r.confidence_tier in ("L1-Alpha", "L1-Squeeze", "L1-Special"):
+                r.confidence_tier = "L2-Bet"
+            calib = price_fit_radar.calculate_fit_calibration(r, t_data, conn=conn)
+            r.fit_score_delta = calib.fit_delta
+            r.calibrated_score = calib.calibrated_score
+            r.lifecycle_status = calib.lifecycle_status
+            r.fit_action_guide = calib.action_guide
+            r._calib_result = calib
+
+        screen8_data = price_fit_radar.build_screen8_radar_data(all_arbitrated, conn=conn)
+        logger.info(f"第八屏雷达数据构建完成: L1={len(screen8_data.get('l1_top', []))}, L2={len(screen8_data.get('l2_top', []))}, Alert={len(screen8_data.get('alert_top', []))}, L3={len(screen8_data.get('l3_top', []))}")
+    except Exception as e:
+        logger.error(f"第八屏构建失败: {e}", exc_info=True)
+
+    # 基于内存终审态分流，保证报告与入库 100% 一致
     acc_list = sorted([r for r in all_arbitrated if r.meta_verdict == "ACC"], key=lambda r: r.meta_score, reverse=True)
     dist_list = sorted([r for r in all_arbitrated if r.meta_verdict == "DIST"], key=lambda r: r.meta_score)
-    all_results = acc_list + dist_list
 
-    # 一次性保存全部完全体代币结果入库
+    # ── Step 4: 一次性原子写穿 meta_snapshots 与 token_lifecycle（零二次覆写）──
     for r in all_arbitrated:
         save_meta_result(conn, {
             "scan_time":      scan_time,
@@ -137,57 +186,13 @@ def main():
     from conflict_detector import detect_conflicts
     conflicts = detect_conflicts(all_arbitrated, all_data)
 
-    # ── 趋势分析（对比上一轮，基于完全体数据）──
-    trend = analyze_trend(conn, all_arbitrated, scan_time)
-    if trend.has_prev:
-        logger.info(f"趋势对比: vs {trend.prev_scan_time} | "
-                     f"新进{len(trend.newcomers)} 退出{len(trend.exits)} "
-                     f"↑{trend.score_up} ↓{trend.score_down} →{trend.stable} "
-                     f"跃变{len(trend.jumps)}")
-
-    # 更新生命周期表 (完美追踪完全体状态)
-    _update_lifecycle(conn, all_arbitrated, scan_time)
-
-    # ── 第八屏：真实市场价格前向拟合与过热-衰减预警雷达 (时序标准差就绪后执行) ──
-    try:
-        import price_fit_radar
-        token_data_map = {d.token_address.lower(): d for d in all_data}
-        for r in all_arbitrated:
-            t_data = token_data_map.get(r.token_address.lower())
-            calib = price_fit_radar.calculate_fit_calibration(r, t_data, conn=conn)
-            r.fit_score_delta = calib.fit_delta
-            r.calibrated_score = calib.calibrated_score
-            r.lifecycle_status = calib.lifecycle_status
-            r.fit_action_guide = calib.action_guide
-            r._calib_result = calib
-
-        # 原子写穿回补 meta_snapshots 中的校准字段与价格偏离度
-        conn.executemany("""
-            UPDATE meta_snapshots 
-            SET fit_score_delta = ?, calibrated_score = ?, lifecycle_status = ?, fit_action_guide = ?, price_now_ret = ?
-            WHERE scan_time = ? AND chain = ? AND lower(token_address) = lower(?)
-        """, [
-            (getattr(r, "fit_score_delta", 0.0), getattr(r, "calibrated_score", 0.0),
-             getattr(r, "lifecycle_status", "NORMAL"), getattr(r, "fit_action_guide", ""),
-             getattr(r, "price_now_ret", None),
-             scan_time, r.chain, r.token_address)
-            for r in all_arbitrated
-        ])
-        conn.commit()
-
-        # 构建第八屏四大精炼矩阵数据集
-        screen8_data = price_fit_radar.build_screen8_radar_data(all_arbitrated, conn=conn)
-        logger.info(f"第八屏雷达数据构建完成: L1={len(screen8_data.get('l1_top', []))}, L2={len(screen8_data.get('l2_top', []))}, Alert={len(screen8_data.get('alert_top', []))}, L3={len(screen8_data.get('l3_top', []))}")
-    except Exception as e:
-        logger.error(f"第八屏构建失败: {e}", exc_info=True)
-
     # ── 第七屏：Hop-2 大额资金穿透与长期仓位接力扫描 ──
     screen7_data = []
     try:
         from hop2_whale_scanner import scan_hop2_whales
         from position_handover import scan_position_handovers
         import sqlite3
-        src_conn = sqlite3.connect(config.SRC_DB_PATH)
+        src_conn = sqlite3.connect(f"file:{config.SRC_DB_PATH}?mode=ro", uri=True, timeout=30.0)
         tokens_for_s7 = [
             {"chain": d.chain, "token_address": d.token_address.lower(), "token_symbol": d.token_symbol}
             for d in all_data
@@ -245,7 +250,6 @@ def _check_engine_health(conn) -> list[dict]:
         "master":     ("watchlist",              "last_updated"),
         "opus":       ("opus_snapshots",         "scan_time"),
         "whale":      ("whale_snapshots",        "scan_time"),
-        "cost-basis": ("cost_basis_snapshots",   "scan_time"),
         "unified":    ("unified_results",        "scan_time"),
     }
     results = []

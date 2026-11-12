@@ -161,7 +161,6 @@ def load_snapshot_detail(
             is_contract,
             is_supernode,
             dex_ratio,
-            gmgn_verified,
             dex_ratio_hop2,
             entity_id
         FROM src_db.bubblemap_holders

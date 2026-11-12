@@ -65,8 +65,7 @@ def check_diamond(holders: list[dict]) -> dict:
             eid = h.get("entity_id") or ""
             dr = h.get("dex_ratio") or 0
             dr2 = h.get("dex_ratio_hop2") or 0
-            gv = h.get("gmgn_verified") or 0
-            has_dex = (dr >= 0.5) or (dr2 >= 0.5) or (gv >= 1)
+            has_dex = (dr >= 0.5) or (dr2 >= 0.5)
             if eid and has_dex:
                 entity_dex[eid] = True
 
@@ -74,10 +73,9 @@ def check_diamond(holders: list[dict]) -> dict:
         for h in acc_addrs:
             dr = h.get("dex_ratio") or 0
             dr2 = h.get("dex_ratio_hop2") or 0
-            gv = h.get("gmgn_verified") or 0
             eid = h.get("entity_id") or ""
 
-            if (dr >= 0.5) or (dr2 >= 0.5) or (gv >= 1):
+            if (dr >= 0.5) or (dr2 >= 0.5):
                 verified += 1
             elif eid and entity_dex.get(eid):
                 verified += 1
