@@ -389,12 +389,14 @@ def arbitrate(token: TokenEngineData, hop2_pct: float = 0.0, conn: sqlite3.Conne
             res.fresh_wallet_score = 0.50
     elif res.fresh_1_7d_count >= 10 and res.fresh_1_7d_hold_pct >= 2.0:
         res.fresh_wallet_score = 0.50
+    elif res.fresh_1_7d_count >= 10 and res.fresh_1_7d_hold_pct >= 1.0:
+        res.fresh_wallet_score = 0.25
     else:
         res.fresh_wallet_score = 0.00
 
     # 1.7 筹码三态形态分类器
     has_hop2 = (res.hop2_score > 0 or hop2_pct > 0.05)
-    has_fresh = (res.fresh_wallet_score > 0) or (res.fresh_1_7d_count >= 3 and res.fresh_1_7d_hold_pct >= 5.0) or (res.fresh_1_7d_count >= 10 and res.fresh_1_7d_hold_pct >= 2.0)
+    has_fresh = (res.fresh_wallet_score > 0) or (res.fresh_1_7d_count >= 3 and res.fresh_1_7d_hold_pct >= 5.0) or (res.fresh_1_7d_count >= 10 and res.fresh_1_7d_hold_pct >= 1.0)
     
     if has_hop2 and has_fresh:
         res.sybil_pattern = "DUAL_RESONANCE"
