@@ -196,6 +196,11 @@ def generate_report(
             category = "🚨 主力集中出货"
             strategy = "触发风控拦截 / 严禁做多抄底"
             reason = r.dump_reasons or "72h同源队列持仓断崖流失"
+        elif getattr(r, "cex_flow_status", "") == "INFLOW_DUMP" and r.meta_score >= 6.0:
+            category = "🚨 诱多充值背离"
+            strategy = "风控拦截 / 严禁介入"
+            flow_desc = getattr(r, "cex_flow_desc", "突发大额充值")
+            reason = f"DEX强吸筹({r.meta_score:.2f}分)但CEX突发充值抛压({flow_desc})"
         else:
             category = "⚠️ 动能衰竭破位"
             strategy = "暂停加仓 / 严格执行止损"
@@ -430,6 +435,9 @@ def generate_report(
             elif i_whale >= 0.6:
                 cat = "🚨 巨鲸派发/转入CEX"
                 strategy = "触发风控拦截 / 严禁做多抄底"
+            elif getattr(r, "cex_flow_status", "") == "INFLOW_DUMP" and r.meta_score >= 6.0:
+                cat = "🚨 诱多充值背离"
+                strategy = "风控拦截 / 严禁介入"
             elif i_cohort_dump > 0.0:
                 cat = "⚠️ 队列显著流失" if i_cohort_dump >= 0.5 else "⚠️ 队列持仓松动"
                 strategy = "严控多头仓位 / 暂停买入严密监控"
@@ -443,7 +451,13 @@ def generate_report(
             ret_str = f"{r.price_now_ret:+.1f}%" if r.price_now_ret is not None else "—"
             hold_str = f"{r.hold_delta_72h_pct:+.1f}%" if r.hold_delta_72h_pct is not None else "—"
             penalty_str = f"-{r.dump_penalty:.1f}" if r.dump_penalty > 0 else "0.0"
-            reasons = r.dump_reasons if r.dump_reasons else f"历史偏离亏损 {ret_str}"
+            if r.dump_reasons:
+                reasons = r.dump_reasons
+            elif cat == "🚨 诱多充值背离":
+                flow_desc = getattr(r, "cex_flow_desc", "突发大额充值")
+                reasons = f"DEX强吸筹({r.meta_score:.2f}分)但CEX突发充值抛压({flow_desc})"
+            else:
+                reasons = f"历史偏离亏损 {ret_str}"
 
             tok_str = format_token_cell(r.token_symbol, r.chain)
             md_lines.append(
