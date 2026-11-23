@@ -791,6 +791,20 @@ def generate_report(
                 verdict_str = item["decision_verdict"]
                 strat_str = item["strategy"]
                 md_lines.append(f"| {sym_str} | {stage_str} | {oi_str} | {chg_str} | {fr_str} | {lsr_str} | {verdict_str} | {strat_str} |")
+                md_lines.extend([
+                "",
+                "### ⏳ 看板 D：连续 5 轮高杠杆多快照时序演进轨迹与波动度 (Window = 5 Snapshots)",
+                "| 代币 (Symbol) | 5 轮持仓演化轨迹 (OI Trajectory) | 初值 → 现值 | 拟合增量 (Δ OI) | 波动度 (σ) | 动态时序演化定性 |",
+                "| :---: | :--- | :---: | :---: | :---: | :--- |",
+            ])
+            for t in crash_res.get("trajectory_top", [])[:15]:
+                sym_str = f"**{t['symbol']}**"
+                traj_str = f"`{t['trajectory_str']}`"
+                range_str = f"${t['init_oi']:.1f}M → ${t['curr_oi']:.1f}M"
+                delta_str = f"**{t['delta_oi']:+.2f}M ({t['pct_oi']:+.1f}%)**"
+                sigma_str = f"{t['std_oi']:.2f} (norm {t['sigma_norm']:.2f})"
+                thesis_str = t["thesis"]
+                md_lines.append(f"| {sym_str} | {traj_str} | {range_str} | {delta_str} | {sigma_str} | {thesis_str} |")
     except Exception as e:
         logger.error(f"第十一屏构建失败: {e}", exc_info=True)
 

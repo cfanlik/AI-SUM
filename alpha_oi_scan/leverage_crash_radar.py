@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 leverage_crash_radar — 全网高杠杆衍生品去杠杆与闪崩踩踏风控雷达引擎 (Screen 11 Core)
-实现四态有限状态机 (FSM) 与 CEX 主导暴涨逼空、时序顶背离、连环踩踏去杠杆三维漏斗判定。
+包含：四态有限状态机 (FSM)、暴涨逼空/顶背离/踩踏判定、以及连续 5 轮多快照时序演进轨迹 (σ) 拟合矩阵。
 """
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import os
 import sys
 import sqlite3
 import logging
+import math
 from datetime import datetime
 
 logger = logging.getLogger("leverage_crash_radar")
@@ -22,7 +23,6 @@ def get_db_connections(sum_db_path: str = None, src_db_path: str = None):
     
     conn = sqlite3.connect(sum_db_path)
     conn.row_factory = sqlite3.Row
-    # 动态挂载 select.db 作为 src_db
     try:
         conn.execute(f"ATTACH DATABASE '{src_db_path}' AS src_db")
     except sqlite3.OperationalError:
@@ -41,12 +41,7 @@ def classify_state_and_risk(
     price_change_24h: float = 0.0,
     bid_depth_2pct: float = 0.0
 ) -> dict:
-    """
-    根据四态状态机评定标的当前所处的杠杆与风控生命周期阶段
-    """
     oi_mcap_ratio = (total_oi_usd / market_cap_usd) if market_cap_usd > 0 else 0.0
-    
-    # 脆性系数 (BidDepth / OI)，若深度未知兜底为极脆弱
     fragility_ratio = (bid_depth_2pct / total_oi_usd) if (bid_depth_2pct > 0 and total_oi_usd > 0) else 0.0
     
     stage = "─ DORMANT"
@@ -58,7 +53,6 @@ def classify_state_and_risk(
     is_crash = False
     is_overheat = False
     
-    # 1. 状态 3: 连环踩踏去杠杆态 (CASCADING_CRASH)
     if total_oi_usd >= 3000000 and (oi_change_24h <= -0.30 or (oi_change_24h <= -0.20 and price_change_24h <= -0.15)):
         stage = "💀 CASCADING-CRASH"
         verdict = f"单日去杠杆 {oi_change_24h*100:.1f}%，多杀多连环踩踏中"
@@ -66,10 +60,8 @@ def classify_state_and_risk(
         risk_level = "BLACK"
         is_crash = True
         
-    # 2. 状态 2: 极度脆弱火药桶态 (FRAGILITY_OVERHEAT)
     elif oi_mcap_ratio >= 2.0 or (total_oi_usd >= 10000000 and oi_mcap_ratio >= 1.0):
         is_overheat = True
-        # 顶背离检测：价格滞涨/微涨，但 OI 剧烈流失
         if price_change_24h >= -0.05 and oi_change_24h <= -0.15:
             stage = "🚨 FRAGILITY-DIVERGENCE"
             verdict = f"杠杆倍率 {oi_mcap_ratio:.1f}x 且出现顶背离 (ΔOI {oi_change_24h*100:.1f}%)"
@@ -82,7 +74,6 @@ def classify_state_and_risk(
             strategy = "⚠️ 警惕现货抽单闪崩 / 逢高止盈减仓"
             risk_level = "RED"
             
-    # 3. 状态 1: 高杠杆轧空扩张态 (SQUEEZE_EXPANSION)
     elif total_oi_usd >= 5000000 and (oi_change_24h >= 0.80 or (oi_change_24h >= 0.35 and long_short_ratio <= 0.70)):
         stage = "🚀 SQUEEZE-EXPANSION"
         if long_short_ratio <= 0.60:
@@ -93,7 +84,6 @@ def classify_state_and_risk(
         risk_level = "PURPLE"
         is_squeeze = True
         
-    # 4. 状态 0: 潜伏蓄水态
     else:
         stage = "🌱 DORMANT-SETUP"
         verdict = f"OI规模稳步运行，未见极端杠杆失衡"
@@ -123,14 +113,72 @@ def classify_state_and_risk(
         "is_overheat": is_overheat
     }
 
+def get_5_snapshot_trajectories(conn: sqlite3.Connection, symbols: list[str]) -> list[dict]:
+    if not symbols:
+        return []
+        
+    trajectories = []
+    for sym in symbols:
+        try:
+            cur = conn.execute("""
+                SELECT oi_value_usd, mark_price, funding_rate, long_short_ratio, scan_time
+                FROM src_db.futures_snapshots
+                WHERE symbol = ?
+                ORDER BY scan_time DESC
+                LIMIT 5
+            """, (sym,))
+            rows = [dict(r) for r in cur.fetchall()]
+            if len(rows) < 3:
+                continue
+            rows.reverse()
+            
+            ois = [r['oi_value_usd'] / 1e6 for r in rows if r['oi_value_usd']]
+            if not ois:
+                continue
+                
+            init_oi, curr_oi = ois[0], ois[-1]
+            delta_oi = curr_oi - init_oi
+            pct_oi = (delta_oi / init_oi * 100) if init_oi > 0 else 0.0
+            
+            mean_oi = sum(ois) / len(ois)
+            variance = sum((x - mean_oi) ** 2 for x in ois) / len(ois)
+            std_oi = math.sqrt(variance)
+            sigma_norm = (std_oi / mean_oi) if mean_oi > 0 else 0.0
+            
+            traj_str = " → ".join([f"${x:.1f}M" for x in ois])
+            
+            if pct_oi >= 40.0 and sigma_norm >= 0.15:
+                thesis = "🚀 杠杆强力扩张逼空 (加速拉升)"
+            elif pct_oi <= -30.0:
+                thesis = "💀 连续去杠杆踩踏中 (闪崩避险)"
+            elif pct_oi <= -15.0 and std_oi >= 1.0:
+                thesis = "🚨 高位持续拐头流失 (顶背离出货)"
+            elif sigma_norm >= 0.30:
+                thesis = "⚡ 多空激烈拉锯博弈 (洗盘剧烈)"
+            else:
+                thesis = "🌱 稳步沉淀蓄水 (低波动运行)"
+                
+            trajectories.append({
+                "symbol": sym,
+                "trajectory_str": traj_str,
+                "init_oi": init_oi,
+                "curr_oi": curr_oi,
+                "delta_oi": delta_oi,
+                "pct_oi": pct_oi,
+                "std_oi": std_oi,
+                "sigma_norm": sigma_norm,
+                "thesis": thesis
+            })
+        except Exception as e:
+            logger.debug(f"提取 {sym} 5轮轨迹失败: {e}")
+            continue
+            
+    trajectories.sort(key=lambda x: abs(x["pct_oi"]), reverse=True)
+    return trajectories
+
 def run_leverage_crash_scan(sum_db_path: str = None, src_db_path: str = None) -> dict:
-    """
-    全量扫描并输出第十一屏四大风控数据看板
-    """
     conn = get_db_connections(sum_db_path, src_db_path)
     
-    # 1. 尝试从 alpha_oi_daily_tracking 获取最新快照
-    # 同时关联 src_db.futures_snapshots 与 src_db.tokens
     try:
         cur = conn.execute("""
             SELECT 
@@ -172,35 +220,39 @@ def run_leverage_crash_scan(sum_db_path: str = None, src_db_path: str = None) ->
         )
         items.append(classified)
         
-    # 分解看板
-    # 看板 A: 火药桶与高杠杆榜 (OI/Mcap 降序或 OI 规模排序)
     overheat_list = sorted([x for x in items if x["is_overheat"] or x["total_oi_usd"] >= 10000000], 
                            key=lambda x: (x["oi_mcap_ratio"] if x["oi_mcap_ratio"] < 99 else 99, x["total_oi_usd"]), 
                            reverse=True)
                            
-    # 看板 B: 时序顶背离雷达 (价格滞涨但 OI 急跌，或 OI 24h 降幅 >= 15%)
     divergence_list = sorted([x for x in items if x["oi_change_24h"] <= -0.15 and x["total_oi_usd"] >= 2000000],
                             key=lambda x: x["oi_change_24h"])
                             
-    # 看板 C: 闪崩连环踩踏去杠杆 (is_crash)
     crash_list = sorted([x for x in items if x["is_crash"]],
                         key=lambda x: x["oi_change_24h"])
                         
-    # 看板 D: 衍生品暴涨逼空突破榜 (is_squeeze)
     squeeze_list = sorted([x for x in items if x["is_squeeze"]],
                          key=lambda x: x["oi_change_24h"], reverse=True)
+                         
+    key_symbols = list(dict.fromkeys(
+        [x["symbol"] for x in overheat_list[:10]] + 
+        [x["symbol"] for x in crash_list[:5]] + 
+        [x["symbol"] for x in squeeze_list[:10]] + 
+        ['EVAA', 'AIN', 'Q', 'AKE', 'IRYS', 'JCT', 'BTW', 'FIL', 'CAKE']
+    ))
+    trajectory_list = get_5_snapshot_trajectories(conn, key_symbols)
                          
     return {
         "overheat_top": overheat_list[:15],
         "divergence_top": divergence_list[:15],
         "crash_top": crash_list[:15],
         "squeeze_top": squeeze_list[:15],
+        "trajectory_top": trajectory_list[:15],
         "total_scanned": len(items)
     }
 
 if __name__ == "__main__":
     res = run_leverage_crash_scan()
-    print(f"扫描完成，总标的数: {res['total_scanned']}")
-    print(f"高杠杆火药桶 Top 3: {[x['symbol'] for x in res['overheat_top'][:3]]}")
-    print(f"闪崩踩踏 Top 3: {[x['symbol'] for x in res['crash_top'][:3]]}")
-    print(f"轧空暴涨 Top 3: {[x['symbol'] for x in res['squeeze_top'][:3]]}")
+    print(f"扫描完成，总数: {res['total_scanned']}")
+    print(f"5轮轨迹提取数量: {len(res['trajectory_top'])}")
+    for t in res['trajectory_top'][:5]:
+        print(f"  {t['symbol']}: {t['trajectory_str']} | Δ: {t['delta_oi']:+.2f}M ({t['pct_oi']:+.1f}%) | σ: {t['std_oi']:.2f}")
