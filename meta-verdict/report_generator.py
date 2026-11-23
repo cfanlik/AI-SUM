@@ -723,6 +723,77 @@ def generate_report(
                 md_lines.append(f"| {sym_str} | {stage_str} | {oi_str} | {ex_str} | {mcap_str} | {ratio_str} | {chg_str} | {top20_str} | {gain_str} | {verdict_str} | {strat_str} |")
     except Exception as e:
         logger.error(f"第十屏构建失败: {e}", exc_info=True)
+    
+    # --- 第十一屏：全网高杠杆衍生品去杠杆与闪崩踩踏风控驾驶舱 ---
+    try:
+        _ai_sum_root = str(Path(__file__).resolve().parent.parent)
+        if _ai_sum_root not in sys.path:
+            sys.path.insert(0, _ai_sum_root)
+        from alpha_oi_scan.leverage_crash_radar import run_leverage_crash_scan
+        crash_res = run_leverage_crash_scan()
+        if crash_res:
+            md_lines.extend([
+                "",
+                "---",
+                "",
+                "## 🚨 第十一屏：全网高杠杆衍生品去杠杆与闪崩踩踏风控驾驶舱 (Extreme Leverage Fragility & Crash Cascading Radar)",
+                "",
+                "> **核心逻辑**: 当标的 `OI / 流通市值 >= 200%` 或单日去杠杆 `ΔOI <= -30%` 时，场内进入极度脆弱火药桶或连环多杀多踩踏态；结合 CEX 现货 2% 深度抽单与顶背离检测，100% 物理阻断逆势追多与盲目抄底接飞刀。",
+                "",
+                "### 🚦 看板 A：全网极度脆弱高杠杆火药桶预警榜 Top 15 (OI/Mcap 风险降序)",
+                "| 代币 (Symbol) | 决策阶段 (Stage) | 全网合约持仓 (OI) | 流通市值 (Mcap) | 杠杆倍率 (OI/Mcap) | 24H OI增减 | 资金费率 | 多空比 (LSR) | 极度脆弱性定性 | 推荐风控指令 |",
+                "| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- | :--- |",
+            ])
+            for item in crash_res.get("overheat_top", [])[:15]:
+                sym_str = f"**{item['symbol']}**"
+                stage_str = f"**{item['stage']}**"
+                oi_str = f"${item['total_oi_usd']/1e6:.1f}M"
+                mcap_str = f"${item['market_cap_usd']/1e6:.1f}M" if item["market_cap_usd"] > 0 else "—"
+                ratio_str = f"**{item['oi_mcap_ratio']*100:.0f}%**" if item["oi_mcap_ratio"] < 99 else "超标"
+                chg_str = f"{item['oi_change_24h']*100:+.1f}%"
+                fr_str = f"{item['funding_rate']:.5f}"
+                lsr_str = f"{item['long_short_ratio']:.2f}"
+                verdict_str = item["decision_verdict"]
+                strat_str = item["strategy"]
+                md_lines.append(f"| {sym_str} | {stage_str} | {oi_str} | {mcap_str} | {ratio_str} | {chg_str} | {fr_str} | {lsr_str} | {verdict_str} | {strat_str} |")
+                
+            md_lines.extend([
+                "",
+                "### 💀 看板 B：多杀多连环爆仓去杠杆进行时 (ΔOI <= -15% & 踩踏出货)",
+                "| 代币 (Symbol) | 决策阶段 (Stage) | 全网持仓 (OI) | 单日去杠杆幅度 (ΔOI) | 1H 去杠杆 (Δ) | 资金费率 | 多空比 (LSR) | 踩踏微观行为归因 | 强制避险指令 |",
+                "| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- | :--- |",
+            ])
+            for item in crash_res.get("crash_top", [])[:10]:
+                sym_str = f"**{item['symbol']}**"
+                stage_str = f"**{item['stage']}**"
+                oi_str = f"${item['total_oi_usd']/1e6:.1f}M"
+                chg_str = f"**{item['oi_change_24h']*100:+.1f}%**"
+                chg1h_str = f"{item['oi_change_1h']*100:+.1f}%"
+                fr_str = f"{item['funding_rate']:.5f}"
+                lsr_str = f"{item['long_short_ratio']:.2f}"
+                verdict_str = item["decision_verdict"]
+                strat_str = item["strategy"]
+                md_lines.append(f"| {sym_str} | {stage_str} | {oi_str} | {chg_str} | {chg1h_str} | {fr_str} | {lsr_str} | {verdict_str} | {strat_str} |")
+                
+            md_lines.extend([
+                "",
+                "### 🚀 看板 C：CEX 衍生品强轧空暴涨突破榜 (Squeeze Surge Top 10)",
+                "| 代币 (Symbol) | 决策阶段 (Stage) | 全网持仓 (OI) | 24H OI增幅 (Δ) | 资金费率 | 多空比 (LSR) | 轧空动能定性 | 顺势交易策略 |",
+                "| :---: | :---: | :---: | :---: | :---: | :---: | :--- | :--- |",
+            ])
+            for item in crash_res.get("squeeze_top", [])[:10]:
+                sym_str = f"**{item['symbol']}**"
+                stage_str = f"**{item['stage']}**"
+                oi_str = f"${item['total_oi_usd']/1e6:.1f}M"
+                chg_str = f"**{item['oi_change_24h']*100:+.1f}%**"
+                fr_str = f"{item['funding_rate']:.5f}"
+                lsr_str = f"**{item['long_short_ratio']:.2f}**"
+                verdict_str = item["decision_verdict"]
+                strat_str = item["strategy"]
+                md_lines.append(f"| {sym_str} | {stage_str} | {oi_str} | {chg_str} | {fr_str} | {lsr_str} | {verdict_str} | {strat_str} |")
+    except Exception as e:
+        logger.error(f"第十一屏构建失败: {e}", exc_info=True)
+
     md_lines.extend([
         "",
         "---",
