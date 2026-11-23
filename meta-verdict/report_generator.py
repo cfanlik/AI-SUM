@@ -738,8 +738,31 @@ def generate_report(
                 "",
                 "## 🚨 第十一屏：全网高杠杆衍生品去杠杆与闪崩踩踏风控驾驶舱 (Extreme Leverage Fragility & Crash Cascading Radar)",
                 "",
-                "> **核心逻辑**: 当标的 `OI / 流通市值 >= 200%` 或单日去杠杆 `ΔOI <= -30%` 时，场内进入极度脆弱火药桶或连环多杀多踩踏态；结合 CEX 现货 2% 深度抽单与顶背离检测，100% 物理阻断逆势追多与盲目抄底接飞刀。",
-                "",
+            ])
+            # 提取衍生品快照最新采集时间
+            latest_time_str = "未知"
+            freshness_alert = "✅ 实时数据"
+            try:
+                import sqlite3 as _sql
+                _c = _sql.connect('/opt/select-coin/data/select.db')
+                _max_t = _c.execute("SELECT MAX(scan_time) FROM futures_snapshots").fetchone()[0]
+                _c.close()
+                if _max_t:
+                    latest_time_str = _max_t
+                    _dt = datetime.strptime(_max_t, "%Y-%m-%d %H:%M:%S")
+                    _diff_h = (datetime.now() - _dt).total_seconds() / 3600.0
+                    if _diff_h > 6.0:
+                        freshness_alert = f"⚠️ 存在时滞 (距今已 {_diff_h:.1f}h，待下轮前置刷新)"
+                    else:
+                        freshness_alert = "✅ 实时同步"
+            except Exception:
+                pass
+
+            md_lines.extend([
+                f"> **核心逻辑**: 当标的 `OI / 流通市值 >= 200%` 或单日去杠杆 `ΔOI <= -30%` 时，场内进入极度脆弱火药桶或连环多杀多踩踏态；结合 CEX 现货 2% 深度抽单与顶背离检测，100% 物理阻断逆势追多与盲目抄底接飞刀。",
+                f"> **数据新鲜度**: 全网衍生品快照时间: `{latest_time_str}` ({freshness_alert})",
+            ])
+            md_lines.extend(["",
                 "### 🚦 看板 A：全网极度脆弱高杠杆火药桶预警榜 Top 15 (OI/Mcap 风险降序)",
                 "| 代币 (Symbol) | 决策阶段 (Stage) | 全网合约持仓 (OI) | 流通市值 (Mcap) | 杠杆倍率 (OI/Mcap) | 24H OI增减 | 资金费率 | 多空比 (LSR) | 极度脆弱性定性 | 推荐风控指令 |",
                 "| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- | :--- |",

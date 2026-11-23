@@ -15,7 +15,11 @@ import json
 import sqlite3
 import argparse
 
+# 容错步骤集合：即使外部网络偶发抖动失败，也不阻塞主报告流水线
+OPTIONAL_STEPS = {"futures-collect"}
+
 STEPS = [
+    ("futures-collect", ["python3", "/opt/select-coin/futures/binance_futures.py"]),
     ("master-scan", ["python3", "master-scan/run.py"]),
     ("opus-scan", ["python3", "opus-scan/run.py", "--offline"]),
     ("unified-scan", ["python3", "unified-scan/run.py", "--offline"]),
@@ -171,11 +175,15 @@ def run_pipeline(force: bool = False, source: str = "auto"):
                     log_file.write(f"[{name}] SUCCESS. Elapsed: {elapsed:.1f}s\n")
                 except subprocess.CalledProcessError as e:
                     elapsed = time.time() - step_start
-                    print(f"失败! ({elapsed:.1f}s)")
-                    log_file.write(f"[{name}] FAILED. Exit code: {e.returncode}. Elapsed: {elapsed:.1f}s\n")
-                    print(f"❌ 流水线在步骤 [{name}] 中断。退出码: {e.returncode}。请检查 {pipeline_log} 日志。")
-                    record_processed_batch(root_dir, current_batch, current_snap_time, status=f"failed_at_{name}")
-                    sys.exit(e.returncode)
+                    if name in OPTIONAL_STEPS:
+                        print(f"⚠️ 可选步骤警告 ({elapsed:.1f}s) - 外部接口波动，降级放行")
+                        log_file.write(f"[{name}] WARNING (Optional step). Exit code: {e.returncode}. Elapsed: {elapsed:.1f}s\n")
+                    else:
+                        print(f"失败! ({elapsed:.1f}s)")
+                        log_file.write(f"[{name}] FAILED. Exit code: {e.returncode}. Elapsed: {elapsed:.1f}s\n")
+                        print(f"❌ 流水线在步骤 [{name}] 中断。退出码: {e.returncode}。请检查 {pipeline_log} 日志。")
+                        record_processed_batch(root_dir, current_batch, current_snap_time, status=f"failed_at_{name}")
+                        sys.exit(e.returncode)
                 except Exception as e:
                     elapsed = time.time() - step_start
                     print(f"异常! ({elapsed:.1f}s)")
