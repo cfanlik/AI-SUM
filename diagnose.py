@@ -1,6 +1,7 @@
+import os
 import sqlite3
 
-c = sqlite3.connect('/opt/AI-SUM/data/select-sum.db')
+c = sqlite3.connect(os.getenv('SUM_DB_PATH', '/opt/AI-SUM/select-sum.db'))
 c.row_factory = sqlite3.Row
 
 # 1. DIAMOND 代币在 opus 中的命中情况

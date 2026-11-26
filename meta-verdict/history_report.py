@@ -2120,7 +2120,9 @@ def l3_gate_status(out_db_path=None) -> str:
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
         
-        hist = c.execute("SELECT * FROM backtest_run_history ORDER BY run_time DESC LIMIT 1").fetchone()
+        hist_cols = {r[1] for r in c.execute("PRAGMA table_info(backtest_run_history)").fetchall()}
+        hist_order = "run_time DESC" if "run_time" in hist_cols else "rowid DESC"
+        hist = c.execute(f"SELECT * FROM backtest_run_history ORDER BY {hist_order} LIMIT 1").fetchone()
         decisions = c.execute("SELECT * FROM signal_decision_result WHERE split_type='Time_Holdout'").fetchall()
         
         # C8: 提取特征与漂移的独立细分个数
@@ -2128,20 +2130,26 @@ def l3_gate_status(out_db_path=None) -> str:
         coverage_fail = c.execute("SELECT COUNT(*) FROM asset_identity WHERE identity_pass=0 AND reason_code IN ('insufficient_post_history_coverage', 'history_gap_too_large')").fetchone()[0]
         drift_conflict = c.execute("SELECT COUNT(*) FROM asset_identity WHERE identity_conflict=1").fetchone()[0]
         
-        # 提取 manifest (C7)
-        manifest = c.execute("SELECT * FROM run_manifest ORDER BY run_time DESC LIMIT 1").fetchone()
+        # 提取 manifest (C7) — 兼容实盘 as_of_utc 与测试 run_time 两种 Schema
+        rm_cols = {r[1] for r in c.execute("PRAGMA table_info(run_manifest)").fetchall()}
+        rm_order = "run_time DESC" if "run_time" in rm_cols else ("as_of_utc DESC" if "as_of_utc" in rm_cols else "rowid DESC")
+        manifest = c.execute(f"SELECT * FROM run_manifest ORDER BY {rm_order} LIMIT 1").fetchone()
         
         conn.close()
         
+        manifest_text = ""
+        if manifest:
+            m_dict = dict(manifest)
+            if m_dict.get('git_commit') or m_dict.get('output_table_hash'):
+                manifest_text = f" | **可审计 Git**: `{m_dict.get('git_commit', 'N/A')}` | **数据表 Hash**: `{m_dict.get('output_table_hash', 'N/A')}`"
+            else:
+                manifest_text = f" | **Run ID**: `{m_dict.get('run_id', 'N/A')}` | **As-Of**: `{m_dict.get('as_of_utc', 'N/A')}`"
+
         if not hist:
-            return "## 🛡️ 模块 0: Launch Path 验证系统\n\n> ⚠ 尚无历史回测记录，准入状态: **DENIED**\n"
+            return f"## 🛡️ 模块 0: Launch Path 验证系统\n\n> ⚠ 尚无历史回测记录 (身份门控剔除: 池缺失={pool_missing}, 覆盖不足={coverage_fail}, 冲突={drift_conflict}{manifest_text})，准入状态: **DENIED**\n"
             
         b_count = sum(1 for r in decisions if r['path_label'] == 'B_triggered')
         unique_ids = len(set((r['chain'], r['token_address'], r['pool_address']) for r in decisions if r['path_label'] == 'B_triggered'))
-        
-        manifest_text = ""
-        if manifest:
-            manifest_text = f" | **可审计 Git**: `{manifest['git_commit']}` | **数据表 Hash**: `{manifest['output_table_hash']}`"
             
         lines = [
             "## 🛡️ 模块 0: Launch Path 验证系统与 L3 生产准入风控\n",

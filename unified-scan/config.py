@@ -41,7 +41,7 @@ _SRC_DEFAULT = str(
 )
 SRC_DB_PATH: str = os.environ.get("SRC_DB_PATH", _SRC_DEFAULT)
 
-_SUM_DEFAULT = str(Path(__file__).parent.parent / "data" / "select-sum.db")
+_SUM_DEFAULT = str(Path(__file__).parent.parent / "select-sum.db")
 SUM_DB_PATH: str = os.environ.get("SUM_DB_PATH", _SUM_DEFAULT)
 Path(SUM_DB_PATH).parent.mkdir(parents=True, exist_ok=True)
 

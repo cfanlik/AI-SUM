@@ -13,7 +13,7 @@ if _env_path.exists():
 
 # ── 数据库路径 ──
 SRC_DB_PATH = os.getenv("SRC_DB_PATH", "/opt/select-coin/data/select.db")
-SUM_DB_PATH = os.getenv("SUM_DB_PATH", "/opt/AI-SUM/data/select-sum.db")
+SUM_DB_PATH = os.getenv("SUM_DB_PATH", str(Path(__file__).resolve().parent.parent / "select-sum.db"))
 
 # ── 报告输出 ──
 REPORT_DIR = os.getenv("CB_REPORT_DIR", str(Path(__file__).resolve().parent.parent / "report" / "cost-basis"))

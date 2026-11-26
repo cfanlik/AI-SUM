@@ -33,7 +33,7 @@ SRC_DB_PATH: str = os.environ.get("SRC_DB_PATH", _SRC_DB_DEFAULT)
 
 # 独立分析库（读写）—— V5 追踪数据、diff 缓存、运行记录
 # 路径由 .env 的 SUM_DB_PATH 控制，回退到同级 data/ 目录
-_SUM_DB_DEFAULT = str(Path(__file__).parent.parent / "data" / "select-sum.db")
+_SUM_DB_DEFAULT = str(Path(__file__).parent.parent / "select-sum.db")
 SUM_DB_PATH: str = os.environ.get("SUM_DB_PATH", _SUM_DB_DEFAULT)
 # 确保目录存在
 Path(SUM_DB_PATH).parent.mkdir(parents=True, exist_ok=True)

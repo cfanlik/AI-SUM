@@ -77,7 +77,8 @@ def evaluate_alpha_token(
     gain_90d = float(token_meta.get("gain_90d_ratio") or 1.0)
     price = float(token_meta.get("price_now") or 0.0)
 
-    oi_ratio = (oi_usd / mcap) if mcap > 0 else 999.0
+    has_mcap = mcap > 0
+    oi_ratio = (oi_usd / mcap) if has_mcap else 0.0
 
     # 门槛 1: 必须为 BSC 链
     is_bsc = (chain == "BSC" or "BSC" in chain)
@@ -86,19 +87,19 @@ def evaluate_alpha_token(
 
     risk_flags = []
     
-    # 阶段判定与分类
-    if oi_ratio > 0.70 or oi_ratio > 1.0:
+    # 阶段判定与分类（缺失市值数据时禁止赋 999 误判 L3-Crash-Risk）
+    if has_mcap and (oi_ratio > 0.70 or oi_ratio > 1.0):
         stage = "🛑 L3-Crash-Risk"
         verdict = "超杠杆博弈危险区"
         risk_flags.append(f"极端超杠杆(OI达市值{oi_ratio*100:.1f}%)")
         strat = "绝对一票否决 / 严禁介入抄底"
-    elif oi_ratio > 0.35 and oi_ratio <= 0.70:
+    elif has_mcap and (0.35 < oi_ratio <= 0.70):
         stage = "⚡ L2-Squeeze"
         verdict = "拉升逼空博弈区"
         if oi_chg24 > 0.30:
             risk_flags.append("持仓暴增加速")
         strat = "多空博弈白热化，仅限短线带损，严禁高位重仓"
-    elif oi_ratio <= oi_threshold and oi_chg24 < oi_chg_threshold and is_oi_5m and is_bsc:
+    elif has_mcap and oi_ratio <= oi_threshold and oi_chg24 < oi_chg_threshold and is_oi_5m and is_bsc:
         if top20 >= top20_threshold and gain_90d <= gain_threshold:
             stage = "🚀 L1-Alpha-OI"
             verdict = "黄金潜伏建仓期"
@@ -114,6 +115,8 @@ def evaluate_alpha_token(
     else:
         stage = "─ L4-观察/未达标"
         verdict = "常态观察标的"
+        if not has_mcap:
+            risk_flags.append("缺失市值数据(暂不计杠杆比)")
         if not is_oi_5m:
             risk_flags.append(f"合约持仓不足5M(${oi_usd/1e6:.1f}M)")
         if not is_bsc:
@@ -203,13 +206,35 @@ def run_alpha_scan(conn: sqlite3.Connection = None, oi_threshold: float = 0.25) 
         top20_ratio = 0.0
         gain_90d = 1.0
 
-        # 仅对具有有效链上合约地址的标的查询 Gecko 市值与链上 Top20 控盘
-        if addr.startswith("0x"):
+        # 对有效链上合约地址（含 EVM/Solana）及 Symbol 多路查询 Gecko/token_names 市值兜底
+        base_sym = sym[:-4] if sym.endswith("USDT") and len(sym) > 4 else sym
+        if not addr:
+            try:
+                tn_match = conn.execute("""
+                    SELECT tn.chain, tn.token_address, COALESCE(NULLIF(tn.market_cap_usd, 0), 0)
+                    FROM src_db.token_names tn
+                    LEFT JOIN src_db.gecko_market_data gk
+                        ON gk.chain = tn.chain AND LOWER(gk.token_address) = LOWER(tn.token_address)
+                    WHERE UPPER(tn.symbol) IN (?, ?)
+                    ORDER BY COALESCE(gk.reserve_usd, 0) DESC, gk.scan_time DESC
+                    LIMIT 1
+                """, (base_sym, sym)).fetchone()
+                if tn_match:
+                    if tn_match[0] and chain == "UNKNOWN":
+                        chain = str(tn_match[0]).upper()
+                    if tn_match[1]:
+                        addr = str(tn_match[1])
+                    if tn_match[2] and float(tn_match[2]) > 0:
+                        mcap = float(tn_match[2])
+            except Exception:
+                pass
+
+        if addr:
             gk = conn.execute("""
                 SELECT COALESCE(NULLIF(market_cap_usd, 0), fdv_usd, 0), price_usd
                 FROM src_db.gecko_market_data
-                WHERE token_address = ?
-                ORDER BY scan_time DESC LIMIT 1
+                WHERE LOWER(token_address) = LOWER(?)
+                ORDER BY COALESCE(reserve_usd, 0) DESC, scan_time DESC LIMIT 1
             """, (addr,)).fetchone()
             if gk and gk[0]:
                 mcap = float(gk[0])
@@ -219,7 +244,7 @@ def run_alpha_scan(conn: sqlite3.Connection = None, oi_threshold: float = 0.25) 
                     mcap = float(tn[0])
 
             # 查 Top 20 链上控盘度：强制走 (chain, token_address, snapshot_time) 组合索引，杜绝无快照聚合与跨链漏查
-            if chain.upper() in ("BSC", "56") or "BSC" in chain.upper():
+            if addr.startswith("0x") and (chain.upper() in ("BSC", "56") or "BSC" in chain.upper()):
                 top20_row = conn.execute("""
                     SELECT SUM(hold_percentage)
                     FROM src_db.bubblemap_holders

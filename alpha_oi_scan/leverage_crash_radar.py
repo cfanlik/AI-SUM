@@ -183,8 +183,9 @@ def run_leverage_crash_scan(sum_db_path: str = None, src_db_path: str = None) ->
         cur = conn.execute("""
             SELECT 
                 f.symbol,
+                f.token_address,
                 f.oi_value_usd as total_oi_usd,
-                COALESCE(a.market_cap_usd, 0.0) as market_cap_usd,
+                COALESCE(NULLIF(a.market_cap_usd, 0), tn.market_cap_usd, 0.0) as market_cap_usd,
                 f.oi_change_24h,
                 f.oi_change_1h,
                 f.funding_rate,
@@ -198,6 +199,12 @@ def run_leverage_crash_scan(sum_db_path: str = None, src_db_path: str = None) ->
                 GROUP BY symbol 
                 HAVING id = MAX(id)
             ) a ON f.symbol = a.symbol
+            LEFT JOIN (
+                SELECT UPPER(symbol) as usym, MAX(market_cap_usd) as market_cap_usd
+                FROM src_db.token_names
+                WHERE market_cap_usd > 0
+                GROUP BY UPPER(symbol)
+            ) tn ON tn.usym = REPLACE(UPPER(f.symbol), 'USDT', '')
             WHERE f.scan_time = (SELECT MAX(scan_time) FROM src_db.futures_snapshots)
         """)
         rows = cur.fetchall()
@@ -205,9 +212,24 @@ def run_leverage_crash_scan(sum_db_path: str = None, src_db_path: str = None) ->
         logger.error(f"查询 futures_snapshots 失败: {e}")
         rows = []
         
+    gecko_mcap_map: dict[str, float] = {}
+    try:
+        for gr in conn.execute("""
+            SELECT LOWER(token_address) as addr, COALESCE(NULLIF(market_cap_usd, 0), fdv_usd, 0) as mc
+            FROM src_db.gecko_market_data
+            WHERE COALESCE(NULLIF(market_cap_usd, 0), fdv_usd, 0) > 0
+            ORDER BY scan_time DESC
+        """).fetchall():
+            if gr["addr"] and gr["addr"] not in gecko_mcap_map:
+                gecko_mcap_map[gr["addr"]] = float(gr["mc"])
+    except Exception:
+        pass
+
     items = []
     for r in rows:
         row_dict = dict(r)
+        if not (row_dict.get("market_cap_usd") or 0) and row_dict.get("token_address"):
+            row_dict["market_cap_usd"] = gecko_mcap_map.get(str(row_dict["token_address"]).lower(), 0.0)
         classified = classify_state_and_risk(
             symbol=row_dict["symbol"],
             total_oi_usd=row_dict["total_oi_usd"] or 0.0,

@@ -42,6 +42,18 @@ def scan_position_handovers(
         return result
 
     cursor = src_conn.cursor()
+    try:
+        bm_cols = {r[1] for r in cursor.execute("PRAGMA table_info(bubblemap_holders)").fetchall()}
+    except Exception:
+        bm_cols = set()
+    if "gmgn_buy_cost_usd" in bm_cols and "buy_amt_usd" in bm_cols:
+        cost_expr = "COALESCE(gmgn_buy_cost_usd, buy_amt_usd, 0.0) AS cost_usd"
+    elif "gmgn_buy_cost_usd" in bm_cols:
+        cost_expr = "COALESCE(gmgn_buy_cost_usd, 0.0) AS cost_usd"
+    elif "buy_amt_usd" in bm_cols:
+        cost_expr = "COALESCE(buy_amt_usd, 0.0) AS cost_usd"
+    else:
+        cost_expr = "0.0 AS cost_usd"
 
     for t in tokens:
         chain = t.get("chain", "")
@@ -95,8 +107,8 @@ def scan_position_handovers(
 
         # 3. 查最新快照中的持仓大户 (命中 idx_bm_snap_chain_token 复合索引)
         try:
-            late_holders = cursor.execute("""
-                SELECT wallet_address, hold_amount, hold_percentage
+            late_holders = cursor.execute(f"""
+                SELECT wallet_address, hold_amount, hold_percentage, {cost_expr}
                 FROM bubblemap_holders
                 WHERE snapshot_time = ? AND chain = ? AND token_address = ?
                   AND is_cex = 0 AND is_contract = 0 AND hold_percentage >= 1.0
@@ -125,8 +137,8 @@ def scan_position_handovers(
         # 5. 遍历采样快照对比等额平移
         for h_snap, span_days in sorted(valid_hist_snaps, key=lambda x: x[1], reverse=True):
             try:
-                hist_holders = cursor.execute("""
-                    SELECT wallet_address, hold_amount, hold_percentage
+                hist_holders = cursor.execute(f"""
+                    SELECT wallet_address, hold_amount, hold_percentage, {cost_expr}
                     FROM bubblemap_holders
                     WHERE snapshot_time = ? AND chain = ? AND token_address = ?
                       AND is_cex = 0 AND is_contract = 0 AND hold_percentage >= 1.0
@@ -135,7 +147,7 @@ def scan_position_handovers(
                 hist_holders = []
 
             for eh in hist_holders:
-                e_addr, e_amt, e_pct = eh
+                e_addr, e_amt, e_pct, e_cost = eh
                 e_amt = float(e_amt or 0.0)
                 eff_usd = e_amt * price_usd
 
