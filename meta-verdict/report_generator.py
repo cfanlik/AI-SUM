@@ -97,6 +97,8 @@ def generate_report(
     all_arbitrated: list[MetaResult] = None,
     screen7_data: list[dict] = None,
     screen8_data: list[dict] | dict = None,
+    output_dir: str | Path | None = None,
+    write_files: bool = True,
 ) -> str:
     """终端 + MD 双输出 (四屏标准决策驾驶舱)"""
 
@@ -844,17 +846,18 @@ def generate_report(
 
     report_content = "\n".join(md_lines)
 
-    # 写入文件
-    import config as _cfg
-    out_dir = Path(_cfg.REPORT_DIR)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    
-    ts_clean = scan_time.replace(":", "").replace("-", "").replace(" ", "_")
-    report_file = out_dir / f"meta_{ts_clean}.md"
-    report_file.write_text(report_content, encoding="utf-8")
+    # 写入文件（支持单测传入隔离 output_dir 或关闭落盘，避免污染生产报告目录）
+    if write_files:
+        import config as _cfg
+        out_dir = Path(output_dir) if output_dir else Path(_cfg.REPORT_DIR)
+        out_dir.mkdir(parents=True, exist_ok=True)
 
-    latest_file = out_dir / "latest_meta_dashboard.md"
-    latest_file.write_text(report_content, encoding="utf-8")
+        ts_clean = scan_time.replace(":", "").replace("-", "").replace(" ", "_")
+        report_file = out_dir / f"meta_{ts_clean}.md"
+        report_file.write_text(report_content, encoding="utf-8")
 
-    logger.info(f"Master Cockpit 总控报告已成功生成: {report_file} 和 {latest_file}")
+        latest_file = out_dir / "latest_meta_dashboard.md"
+        latest_file.write_text(report_content, encoding="utf-8")
+
+        logger.info(f"Master Cockpit 总控报告已成功生成: {report_file} 和 {latest_file}")
     return report_content

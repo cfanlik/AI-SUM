@@ -83,10 +83,12 @@ class TestRetentionAndRadar(unittest.TestCase):
             score_sigma=0.0, retention_7d=39.4, lifecycle_status="DIST_WARN", action_guide="成本螺旋预警"
         )
         screen8 = pfr.build_screen8_radar_data([r_kite, r_take])
-        report = rep.generate_report(
-            acc_list=[r_kite, r_take], dist_list=[], all_count=2, scan_time="2026-09-26 21:30:00",
-            all_arbitrated=[r_kite, r_take], screen8_data=screen8
-        )
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report = rep.generate_report(
+                acc_list=[r_kite, r_take], dist_list=[], all_count=2, scan_time="2026-09-26 21:30:00",
+                all_arbitrated=[r_kite, r_take], screen8_data=screen8, output_dir=tmpdir
+            )
         self.assertIn("96.6%", report)
         self.assertIn("39.4%", report)
         self.assertIn("加速蓄力", report)

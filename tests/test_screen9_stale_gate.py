@@ -60,13 +60,16 @@ class TestScreen9StaleGate(unittest.TestCase):
         self.assertIn("过期熔断", res["stats"].get("message", ""))
 
     def test_02_report_generator_stale_placeholder(self):
-        md = report_generator.generate_report(
-            acc_list=[],
-            dist_list=[],
-            all_count=0,
-            scan_time="2026-10-26 15:00:00",
-            all_arbitrated=[]
-        )
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            md = report_generator.generate_report(
+                acc_list=[],
+                dist_list=[],
+                all_count=0,
+                scan_time="2026-10-26 15:00:00",
+                all_arbitrated=[],
+                output_dir=tmpdir,
+            )
         self.assertIn("数据源时效熔断", md)
         self.assertNotIn("突发大额充值流入，警惕庄家借机高位砸盘出货", md)
 
