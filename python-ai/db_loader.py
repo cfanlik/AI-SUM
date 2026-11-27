@@ -7,6 +7,12 @@ AI-SUM V5 — 数据加载层
 import sqlite3
 import json
 from datetime import datetime, timezone
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parent.parent) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+from bj_time import ensure_beijing_tz, now_bj_iso
+ensure_beijing_tz()
 from typing import Optional
 from pathlib import Path
 
@@ -341,7 +347,7 @@ def save_diff_cache(
     diff_data: dict,
 ) -> None:
     """写入 diff 缓存（已存在则覆盖）。"""
-    now = datetime.now(timezone.utc).isoformat()
+    now = now_bj_iso()
     conn.execute(
         """
         INSERT OR REPLACE INTO snapshot_diff_cache
@@ -380,7 +386,7 @@ def upsert_watchlist(
     - 已存在 ACTIVE：更新 last_updated / trigger_pattern / signal_level / trigger_detail，重置计数
     返回 True 表示新增，False 表示更新。
     """
-    now = datetime.now(timezone.utc).isoformat()
+    now = now_bj_iso()
     existing = conn.execute(
         "SELECT id, status FROM watchlist WHERE chain=? AND token_address=?",
         (chain, token_address),
@@ -444,7 +450,7 @@ def update_watchlist_status(
 ) -> None:
     """人工更新状态（DISMISSED / PUMPED / EXPIRED）。"""
     sql = "UPDATE watchlist SET status=?, last_updated=? WHERE chain=? AND token_address=?"
-    now = datetime.now(timezone.utc).isoformat()
+    now = now_bj_iso()
     conn.execute(sql, (status, now, chain, token_address))
     if notes:
         conn.execute(
@@ -467,7 +473,7 @@ def record_scan_run(
     report_path: str = None,
 ) -> int:
     """写入扫描运行记录，返回 run_id。"""
-    now = datetime.now(timezone.utc).isoformat()
+    now = now_bj_iso()
     cursor = conn.execute(
         """
         INSERT INTO scan_runs

@@ -6,6 +6,14 @@ AI-SUM 串行流水线调度器 (v6.0 新鲜度门禁与防重入锁增强版)
 2. 前置新鲜度门禁 (Staleness Gate) 拦截无新批次的无效全量重算
 3. 保证同一时间仅有一个任务在跑，上游事件驱动与固定 cron 保底协同
 """
+import os as _os, sys as _sys
+_AS_ROOT = _os.path.dirname(_os.path.abspath(__file__))
+if _os.path.basename(_AS_ROOT) != 'AI-SUM' and _os.path.exists(_os.path.join(_os.path.dirname(_AS_ROOT), 'bj_time.py')):
+    _AS_ROOT = _os.path.dirname(_AS_ROOT)
+if _AS_ROOT not in _sys.path:
+    _sys.path.insert(0, _AS_ROOT)
+from bj_time import ensure_beijing_tz as _ensure_bj_tz
+_ensure_bj_tz()
 import subprocess
 import time
 import sys

@@ -385,7 +385,7 @@ def backfill_market_cap(conn: sqlite3.Connection) -> int:
         mcap = id_to_mcap.get(cmc_id)
         if mcap and mcap > 0:
             cursor.execute("""
-                UPDATE token_names SET market_cap_usd = ?, updated_at = CURRENT_TIMESTAMP
+                UPDATE token_names SET market_cap_usd = ?, updated_at = datetime('now', '+8 hours')
                 WHERE chain = ? AND token_address = ?
             """, (mcap, chain, addr))
             updated += 1

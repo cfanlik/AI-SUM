@@ -10,6 +10,12 @@ import json
 import statistics
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parent.parent) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+from bj_time import BJ_TZ, ensure_beijing_tz
+ensure_beijing_tz()
 from typing import Optional
 
 import config, db_loader
@@ -100,11 +106,12 @@ def _parse_time(t: str) -> datetime:
     """将快照时间字符串解析为 datetime（尝试多种格式）。"""
     for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%d"):
         try:
-            return datetime.strptime(t, fmt).replace(tzinfo=timezone.utc)
+            return datetime.strptime(t, fmt).replace(tzinfo=BJ_TZ)
         except ValueError:
             continue
     # fallback ISO
-    return datetime.fromisoformat(t.replace("Z", "+00:00"))
+    dt = datetime.fromisoformat(t.replace("Z", "+00:00"))
+    return dt.astimezone(BJ_TZ) if dt.tzinfo else dt.replace(tzinfo=BJ_TZ)
 
 
 def _hours_between(t_old: str, t_new: str) -> float:

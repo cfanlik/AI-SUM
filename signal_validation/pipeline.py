@@ -1,4 +1,10 @@
 from __future__ import annotations
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parent.parent) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+from bj_time import ensure_beijing_tz, now_bj_iso
+ensure_beijing_tz()
 import json
 import sqlite3
 import hashlib
@@ -24,7 +30,7 @@ def get_proxy():
 
 def check_dual_api_real(chain, pool_address, db_path):
     proxy = get_proxy()
-    as_of = datetime.utcnow().isoformat()
+    as_of = now_bj_iso()
     
     if not proxy:
         print("未配置代理 PROXY_URL，标记 api_config_missing FAIL。")

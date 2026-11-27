@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """
 meta-verdict 主入口
 五引擎仲裁 → 趋势分析 → 综合排名 + 生命周期状态
@@ -7,7 +8,14 @@ meta-verdict 主入口
     python3 meta-verdict/run.py          # 全量仲裁
     python3 meta-verdict/run.py --symbol GWEI  # 单币诊断
 """
-from __future__ import annotations
+import os as _os, sys as _sys
+_AS_ROOT = _os.path.dirname(_os.path.abspath(__file__))
+if _os.path.basename(_AS_ROOT) != 'AI-SUM' and _os.path.exists(_os.path.join(_os.path.dirname(_AS_ROOT), 'bj_time.py')):
+    _AS_ROOT = _os.path.dirname(_AS_ROOT)
+if _AS_ROOT not in _sys.path:
+    _sys.path.insert(0, _AS_ROOT)
+from bj_time import ensure_beijing_tz as _ensure_bj_tz
+_ensure_bj_tz()
 import sys
 import os
 import logging

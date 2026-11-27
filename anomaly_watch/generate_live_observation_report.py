@@ -12,6 +12,12 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 from datetime import datetime, timedelta, timezone
+import sys as _sys
+from pathlib import Path as _Path
+if str(_Path(__file__).resolve().parent.parent) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+from bj_time import BJ_TZ, ensure_beijing_tz, now_bj
+ensure_beijing_tz()
 from statistics import median
 from typing import Dict, List, Optional, Any
 
@@ -51,7 +57,7 @@ def parse_dt(v: Any) -> datetime:
     else:
         dt = datetime.fromisoformat(s)
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=BJ_TZ)
     return dt
 
 def format_price(p: float) -> str:
@@ -205,7 +211,7 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
         as_of = as_of_arg
     else:
         max_scan_time = select_conn.execute("SELECT MAX(scan_time) FROM gecko_market_data").fetchone()[0]
-        as_of = max_scan_time if max_scan_time else datetime.utcnow().isoformat(timespec='seconds') + "Z"
+        as_of = max_scan_time if max_scan_time else now_bj(aware=True).isoformat(timespec='seconds')
         
     as_of_dt = parse_dt(as_of)
     print(f"数据时钟基线 (as_of_utc): {as_of}")
@@ -263,7 +269,7 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
     def ensure_utc(v: Any) -> datetime:
         if isinstance(v, datetime):
             if v.tzinfo is None:
-                return v.replace(tzinfo=timezone.utc)
+                return v.replace(tzinfo=BJ_TZ)
             return v
         return parse_dt(v)
 
@@ -397,7 +403,7 @@ def generate_report(as_of_arg: Optional[str] = None, dry_run: bool = False) -> i
 
     doc = {
         "report_metadata": {
-            "report_generated_at_utc": datetime.now(timezone.utc).isoformat(timespec='seconds') + "Z",
+            "report_generated_at_utc": now_bj(aware=True).isoformat(timespec='seconds'),
             "as_of_utc": as_of,
             "evaluation_status": evaluation_status,
             "evaluation_reason": evaluation_reason,
